@@ -13,6 +13,11 @@ import Delivery from "./pages/Delivery";
 import Reports from "./pages/Reports";
 import Pricing from "./pages/Pricing";
 import Settings from "./pages/Settings";
+import AdminLogin from "./pages/admin/AdminLogin";
+import ApprovalsList from "./pages/admin/ApprovalsList";
+import ApprovalDetail from "./pages/admin/ApprovalDetail";
+import BillingStatus from "./pages/billing/BillingStatus";
+import Checkout from "./pages/checkout/Checkout";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -33,7 +38,12 @@ const App = () => (
           <Route path="/app/delivery" element={<Delivery />} />
           <Route path="/app/reports" element={<Reports />} />
           <Route path="/app/settings" element={<Settings />} />
+          <Route path="/app/billing" element={<BillingStatus />} />
           <Route path="/pricing" element={<Pricing />} />
+          <Route path="/checkout" element={<Checkout />} />
+          <Route path="/admin/login" element={<AdminLogin />} />
+          <Route path="/admin/approvals" element={<ApprovalsList />} />
+          <Route path="/admin/approvals/:requestId" element={<ApprovalDetail />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>

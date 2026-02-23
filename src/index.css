@@ -2,7 +2,7 @@
 @tailwind components;
 @tailwind utilities;
 
-@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@300;400;500;600;700&family=IBM+Plex+Sans:wght@300;400;500;600;700&display=swap');
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@300;400;500;600;700&family=IBM+Plex+Sans:wght@300;400;500;600;700&display=swap");
 
 @layer base {
   :root {
@@ -58,7 +58,7 @@
     --chart-4: 210 92% 45%;
     --chart-5: 340 65% 55%;
 
-    --font-sans: 'IBM Plex Sans Thai', 'IBM Plex Sans', system-ui, sans-serif;
+    --font-sans: "IBM Plex Sans Thai", "IBM Plex Sans", system-ui, sans-serif;
   }
 
   .dark {
@@ -102,26 +102,33 @@
     font-family: var(--font-sans);
   }
 
-  h1, h2, h3, h4, h5, h6 {
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
     @apply font-semibold tracking-tight;
   }
 }
 
 @layer components {
+  /* ── Cards & Containers ───────────────────────────── */
   .guidance-card {
-    @apply bg-accent/10 border-accent/30 border rounded-lg p-4;
+    @apply bg-accent/10 border-accent/30 border rounded-xl p-4;
   }
 
   .stat-card {
-    @apply bg-card border rounded-lg p-5 shadow-sm;
+    @apply bg-card border rounded-xl p-5 shadow-sm;
   }
 
+  /* ── Metrics ──────────────────────────────────────── */
   .metric-value {
     @apply text-2xl font-bold text-foreground tabular-nums;
   }
 
   .metric-label {
-    @apply text-sm text-muted-foreground font-medium;
+    @apply text-xs text-muted-foreground font-medium uppercase tracking-wider;
   }
 
   .metric-change-up {
@@ -133,27 +140,190 @@
     @apply text-xs font-medium text-destructive;
   }
 
+  /* ── Page Header ──────────────────────────────────── */
+  /*  Usage: <div class="page-header">                  */
+  /*           <div><h1>Title</h1><p>Subtitle</p></div> */
+  /*           <div>{/* actions *\/}</div>               */
+  /*         </div>                                      */
+  .page-header {
+    @apply flex items-start justify-between flex-wrap gap-4 mb-7;
+  }
+
+  .page-title {
+    @apply text-2xl font-bold text-foreground leading-tight;
+  }
+
+  .page-subtitle {
+    @apply text-sm text-muted-foreground mt-1;
+  }
+
+  /* ── KPI Grid ─────────────────────────────────────── */
+  /*  2-col mobile, 4-col desktop                       */
+  .kpi-grid {
+    @apply grid grid-cols-2 lg:grid-cols-4 gap-4;
+  }
+
+  .kpi-card {
+    @apply stat-card flex flex-col gap-1;
+  }
+
+  /* ── Data Table ───────────────────────────────────── */
+  .data-table {
+    @apply w-full text-sm;
+  }
+
+  .data-table thead tr {
+    @apply border-b;
+  }
+
+  .data-table th {
+    @apply text-left text-xs font-semibold text-muted-foreground pb-3 pr-4;
+  }
+
+  .data-table tbody tr {
+    @apply border-b last:border-0 transition-colors hover:bg-muted/30;
+  }
+
+  .data-table td {
+    @apply py-3 pr-4 text-sm;
+  }
+
+  /* ── Form ─────────────────────────────────────────── */
+  .form-group {
+    @apply space-y-1.5;
+  }
+
+  .form-label {
+    @apply text-sm font-medium text-foreground block;
+  }
+
+  .form-input {
+    @apply w-full px-3 py-2.5 rounded-lg border bg-background text-foreground text-sm
+           focus:outline-none focus:ring-2 focus:ring-ring transition-shadow;
+  }
+
+  .form-hint {
+    @apply text-xs text-muted-foreground;
+  }
+
+  /* ── Status Badges ────────────────────────────────── */
+  .status-badge {
+    @apply inline-flex items-center text-xs font-medium px-2.5 py-0.5 rounded-full;
+  }
+
+  .status-badge-success {
+    @apply status-badge bg-success/10 text-success;
+  }
+
+  .status-badge-warning {
+    @apply status-badge bg-warning/15 text-warning;
+  }
+
+  .status-badge-danger {
+    @apply status-badge bg-destructive/10 text-destructive;
+  }
+
+  .status-badge-muted {
+    @apply status-badge bg-muted text-muted-foreground;
+  }
+
+  .status-badge-info {
+    @apply status-badge bg-sky-100 text-sky-700;
+  }
+
+  /* ── Navigation ───────────────────────────────────── */
   .bottom-nav {
-    @apply fixed bottom-0 left-0 right-0 z-50 bg-card border-t flex items-center justify-around py-2 px-1;
+    @apply fixed bottom-0 left-0 right-0 z-50 bg-card border-t flex items-center justify-around pt-2;
+    padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
   }
 
   .bottom-nav-item {
-    @apply flex flex-col items-center gap-0.5 text-muted-foreground text-xs px-2 py-1 rounded-md transition-colors;
+    @apply flex flex-col items-center gap-0.5 text-muted-foreground px-3 py-1 rounded-lg
+           transition-colors min-w-[3.5rem] cursor-pointer;
   }
 
   .bottom-nav-item.active {
-    @apply text-primary font-medium;
+    @apply text-primary font-semibold;
   }
 
+  /* ── Misc ─────────────────────────────────────────── */
   .timestamp {
     @apply text-xs text-muted-foreground tabular-nums;
   }
 
   .section-title {
-    @apply text-lg font-semibold text-foreground;
+    @apply text-base font-semibold text-foreground;
   }
 
   .panel-header {
     @apply flex items-center justify-between pb-3 border-b mb-4;
+  }
+
+  /* ── Action Bar ───────────────────────────────────── */
+  /*  Sticky CTA row — used in Reports & export pages   */
+  .action-bar {
+    @apply flex flex-wrap items-center gap-2 justify-end;
+  }
+
+  /* ── Divider ──────────────────────────────────────── */
+  .section-divider {
+    @apply border-t my-6;
+  }
+
+  /* ── Empty State ──────────────────────────────────── */
+  .empty-state {
+    @apply flex flex-col items-center justify-center py-16 text-center space-y-2
+           text-muted-foreground;
+  }
+
+  .empty-state-icon {
+    @apply w-10 h-10 opacity-40 mb-1;
+  }
+
+  .empty-state-title {
+    @apply text-sm font-medium text-foreground;
+  }
+
+  .empty-state-desc {
+    @apply text-xs text-muted-foreground;
+  }
+}
+
+
+/* ─── Print / PDF ──────────────────────────────────────────────────────────────
+   Used when user clicks พิมพ์/PDF in the Reports page.
+   Hides the app shell so only the report content is visible in the printout.
+────────────────────────────────────────────────────────────────────────────── */
+@media print {
+  /* Hide app navigation, sidebar, and export toolbar */
+  nav,
+  aside,
+  [data-sidebar],
+  [class*="bottom-nav"],
+  [class*="sidebar"],
+  .print\\:hidden,
+  button {
+    display: none !important;
+  }
+
+  /* Full-width report content */
+  body {
+    background: white !important;
+    color: black !important;
+    font-size: 12pt;
+  }
+
+  .stat-card {
+    box-shadow: none !important;
+    border: 1px solid #e5e7eb !important;
+    break-inside: avoid;
+  }
+
+  /* Remove max-width constraints */
+  main,
+  [class*="max-w"] {
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 0.5cm !important;
   }
 }

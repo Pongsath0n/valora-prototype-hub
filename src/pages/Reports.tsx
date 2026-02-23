@@ -1,76 +1,140 @@
 import AppLayout from "@/components/AppLayout";
 import DataQualityBadge from "@/components/DataQualityBadge";
-import { useState, useRef } from "react";
-import { Download, Share2, FileText, Printer, Info, Clock } from "lucide-react";
-
-const now = new Date().toLocaleString("th-TH", { dateStyle: "long", timeStyle: "short" });
-const shopName = "ร้านกาแฟบ้านสวน";
-
-// Demo data
-const kpis = [
-  { label: "ค่าใช้จ่ายคงที่", value: "฿50,000", unit: "/เดือน" },
-  { label: "จุดคุ้มทุน", value: "1,186", unit: "แก้ว/เดือน" },
-  { label: "จุดคุ้มทุน", value: "46", unit: "แก้ว/วัน" },
-  { label: "ยอดขายเพื่อกำไรเป้า", value: "฿5,190", unit: "/วัน" },
-  { label: "กำไรสุทธิประมาณการ", value: "฿37,693", unit: "/เดือน" },
-  { label: "กำไรขั้นต้นเฉลี่ย", value: "฿42.2", unit: "/แก้ว" },
-];
-
-const menuMetrics = [
-  { name: "ลาเต้เย็น", price: 75, cost: 28.2, gp: 46.8, cm: "62.4%", mix: "28%", status: "กำไรดี" },
-  { name: "คาปูชิโน่ร้อน", price: 65, cost: 27.2, gp: 37.8, cm: "58.2%", mix: "23%", status: "กำไรดี" },
-  { name: "มัทฉะลาเต้", price: 85, cost: 38.0, gp: 47.0, cm: "55.3%", mix: "18%", status: "กำไรดี" },
-  { name: "อเมริกาโน่", price: 55, cost: 17.5, gp: 37.5, cm: "68.2%", mix: "17%", status: "กำไรดี" },
-  { name: "ชาเขียวนม", price: 75, cost: 35.5, gp: 39.5, cm: "52.7%", mix: "14%", status: "กำไรดี" },
-];
+import { useState, useRef, useMemo } from "react";
+import { Download, Share2, FileText, Printer, Info, Clock, CheckCircle2 } from "lucide-react";
+import { shopService, fixedCostService, menuService } from "@/services/mockStorage";
+import { calcBusinessKPIs, calcMenuMetrics } from "@/services/calculationEngine";
 
 export default function ReportsPage() {
   const [showPreview, setShowPreview] = useState(true);
+  const [shareMsg, setShareMsg] = useState("");
+  const [pngLoading, setPngLoading] = useState(false);
   const reportRef = useRef<HTMLDivElement>(null);
 
+  const shop = useMemo(() => shopService.get(), []);
+  const fixedCostsRows = useMemo(() => fixedCostService.get(), []);
+  const fixedCostsTotal = useMemo(() => fixedCostService.total(), []);
+  const menuRows = useMemo(() => menuService.get(), []);
+
+  const kpis = useMemo(
+    () => calcBusinessKPIs(fixedCostsTotal, shop.targetProfit, shop.daysOpen, menuRows),
+    [fixedCostsTotal, shop, menuRows]
+  );
+  const menuWithMetrics = useMemo(() => menuRows.map(calcMenuMetrics), [menuRows]);
+
+  const now = new Date().toLocaleString("th-TH", { dateStyle: "long", timeStyle: "short" });
+
+  // ─── Export handlers ────────────────────────────────────────────────────────
   const handlePrint = () => {
     window.print();
   };
 
+  const handlePNG = async () => {
+    if (!reportRef.current) return;
+    setPngLoading(true);
+    try {
+      // Load html2canvas from CDN at runtime — no npm install needed
+      const script = document.createElement("script");
+      script.src = "https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js";
+      document.head.appendChild(script);
+      await new Promise((res) => { script.onload = res; });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const canvas = await (window as any).html2canvas(reportRef.current, { scale: 2, useCORS: true, backgroundColor: "#ffffff" });
+      const link = document.createElement("a");
+      link.download = `valora-report-${shop.name}-${Date.now()}.png`;
+      link.href = canvas.toDataURL("image/png");
+      link.click();
+    } catch (e) {
+      console.error(e);
+      alert("ดาวน์โหลด PNG ไม่สำเร็จ — ลองอีกครั้ง");
+    } finally {
+      setPngLoading(false);
+    }
+  };
+
+  const handleShare = () => {
+    const payload = {
+      shop: shop.name,
+      bepDay: kpis.bepCupsDay,
+      targetCupsDay: kpis.targetCupsDay,
+      estNetProfit: kpis.estNetProfit,
+    };
+    const encoded = btoa(encodeURIComponent(JSON.stringify(payload)));
+    const url = `${window.location.origin}/app/reports?data=${encoded}`;
+    navigator.clipboard.writeText(url).then(() => {
+      setShareMsg("คัดลอกลิงก์แล้ว");
+      setTimeout(() => setShareMsg(""), 3000);
+    }).catch(() => {
+      // Fallback: show url in prompt
+      prompt("คัดลอกลิงก์ด้านล่าง:", url);
+    });
+  };
+
+  const fmtVal = (v: number, prefix = "") =>
+    isFinite(v) ? `${prefix}${v.toLocaleString()}` : "N/A";
+
+  const kpiSummary = [
+    { label: "ค่าใช้จ่ายคงที่", value: `฿${fixedCostsTotal.toLocaleString()}`, unit: "/เดือน" },
+    { label: "จุดคุ้มทุน", value: fmtVal(kpis.bepCupsMonth), unit: "แก้ว/เดือน" },
+    { label: "จุดคุ้มทุน", value: fmtVal(kpis.bepCupsDay), unit: "แก้ว/วัน" },
+    { label: "ยอดขายเพื่อกำไรเป้า", value: fmtVal(kpis.requiredRevenueDay, "฿"), unit: "/วัน" },
+    { label: "กำไรสุทธิประมาณการ", value: fmtVal(kpis.estNetProfit, "฿"), unit: "/เดือน" },
+    { label: "กำไรขั้นต้นเฉลี่ย", value: `฿${kpis.weightedCM.toFixed(1)}`, unit: "/แก้ว" },
+  ];
+
   return (
     <AppLayout>
       <div className="space-y-6">
-        <div className="flex items-center justify-between flex-wrap gap-3">
+        {/* ── Page Header ─────────────────────────────── */}
+        <div className="page-header">
           <div>
-            <h1 className="text-2xl font-bold text-foreground">รายงาน</h1>
-            <p className="text-sm text-muted-foreground mt-1">สร้างรายงานแผนกำไรในรูปแบบเอกสารธุรกิจ</p>
+            <h1 className="page-title">รายงาน</h1>
+            <p className="page-subtitle">สร้างรายงานแผนกำไรในรูปแบบเอกสารธุรกิจ</p>
           </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setShowPreview(!showPreview)}
-              className="flex items-center gap-1.5 bg-secondary text-secondary-foreground px-3 py-2 rounded-lg text-sm font-medium hover:bg-secondary/80 transition-colors"
-            >
-              <FileText className="w-4 h-4" />
-              {showPreview ? "ซ่อนตัวอย่าง" : "แสดงตัวอย่าง"}
-            </button>
-          </div>
+          <button
+            onClick={() => setShowPreview(!showPreview)}
+            className="flex items-center gap-1.5 bg-secondary text-secondary-foreground px-3 py-2 rounded-lg text-sm font-medium hover:bg-secondary/80 transition-colors cursor-pointer"
+          >
+            <FileText className="w-4 h-4" />
+            {showPreview ? "ซ่อนตัวอย่าง" : "แสดงตัวอย่าง"}
+          </button>
         </div>
 
         {/* Export options */}
         <div className="stat-card">
-          <h2 className="section-title mb-3">ส่งออกรายงาน</h2>
-          <div className="flex flex-wrap gap-2">
-            <button className="flex items-center gap-1.5 bg-primary text-primary-foreground px-4 py-2 rounded-lg text-sm font-medium hover:opacity-90 transition-opacity">
-              <Download className="w-4 h-4" /> ดาวน์โหลด PDF
-            </button>
-            <button className="flex items-center gap-1.5 bg-secondary text-secondary-foreground px-4 py-2 rounded-lg text-sm font-medium hover:bg-secondary/80 transition-colors">
-              <Download className="w-4 h-4" /> ดาวน์โหลด PNG
-            </button>
-            <button className="flex items-center gap-1.5 bg-secondary text-secondary-foreground px-4 py-2 rounded-lg text-sm font-medium hover:bg-secondary/80 transition-colors">
-              <Share2 className="w-4 h-4" /> แชร์ลิงก์อ่านอย่างเดียว
-            </button>
+          <div className="panel-header">
+            <h2 className="section-title">ส่งออกรายงาน</h2>
+          </div>
+          <div className="action-bar justify-start">
             <button
               onClick={handlePrint}
-              className="flex items-center gap-1.5 bg-secondary text-secondary-foreground px-4 py-2 rounded-lg text-sm font-medium hover:bg-secondary/80 transition-colors"
+              className="flex items-center gap-1.5 bg-primary text-primary-foreground px-4 py-2 rounded-lg text-sm font-semibold hover:opacity-90 transition-opacity cursor-pointer"
             >
-              <Printer className="w-4 h-4" /> พิมพ์
+              <Printer className="w-4 h-4" /> พิมพ์ / PDF
             </button>
+            <button
+              onClick={handlePNG}
+              disabled={pngLoading}
+              className="flex items-center gap-1.5 bg-secondary text-secondary-foreground px-4 py-2 rounded-lg text-sm font-medium hover:bg-secondary/80 transition-colors disabled:opacity-50 cursor-pointer"
+            >
+              <Download className="w-4 h-4" />
+              {pngLoading ? "กำลังสร้าง..." : "ดาวน์โหลด PNG"}
+            </button>
+            <button
+              onClick={handleShare}
+              className="flex items-center gap-1.5 bg-secondary text-secondary-foreground px-4 py-2 rounded-lg text-sm font-medium hover:bg-secondary/80 transition-colors cursor-pointer"
+            >
+              <Share2 className="w-4 h-4" /> แชร์ลิงก์
+            </button>
+            {shareMsg && (
+              <span className="flex items-center gap-1 text-sm text-success font-medium">
+                <CheckCircle2 className="w-4 h-4" /> {shareMsg}
+              </span>
+            )}
           </div>
+          <p className="mt-3 text-xs text-muted-foreground">
+            PDF: บราวเซอร์จะเปิด dialog บันทึกเป็น PDF | PNG: บันทึกเป็นรูปภาพ | แชร์: คัดลอก URL พร้อมข้อมูลสรุป
+          </p>
         </div>
 
         {/* Report Preview */}
@@ -89,7 +153,7 @@ export default function ReportsPage() {
                   </div>
                 </div>
                 <div className="text-right text-sm">
-                  <p className="font-semibold">{shopName}</p>
+                  <p className="font-semibold">{shop.name}</p>
                   <p className="text-xs opacity-80">สร้างเมื่อ: {now}</p>
                 </div>
               </div>
@@ -100,10 +164,10 @@ export default function ReportsPage() {
               <div>
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="text-base font-semibold text-foreground">ตัวชี้วัดหลัก</h3>
-                  <DataQualityBadge level="estimated" lastChecked="23 ก.พ. 69" />
+                  <DataQualityBadge level="estimated" lastChecked={now} />
                 </div>
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                  {kpis.map((kpi, i) => (
+                  {kpiSummary.map((kpi, i) => (
                     <div key={i} className="bg-muted rounded-lg p-3">
                       <p className="text-xs text-muted-foreground">{kpi.label}</p>
                       <p className="text-lg font-bold tabular-nums text-foreground mt-0.5">
@@ -113,6 +177,33 @@ export default function ReportsPage() {
                     </div>
                   ))}
                 </div>
+              </div>
+
+              {/* Fixed Costs Breakdown */}
+              <div>
+                <h3 className="text-base font-semibold text-foreground mb-3">ค่าใช้จ่ายคงที่รายเดือน</h3>
+                <table className="w-full text-sm border">
+                  <thead>
+                    <tr className="bg-muted text-muted-foreground">
+                      <th className="px-3 py-2 text-left font-medium border-b">รายการ</th>
+                      <th className="px-3 py-2 text-right font-medium border-b">จำนวน (฿)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {fixedCostsRows.map((r) => (
+                      <tr key={r.id} className="border-b last:border-0">
+                        <td className="px-3 py-2 text-foreground">{r.label || "ไม่ระบุ"}</td>
+                        <td className="px-3 py-2 text-right tabular-nums font-medium">฿{Number(r.amount).toLocaleString()}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr className="bg-muted/50 font-semibold border-t">
+                      <td className="px-3 py-2 text-foreground">รวม</td>
+                      <td className="px-3 py-2 text-right tabular-nums">฿{fixedCostsTotal.toLocaleString()}/เดือน</td>
+                    </tr>
+                  </tfoot>
+                </table>
               </div>
 
               {/* Menu Metrics Table */}
@@ -132,17 +223,21 @@ export default function ReportsPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {menuMetrics.map((m, i) => (
+                      {menuWithMetrics.map((m, i) => (
                         <tr key={i} className="border-b last:border-0">
                           <td className="px-3 py-2 text-foreground font-medium">{m.name}</td>
                           <td className="px-3 py-2 text-right tabular-nums">{m.price}</td>
-                          <td className="px-3 py-2 text-right tabular-nums">{m.cost.toFixed(1)}</td>
-                          <td className="px-3 py-2 text-right tabular-nums font-medium">{m.gp.toFixed(1)}</td>
-                          <td className="px-3 py-2 text-right tabular-nums">{m.cm}</td>
-                          <td className="px-3 py-2 text-right tabular-nums">{m.mix}</td>
+                          <td className="px-3 py-2 text-right tabular-nums">{m.totalCost.toFixed(1)}</td>
+                          <td className="px-3 py-2 text-right tabular-nums font-medium">{m.grossProfit.toFixed(1)}</td>
+                          <td className="px-3 py-2 text-right tabular-nums">{m.cmPercent.toFixed(1)}%</td>
+                          <td className="px-3 py-2 text-right tabular-nums">{m.mix}%</td>
                           <td className="px-3 py-2 text-center">
-                            <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-success/10 text-success">
-                              {m.status}
+                            <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
+                              m.status === "good" ? "bg-success/10 text-success" :
+                              m.status === "caution" ? "bg-warning/10 text-warning" :
+                              "bg-destructive/10 text-destructive"
+                            }`}>
+                              {m.status === "good" ? "กำไรดี" : m.status === "caution" ? "ควรระวัง" : "ขาดทุน"}
                             </span>
                           </td>
                         </tr>
@@ -157,8 +252,8 @@ export default function ReportsPage() {
                 <h3 className="text-base font-semibold text-foreground mb-2">วิธีคำนวณ</h3>
                 <div className="text-sm text-muted-foreground space-y-1.5">
                   <p><strong className="text-foreground">กำไรขั้นต้น/แก้ว</strong> = ราคาขาย - ต้นทุนวัตถุดิบต่อแก้ว</p>
-                  <p><strong className="text-foreground">กำไรขั้นต้นถ่วงน้ำหนัก</strong> = ผลรวมของ (กำไรขั้นต้น/แก้ว x Mix%) ทุกเมนู</p>
-                  <p><strong className="text-foreground">จุดคุ้มทุน</strong> = ค่าใช้จ่ายคงที่รวม / กำไรขั้นต้นถ่วงน้ำหนัก</p>
+                  <p><strong className="text-foreground">กำไรขั้นต้นถ่วงน้ำหนัก (Weighted CM)</strong> = ผลรวมของ (กำไรขั้นต้น/แก้ว x Mix%) ทุกเมนู</p>
+                  <p><strong className="text-foreground">จุดคุ้มทุน</strong> = ค่าใช้จ่ายคงที่รวม / Weighted CM</p>
                   <p><strong className="text-foreground">CM%</strong> = (กำไรขั้นต้น / ราคาขาย) x 100</p>
                 </div>
               </div>
@@ -174,9 +269,7 @@ export default function ReportsPage() {
 
               {/* Footer */}
               <div className="border-t pt-4 flex items-center justify-between">
-                <p className="text-xs text-muted-foreground">
-                  ข้อมูลนี้เป็นแบบจำลองเพื่อการวางแผน โปรดตรวจสอบต้นทุนจริงเป็นระยะ
-                </p>
+                <p className="text-xs text-muted-foreground">ข้อมูลนี้เป็นแบบจำลองเพื่อการวางแผน โปรดตรวจสอบต้นทุนจริงเป็นระยะ</p>
                 <div className="flex items-center gap-1 text-xs text-muted-foreground">
                   <Clock className="w-3 h-3" />
                   <span>ปัดเศษทศนิยม 1 ตำแหน่ง</span>

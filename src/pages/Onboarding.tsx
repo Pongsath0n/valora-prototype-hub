@@ -1,23 +1,9 @@
-import { Link } from "react-router-dom";
-import { useState, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
+import { useState } from "react";
 import { CheckCircle2, Plus, Trash2, Info, Lightbulb, Eye, EyeOff } from "lucide-react";
+import { shopService, fixedCostService, menuService } from "@/services/mockStorage";
+import type { FixedCostRow, MenuRow } from "@/services/types";
 
-interface FixedCostRow {
-  id: number;
-  label: string;
-  amount: number;
-}
-
-interface MenuRow {
-  id: number;
-  name: string;
-  price: number;
-  totalCost: number;
-  ingredientCost: number;
-  packagingCost: number;
-  deliveryFee: number;
-  mix: number;
-}
 
 const defaultFixedCosts: FixedCostRow[] = [
   { id: 1, label: "ค่าเช่า", amount: 15000 },
@@ -42,19 +28,29 @@ let nextFixedId = 5;
 let nextMenuId = 4;
 
 export default function OnboardingPage() {
+  const navigate = useNavigate();
   const [step, setStep] = useState(0);
 
-  // Step 1
-  const [shopName, setShopName] = useState("ร้านกาแฟบ้านสวน");
-  const [daysOpen, setDaysOpen] = useState(26);
-  const [targetProfit, setTargetProfit] = useState(30000);
+  // Step 1 — initialise from localStorage so returning users see saved data
+  const savedShop = shopService.get();
+  const [shopName, setShopName] = useState(savedShop.name);
+  const [daysOpen, setDaysOpen] = useState(savedShop.daysOpen);
+  const [targetProfit, setTargetProfit] = useState(savedShop.targetProfit);
 
   // Step 2
-  const [fixedCosts, setFixedCosts] = useState<FixedCostRow[]>(defaultFixedCosts);
+  const [fixedCosts, setFixedCosts] = useState<FixedCostRow[]>(() => fixedCostService.get());
 
   // Step 3
-  const [menuRows, setMenuRows] = useState<MenuRow[]>(defaultMenuRows);
+  const [menuRows, setMenuRows] = useState<MenuRow[]>(() => menuService.get());
   const [detailedMode, setDetailedMode] = useState(false);
+
+  // Persist all data to localStorage then navigate to dashboard
+  const handleConfirm = () => {
+    shopService.set({ name: shopName, daysOpen, targetProfit });
+    fixedCostService.set(fixedCosts);
+    menuService.set(menuRows);
+    navigate("/app/dashboard");
+  };
 
   // Step 2 handlers
   const addFixedCost = () => {
@@ -133,44 +129,40 @@ export default function OnboardingPage() {
                 </p>
               </div>
 
-              <div>
-                <label className="text-sm font-medium text-foreground block mb-1.5">ชื่อร้าน</label>
+              <div className="form-group">
+                <label className="form-label">ชื่อร้าน</label>
                 <input
                   type="text"
                   value={shopName}
                   onChange={(e) => setShopName(e.target.value)}
                   maxLength={100}
-                  className="w-full px-3 py-2.5 rounded-lg border bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                  className="form-input"
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="text-sm font-medium text-foreground block mb-1.5">
-                    จำนวนวันเปิดขาย/เดือน
-                  </label>
+                <div className="form-group">
+                  <label className="form-label">จำนวนวันเปิดขาย/เดือน</label>
                   <input
                     type="number"
                     value={daysOpen}
                     onChange={(e) => setDaysOpen(Math.max(1, Math.min(31, Number(e.target.value))))}
                     min={1}
                     max={31}
-                    className="w-full px-3 py-2.5 rounded-lg border bg-background text-foreground text-sm tabular-nums focus:outline-none focus:ring-2 focus:ring-ring"
+                    className="form-input tabular-nums"
                   />
-                  <p className="text-xs text-muted-foreground mt-1">1-31 วัน</p>
+                  <p className="form-hint">1-31 วัน</p>
                 </div>
-                <div>
-                  <label className="text-sm font-medium text-foreground block mb-1.5">
-                    เป้ากำไรสุทธิ/เดือน (฿)
-                  </label>
+                <div className="form-group">
+                  <label className="form-label">เป้ากำไรสุทธิ์/เดือน (฿)</label>
                   <input
                     type="number"
                     value={targetProfit}
                     onChange={(e) => setTargetProfit(Math.max(0, Number(e.target.value)))}
                     min={0}
-                    className="w-full px-3 py-2.5 rounded-lg border bg-background text-foreground text-sm tabular-nums focus:outline-none focus:ring-2 focus:ring-ring"
+                    className="form-input tabular-nums"
                   />
-                  <p className="text-xs text-muted-foreground mt-1">คำนวณจาก: รายได้ - ต้นทุน - ค่าใช้จ่ายคงที่</p>
+                  <p className="form-hint">คำนวณจาก: รายได้ - ต้นทุน - ค่าใช้จ่ายคงที่</p>
                 </div>
               </div>
             </div>
@@ -439,12 +431,12 @@ export default function OnboardingPage() {
                 {step === 2 ? "ตรวจสอบข้อมูล" : "ถัดไป"}
               </button>
             ) : (
-              <Link
-                to="/app/dashboard"
+              <button
+                onClick={handleConfirm}
                 className="bg-primary text-primary-foreground px-5 py-2 rounded-lg text-sm font-medium hover:opacity-90 transition-opacity"
               >
                 ยืนยันและเริ่มใช้งาน
-              </Link>
+              </button>
             )}
           </div>
         </div>

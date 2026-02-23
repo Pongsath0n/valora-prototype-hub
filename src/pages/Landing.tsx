@@ -47,27 +47,27 @@ export default function LandingPage() {
       </header>
 
       {/* Hero */}
-      <section className="max-w-6xl mx-auto px-4 pt-16 pb-20 md:pt-24 md:pb-28">
-        <div className="max-w-2xl">
-          <h1 className="text-3xl md:text-5xl font-bold text-foreground leading-tight mb-4">
+      <section className="max-w-6xl mx-auto px-4 pt-16 pb-20 md:pt-28 md:pb-32 text-center md:text-left">
+        <div className="max-w-3xl">
+          <h1 className="text-4xl md:text-6xl font-bold text-foreground leading-tight mb-6 tracking-tight">
             รู้ต้นทุน รู้กำไร<br />
             <span className="text-accent">ตัดสินใจได้มั่นใจ</span>
           </h1>
-          <p className="text-lg text-muted-foreground mb-8 max-w-xl">
+          <p className="text-lg md:text-xl text-muted-foreground mb-10 max-w-xl mx-auto md:mx-0 leading-relaxed">
             เครื่องมือวิเคราะห์ต้นทุนและจำลองสถานการณ์ ออกแบบสำหรับร้านอาหารและคาเฟ่ไทย
             ให้ข้อมูลที่เชื่อถือได้ โปร่งใส ตรวจสอบได้ทุกขั้นตอน
           </p>
-          <div className="flex flex-wrap gap-3">
+          <div className="flex flex-wrap gap-4 justify-center md:justify-start">
             <Link
               to="/onboarding"
-              className="inline-flex items-center gap-2 bg-primary text-primary-foreground px-6 py-3 rounded-lg font-medium hover:opacity-90 transition-opacity"
+              className="inline-flex items-center gap-2 bg-primary text-primary-foreground px-8 py-3.5 rounded-xl font-semibold hover:opacity-90 transition-all shadow-lg shadow-primary/20 cursor-pointer"
             >
               เริ่มต้นใช้งาน
               <ArrowRight className="w-4 h-4" />
             </Link>
             <Link
               to="/app/dashboard"
-              className="inline-flex items-center gap-2 bg-secondary text-secondary-foreground px-6 py-3 rounded-lg font-medium hover:bg-secondary/80 transition-colors"
+              className="inline-flex items-center gap-2 bg-secondary text-secondary-foreground px-8 py-3.5 rounded-xl font-semibold hover:bg-secondary/80 transition-all cursor-pointer"
             >
               ดูตัวอย่างระบบ
             </Link>
@@ -76,13 +76,15 @@ export default function LandingPage() {
       </section>
 
       {/* Features */}
-      <section className="max-w-6xl mx-auto px-4 pb-20">
-        <div className="grid md:grid-cols-3 gap-6">
+      <section className="max-w-6xl mx-auto px-4 pb-24">
+        <div className="grid md:grid-cols-3 gap-8">
           {features.map((f) => (
-            <div key={f.title} className="stat-card">
-              <f.icon className="w-8 h-8 text-accent mb-3" />
-              <h3 className="font-semibold text-foreground mb-2">{f.title}</h3>
-              <p className="text-sm text-muted-foreground">{f.desc}</p>
+            <div key={f.title} className="stat-card hover:shadow-md transition-shadow">
+              <div className="w-12 h-12 rounded-xl bg-accent/10 flex items-center justify-center mb-5">
+                <f.icon className="w-6 h-6 text-accent" />
+              </div>
+              <h3 className="text-lg font-bold text-foreground mb-3">{f.title}</h3>
+              <p className="text-sm text-muted-foreground leading-relaxed">{f.desc}</p>
             </div>
           ))}
         </div>

@@ -1,68 +1,48 @@
 import AppLayout from "@/components/AppLayout";
 import DataQualityBadge from "@/components/DataQualityBadge";
 import AssumptionsDrawer from "@/components/AssumptionsDrawer";
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Save, Clock, Info, FileText, Trash2 } from "lucide-react";
-
-// Baseline data
-const baselineData = {
-  fixedCosts: 50000,
-  targetProfit: 30000,
-  daysOpen: 26,
-  avgPrice: 71.1,
-  avgCost: 28.9,
-  weightedCM: 42.2,
-};
-
-interface SavedScenario {
-  id: number;
-  name: string;
-  timestamp: string;
-  fixedCosts: number;
-  avgPrice: number;
-  avgCost: number;
-  daysOpen: number;
-  targetProfit: number;
-  notes: string;
-}
-
-let scenarioId = 3;
+import { shopService, fixedCostService, menuService, scenarioService } from "@/services/mockStorage";
+import { calcScenarioKPIs, calcWeightedMetrics } from "@/services/calculationEngine";
+import type { SavedScenario } from "@/services/types";
 
 const now = new Date().toLocaleString("th-TH", { dateStyle: "medium", timeStyle: "short" });
 
 export default function ScenarioPage() {
-  // Adjustable inputs
-  const [fixedCosts, setFixedCosts] = useState(baselineData.fixedCosts);
-  const [avgPrice, setAvgPrice] = useState(baselineData.avgPrice);
-  const [avgCost, setAvgCost] = useState(baselineData.avgCost);
-  const [daysOpen, setDaysOpen] = useState(baselineData.daysOpen);
-  const [targetProfit, setTargetProfit] = useState(baselineData.targetProfit);
+  // Load baseline from service layer
+  const shop = useMemo(() => shopService.get(), []);
+  const fixedCostsTotal = useMemo(() => fixedCostService.total(), []);
+  const menuRows = useMemo(() => menuService.get(), []);
+  const { weightedCM: baseWeightedCM, weightedPrice: baseWeightedPrice } = useMemo(
+    () => calcWeightedMetrics(menuRows),
+    [menuRows]
+  );
+  const baseAvgCost = baseWeightedPrice - baseWeightedCM;
+
+  // Scenario state — initialised from real baseline
+  const [fixedCosts, setFixedCosts] = useState(fixedCostsTotal);
+  const [avgPrice, setAvgPrice] = useState(parseFloat(baseWeightedPrice.toFixed(1)));
+  const [avgCost, setAvgCost] = useState(parseFloat(baseAvgCost.toFixed(1)));
+  const [daysOpen, setDaysOpen] = useState(shop.daysOpen);
+  const [targetProfit, setTargetProfit] = useState(shop.targetProfit);
   const [scenarioNotes, setScenarioNotes] = useState("");
+  const [savedScenarios, setSavedScenarios] = useState<SavedScenario[]>(() =>
+    scenarioService.get()
+  );
 
-  const [savedScenarios, setSavedScenarios] = useState<SavedScenario[]>([
-    { id: 1, name: "ขึ้นราคา 5 บาท", timestamp: "20 ก.พ. 2569 14:30", fixedCosts: 50000, avgPrice: 76.1, avgCost: 28.9, daysOpen: 26, targetProfit: 30000, notes: "ทดสอบผลกระทบจากการขึ้นราคาเฉลี่ย 5 บาท" },
-    { id: 2, name: "ลดค่าเช่า", timestamp: "18 ก.พ. 2569 10:15", fixedCosts: 40000, avgPrice: 71.1, avgCost: 28.9, daysOpen: 26, targetProfit: 30000, notes: "ย้ายไปทำเลถูกลง" },
-  ]);
-
-  // Calculations
-  const cm = avgPrice - avgCost;
-  const cmBaseline = baselineData.avgPrice - baselineData.avgCost;
-
-  const calc = (fc: number, tp: number, cmVal: number, d: number, price: number) => {
-    if (cmVal <= 0) return { bepMonth: Infinity, bepDay: Infinity, targetCupsDay: Infinity, revenueDay: Infinity, netProfit: -fc };
-    const bepMonth = Math.ceil(fc / cmVal);
-    const bepDay = Math.ceil(bepMonth / d);
-    const targetCupsMonth = Math.ceil((fc + tp) / cmVal);
-    const targetCupsDay = Math.ceil(targetCupsMonth / d);
-    const revenueDay = Math.round(targetCupsDay * price);
-    const netProfit = Math.round(targetCupsDay * d * cmVal - fc);
-    return { bepMonth, bepDay, targetCupsDay, revenueDay, netProfit };
-  };
-
-  const baseline = calc(baselineData.fixedCosts, baselineData.targetProfit, cmBaseline, baselineData.daysOpen, baselineData.avgPrice);
-  const scenario = calc(fixedCosts, targetProfit, cm, daysOpen, avgPrice);
+  // Calculations (pure engine)
+  const baseline = useMemo(
+    () => calcScenarioKPIs(fixedCostsTotal, shop.targetProfit, baseWeightedPrice, baseAvgCost, shop.daysOpen),
+    [fixedCostsTotal, shop, baseWeightedPrice, baseAvgCost]
+  );
+  const scenario = useMemo(
+    () => calcScenarioKPIs(fixedCosts, targetProfit, avgPrice, avgCost, daysOpen),
+    [fixedCosts, targetProfit, avgPrice, avgCost, daysOpen]
+  );
 
   const diff = (a: number, b: number) => {
+    if (!isFinite(a) || !isFinite(b)) return { text: "-", cls: "text-muted-foreground" };
     const d = a - b;
     if (d === 0) return { text: "ไม่เปลี่ยนแปลง", cls: "text-muted-foreground" };
     const sign = d > 0 ? "+" : "";
@@ -71,8 +51,8 @@ export default function ScenarioPage() {
 
   const saveScenario = () => {
     const newScenario: SavedScenario = {
-      id: scenarioId++,
-      name: `สถานการณ์ ${scenarioId - 1}`,
+      id: scenarioService.nextId(),
+      name: `สถานการณ์ ${scenarioService.nextId()}`,
       timestamp: now,
       fixedCosts,
       avgPrice,
@@ -81,12 +61,14 @@ export default function ScenarioPage() {
       targetProfit,
       notes: scenarioNotes,
     };
-    setSavedScenarios([newScenario, ...savedScenarios]);
+    scenarioService.save(newScenario);
+    setSavedScenarios(scenarioService.get());
     setScenarioNotes("");
   };
 
   const deleteScenario = (id: number) => {
-    setSavedScenarios(savedScenarios.filter((s) => s.id !== id));
+    scenarioService.delete(id);
+    setSavedScenarios(scenarioService.get());
   };
 
   const loadScenario = (s: SavedScenario) => {
@@ -97,6 +79,9 @@ export default function ScenarioPage() {
     setTargetProfit(s.targetProfit);
     setScenarioNotes(s.notes);
   };
+
+  const cm = avgPrice - avgCost;
+  const cmBaseline = baseWeightedPrice - baseAvgCost;
 
   const kpiRows = [
     { label: "จุดคุ้มทุน (แก้ว/เดือน)", unit: "แก้ว", base: baseline.bepMonth, scen: scenario.bepMonth },
@@ -109,15 +94,18 @@ export default function ScenarioPage() {
   return (
     <AppLayout>
       <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">จำลองสถานการณ์</h1>
-          <p className="text-sm text-muted-foreground mt-1">ปรับตัวแปรและเปรียบเทียบผลลัพธ์กับข้อมูลปัจจุบัน</p>
+        {/* ── Page Header ─────────────────────────────── */}
+        <div className="page-header">
+          <div>
+            <h1 className="page-title">จำลองสถานการณ์</h1>
+            <p className="page-subtitle">ปรับตัวแปรและเปรียบเทียบผลลัพธ์กับข้อมูลปัจจุบัน</p>
+          </div>
         </div>
 
         <div className="guidance-card flex items-start gap-2">
           <Info className="w-4 h-4 text-accent flex-shrink-0 mt-0.5" />
           <p className="text-sm text-foreground">
-            การจำลองอ้างอิงจากข้อมูลที่กรอกล่าสุด ปรับค่าในฝั่งซ้ายและดูผลลัพธ์ฝั่งขวาทันที
+            ค่าเริ่มต้นดึงจากข้อมูลร้านและเมนูที่กรอกใน Onboarding ปรับค่าในฝั่งซ้ายและดูผลลัพธ์ฝั่งขวาทันที สถานการณ์ที่บันทึกจะถูกเก็บไว้แม้ปิดหน้าต่าง
           </p>
         </div>
 
@@ -134,36 +122,36 @@ export default function ScenarioPage() {
                 { label: "วันเปิดขาย", unit: "วัน/เดือน", value: daysOpen, set: setDaysOpen, min: 1, max: 31, step: 1 },
                 { label: "เป้ากำไรสุทธิ", unit: "฿/เดือน", value: targetProfit, set: setTargetProfit, min: 0, max: 200000, step: 1000 },
               ].map((s) => (
-                <div key={s.label}>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <label className="text-sm font-medium text-foreground">{s.label}</label>
-                    <span className="text-xs text-muted-foreground">{s.unit}</span>
+                  <div key={s.label}>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="form-label">{s.label}</label>
+                      <span className="text-xs text-muted-foreground font-medium">{s.unit}</span>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="range"
+                        min={s.min}
+                        max={s.max}
+                        step={s.step}
+                        value={s.value}
+                        onChange={(e) => s.set(Number(e.target.value))}
+                        className="flex-1 h-2 rounded-full appearance-none bg-muted accent-primary cursor-pointer"
+                      />
+                      <input
+                        type="number"
+                        value={s.value}
+                        onChange={(e) => s.set(Number(e.target.value))}
+                        min={s.min}
+                        max={s.max}
+                        step={s.step}
+                        className="w-24 px-2 py-1.5 rounded-lg border bg-background text-foreground text-sm tabular-nums text-right focus:outline-none focus:ring-2 focus:ring-ring"
+                      />
+                    </div>
                   </div>
-                  <div className="flex items-center gap-3">
-                    <input
-                      type="range"
-                      min={s.min}
-                      max={s.max}
-                      step={s.step}
-                      value={s.value}
-                      onChange={(e) => s.set(Number(e.target.value))}
-                      className="flex-1 h-2 rounded-full appearance-none bg-muted accent-primary cursor-pointer"
-                    />
-                    <input
-                      type="number"
-                      value={s.value}
-                      onChange={(e) => s.set(Number(e.target.value))}
-                      min={s.min}
-                      max={s.max}
-                      step={s.step}
-                      className="w-24 px-2 py-1.5 rounded-lg border bg-background text-foreground text-sm tabular-nums text-right focus:outline-none focus:ring-2 focus:ring-ring"
-                    />
-                  </div>
-                </div>
               ))}
 
               <div>
-                <label className="text-sm font-medium text-foreground block mb-1.5">บันทึกช่วยจำ</label>
+                <label className="form-label mb-1.5">บันทึกช่วยจำ</label>
                 <textarea
                   value={scenarioNotes}
                   onChange={(e) => setScenarioNotes(e.target.value)}
@@ -181,9 +169,7 @@ export default function ScenarioPage() {
                 >
                   <Save className="w-4 h-4" /> บันทึกสถานการณ์
                 </button>
-                <button
-                  className="flex items-center justify-center gap-1.5 bg-secondary text-secondary-foreground px-4 py-2 rounded-lg text-sm font-medium hover:bg-secondary/80 transition-colors"
-                >
+                <button className="flex items-center justify-center gap-1.5 bg-secondary text-secondary-foreground px-4 py-2 rounded-lg text-sm font-medium hover:bg-secondary/80 transition-colors">
                   <FileText className="w-4 h-4" /> บันทึกเป็นรายงาน
                 </button>
               </div>
@@ -204,13 +190,13 @@ export default function ScenarioPage() {
                 </div>
               )}
 
-              <table className="w-full text-sm">
+              <table className="data-table">
                 <thead>
-                  <tr className="text-muted-foreground border-b">
-                    <th className="pb-2 text-left font-medium">ตัวชี้วัด</th>
-                    <th className="pb-2 text-right font-medium">ปัจจุบัน</th>
-                    <th className="pb-2 text-right font-medium">จำลอง</th>
-                    <th className="pb-2 text-right font-medium">ผลต่าง</th>
+                  <tr>
+                    <th>ตัวชี้วัด</th>
+                    <th className="text-right">ปัจจุบัน</th>
+                    <th className="text-right">จำลอง</th>
+                    <th className="text-right">ผลต่าง</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -218,13 +204,15 @@ export default function ScenarioPage() {
                     const d = diff(row.scen, row.base);
                     const isInf = !isFinite(row.scen);
                     return (
-                      <tr key={i} className="border-b last:border-0">
-                        <td className="py-2.5 text-foreground font-medium">{row.label}</td>
-                        <td className="py-2.5 text-right tabular-nums">{row.unit === "฿" ? `฿${row.base.toLocaleString()}` : row.base.toLocaleString()}</td>
-                        <td className="py-2.5 text-right tabular-nums font-medium">
+                      <tr key={i}>
+                        <td className="text-foreground font-medium">{row.label}</td>
+                        <td className="text-right tabular-nums">
+                          {!isFinite(row.base) ? "N/A" : row.unit === "฿" ? `฿${row.base.toLocaleString()}` : row.base.toLocaleString()}
+                        </td>
+                        <td className="text-right tabular-nums font-semibold">
                           {isInf ? "N/A" : row.unit === "฿" ? `฿${row.scen.toLocaleString()}` : row.scen.toLocaleString()}
                         </td>
-                        <td className={`py-2.5 text-right tabular-nums text-xs font-medium ${d.cls}`}>
+                        <td className={`text-right tabular-nums text-xs font-medium ${d.cls}`}>
                           {isInf ? "-" : d.text}
                         </td>
                       </tr>
@@ -233,7 +221,6 @@ export default function ScenarioPage() {
                 </tbody>
               </table>
 
-              {/* Key differences */}
               {cm > 0 && (
                 <div className="mt-4 pt-4 border-t">
                   <h4 className="text-sm font-semibold text-foreground mb-2">สรุปความแตกต่าง</h4>
@@ -255,12 +242,11 @@ export default function ScenarioPage() {
               </div>
             </div>
 
-            {/* Methodology */}
             <AssumptionsDrawer
               title="วิธีคำนวณ"
               inputSources={[
                 "ค่าใช้จ่ายคงที่ (ปรับได้จากสไลเดอร์)",
-                "ราคาและต้นทุนเฉลี่ยถ่วงน้ำหนัก (ปรับได้จากสไลเดอร์)",
+                "ราคาและต้นทุนเฉลี่ยถ่วงน้ำหนัก (ดึงจากข้อมูลเมนูใน Onboarding)",
                 "เป้ากำไรสุทธิ (ปรับได้จากสไลเดอร์)",
               ]}
               formulas={[
@@ -269,7 +255,7 @@ export default function ScenarioPage() {
               ]}
               assumptions={[
                 { text: "ใช้ราคาและต้นทุนเฉลี่ยถ่วงน้ำหนัก ไม่ใช่รายเมนู" },
-                { text: "สมมติว่า Mix% ไม่เปลี่ยนแปลง" },
+                { text: "สมมติว่า Mix% ไม่เปลี่ยนแปลงในระหว่างจำลอง" },
               ]}
             />
           </div>
@@ -304,9 +290,9 @@ export default function ScenarioPage() {
           </div>
         )}
 
-        <div className="text-center py-4 border-t">
-          <p className="text-xs text-muted-foreground">ข้อมูลนี้เป็นแบบจำลองเพื่อการวางแผน โปรดตรวจสอบต้นทุนจริงเป็นระยะ</p>
-        </div>
+        <p className="text-center text-xs text-muted-foreground pt-4 border-t">
+          ข้อมูลนี้เป็นแบบจำลองเพื่อการวางแผน โปรดตรวจสอบต้นทุนจริงเป็นระยะ
+        </p>
       </div>
     </AppLayout>
   );

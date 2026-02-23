@@ -1,0 +1,80 @@
+// ─── Plan & Billing Domain Types ──────────────────────────────────────────────
+
+export type PlanId = "free" | "starter" | "pro";
+export type BillingCycle = "monthly" | "yearly";
+
+/** Overall subscription status for the user */
+export type PlanStatus = "FREE" | "PENDING" | "ACTIVE" | "EXPIRED";
+
+/** Invoice payment status */
+export type InvoiceStatus = "UNPAID" | "PAID" | "EXPIRED";
+
+/** Status of a payment proof submission */
+export type SubmissionStatus =
+  | "PAYMENT_SUBMITTED"
+  | "VERIFIED"
+  | "REJECTED";
+
+/** Notification event types for the notifier stub */
+export type NotificationEvent =
+  | "PAYMENT_SUBMITTED"
+  | "PAYMENT_VERIFIED"
+  | "PAYMENT_REJECTED";
+
+// ─── Entities ─────────────────────────────────────────────────────────────────
+
+export interface UserPlan {
+  user_id: string;
+  current_plan: PlanId;
+  billing_cycle: BillingCycle;
+  status: PlanStatus;
+  /** ISO 8601 date string — null for FREE / PENDING plans */
+  active_until: string | null;
+}
+
+export interface Invoice {
+  invoice_id: string;
+  user_id: string;
+  plan: PlanId;
+  billing_cycle: BillingCycle;
+  /** THB amount before VAT */
+  amount: number;
+  /** Unique reference code user quotes when transferring */
+  reference_code: string;
+  status: InvoiceStatus;
+  created_at: string;
+}
+
+export interface PaymentSubmission {
+  submission_id: string;
+  invoice_id: string;
+  /** THB amount the user claims to have paid */
+  paid_amount: number;
+  /** ISO date string of when user transferred */
+  paid_at: string;
+  /** Base64 data-URL of proof image, or null */
+  proof_url: string | null;
+  status: SubmissionStatus;
+  admin_note: string | null;
+  approved_by: string | null;
+  approved_at: string | null;
+}
+
+export interface PlanChangeRequest {
+  request_id: string;
+  user_id: string;
+  plan: PlanId;
+  cycle: BillingCycle;
+  invoice_id: string;
+  status: "PENDING" | "APPROVED" | "REJECTED";
+  created_at: string;
+}
+
+// ─── Derived / view types ────────────────────────────────────────────────────
+
+/** Convenience bundle for the admin approvals list */
+export interface ApprovalRow {
+  submission: PaymentSubmission;
+  invoice: Invoice;
+  userPlan: UserPlan;
+}

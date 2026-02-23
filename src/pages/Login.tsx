@@ -16,30 +16,30 @@ export default function LoginPage() {
           <p className="text-sm text-muted-foreground mt-1">กรอกอีเมลและรหัสผ่านเพื่อเข้าใช้งาน</p>
         </div>
 
-        <div className="stat-card space-y-4">
-          <div>
-            <label className="text-sm font-medium text-foreground block mb-1.5">อีเมล</label>
+        <div className="stat-card space-y-5">
+          <div className="form-group">
+            <label className="form-label">อีเมล</label>
             <input
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="email@example.com"
-              className="w-full px-3 py-2.5 rounded-lg border bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+              className="form-input"
             />
           </div>
-          <div>
-            <label className="text-sm font-medium text-foreground block mb-1.5">รหัสผ่าน</label>
+          <div className="form-group">
+            <label className="form-label">รหัสผ่าน</label>
             <input
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="กรอกรหัสผ่าน"
-              className="w-full px-3 py-2.5 rounded-lg border bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+              className="form-input"
             />
           </div>
           <Link
             to="/app/dashboard"
-            className="w-full block text-center bg-primary text-primary-foreground py-2.5 rounded-lg text-sm font-medium hover:opacity-90 transition-opacity"
+            className="w-full block text-center bg-primary text-primary-foreground py-2.5 rounded-lg text-sm font-semibold hover:opacity-90 transition-opacity cursor-pointer"
           >
             เข้าสู่ระบบ
           </Link>
