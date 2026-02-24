@@ -1,73 +1,72 @@
-# Welcome to your Lovable project
+# 💎 Valora Hub — Restaurant Intelligence Platform
 
-## Project info
+**Valora Hub** เป็นเครื่องมือวิเคราะห์ต้นทุนและจำลองสถานการณ์การดำเนินงาน ออกแบบมาเพื่อเจ้าของร้านอาหารและคาเฟ่ในไทยโดยเฉพาะ เพื่อช่วยในการตัดสินใจทางธุรกิจด้วยข้อมูลที่แม่นยำ
 
-**URL**: https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID
+![Valora Hub Preview](public/favicon.svg) <!-- หรือใส่ภาพ Hero Screenshot ถ้ามี -->
 
-## How can I edit this code?
+## 🚀 คุณสมบัติเด่น (Core Features)
 
-There are several ways of editing your application.
+- **Financial Dashboard**: ติดตามยอดขาย ต้นทุนวัตถุดิบ (COGS) และกำไรสุทธิแบบ Real-time
+- **Scenario Simulation**: จำลองสถานการณ์ "What-if" เพื่อดูผลกระทบของการเปลี่ยนแปลงราคาอาหาร หรือการเพิ่มค่าใช้จ่ายพนักงาน
+- **Premium Services**: ระบบสมัครสมาชิกเพื่อเข้าถึงฟีเจอร์ขั้นสูงและการขอคำปรึกษาจากทีมผู้เชี่ยวชาญ
+- **Admin Management**: ระบบหลังบ้านสำหรับจัดการคำขอรับคำปรึกษาและตรวจสอบสถานะการชำระเงิน
+- **Thai Context**: ออกแบบการคำนวณและคำศัพท์ให้สอดคล้องกับการทำธุรกิจร้านอาหารในประเทศไทย
 
-**Use Lovable**
+## 🛠️ เทคโนโลยีที่ใช้ (Tech Stack)
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and start prompting.
+- **Frontend**: [Vite](https://vitejs.dev/) + [React](https://reactjs.org/) + [TypeScript](https://www.typescriptlang.org/)
+- **Styling**: [Tailwind CSS](https://tailwindcss.com/) + [shadcn/ui](https://ui.shadcn.com/)
+- **Database / Auth**: [Supabase](https://supabase.com/)
+- **Icons**: [Lucide React](https://lucide.dev/)
+- **Payment Gateway**: [Omise](https://www.omise.co/) (Coming Soon)
 
-Changes made via Lovable will be committed automatically to this repo.
+## 📦 วิธีการประติติดตั้ง (Local Development)
 
-**Use your preferred IDE**
+### 1. Pre-requisites
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
+- Node.js (v18 หรือสูงกว่า)
+- npm หรือ Bun
 
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
+### 2. การติดตั้ง
 
-Follow these steps:
+```bash
+# Clone repository
+git clone https://github.com/Pongsath0n/valora-prototype-hub.git
 
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
+# เข้าไปที่โฟลเดอร์
+cd valora-prototype-hub
 
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
+# ติดตั้ง dependencies
+npm install
+```
 
-# Step 3: Install the necessary dependencies.
-npm i
+### 3. การตั้งค่า Environment Variables
 
-# Step 4: Start the development server with auto-reloading and an instant preview.
+สร้างไฟล์ `.env` ที่ Root directory และระบุค่าดังนี้:
+
+```env
+VITE_SUPABASE_URL=your_supabase_url
+VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
+```
+
+_(ดูตัวอย่างได้จากไฟล์ `.env.example`)_
+
+### 4. รันโปรเจกต์
+
+```bash
 npm run dev
 ```
 
-**Edit a file directly in GitHub**
+## 🌐 การ Deploy (Deployment)
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+โปรเจกต์นี้รองรับการ Deploy บน **Vercel** อย่างเต็มรูปแบบ:
 
-**Use GitHub Codespaces**
+1. เชื่อมต่อ GitHub Repo เข้ากับ Vercel
+2. ตั้งค่า Environment Variables ใน Vercel Dashboard
+3. ระบบจะทำการ Deploy อัตโนมัติทุกครั้งที่มีการ Push ไปยัง `main` branch
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+---
 
-## What technologies are used for this project?
+## 📄 License
 
-This project is built with:
-
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
-
-## How can I deploy this project?
-
-Simply open [Lovable](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and click on Share -> Publish.
-
-## Can I connect a custom domain to my Lovable project?
-
-Yes, you can!
-
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
-
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+Copyright © 2026 Valora Hub. All rights reserved.
