@@ -3,6 +3,7 @@ import { useState } from "react";
 import { CheckCircle2, Plus, Trash2, Info, Lightbulb, Eye, EyeOff } from "lucide-react";
 import { shopService, fixedCostService, menuService } from "@/services/mockStorage";
 import type { FixedCostRow, MenuRow } from "@/services/types";
+import LogoBrand from "@/components/LogoBrand";
 
 
 const defaultFixedCosts: FixedCostRow[] = [
@@ -49,8 +50,10 @@ export default function OnboardingPage() {
     shopService.set({ name: shopName, daysOpen, targetProfit });
     fixedCostService.set(fixedCosts);
     menuService.set(menuRows);
+    localStorage.setItem("valora:onboarded", "1");
     navigate("/app/dashboard");
   };
+
 
   // Step 2 handlers
   const addFixedCost = () => {
@@ -91,10 +94,10 @@ export default function OnboardingPage() {
     <div className="min-h-screen bg-background flex items-center justify-center p-4">
       <div className="w-full max-w-2xl">
         <div className="text-center mb-6">
-          <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center mx-auto mb-3">
-            <span className="text-primary-foreground font-bold text-lg">V</span>
+          <div className="flex justify-center mb-3">
+            <LogoBrand size="md" />
           </div>
-          <h1 className="text-2xl font-bold text-foreground">ตั้งค่าร้านของคุณ</h1>
+          <h1 className="text-2xl font-bold text-foreground leading-snug">ตั้งค่าร้านของคุณ</h1>
           <p className="text-sm text-muted-foreground mt-1">กรอกข้อมูลเพื่อให้ Valora คำนวณจุดคุ้มทุนและวางแผนกำไร</p>
         </div>
 

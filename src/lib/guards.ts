@@ -1,61 +1,60 @@
-// ─── Admin Session Guard ──────────────────────────────────────────────────────
-// Simple localStorage-based session for demo/prototype.
-// TODO: Replace with JWT / server-side session in production.
+// ─── Admin Guards ─────────────────────────────────────────────────────────────
+// Role-based admin access via Supabase Auth + profiles.role column.
+// Replaces the old hardcoded password approach.
 
-const ADMIN_SESSION_KEY = "valora:admin_session";
-const ADMIN_PASSWORD = "admin2025"; // hardcoded for demo only
-
-/**
- * Checks whether the current session has admin privileges.
- * Returns true if the admin session flag is set in localStorage.
- */
-export function isAdminLoggedIn(): boolean {
-  try {
-    return localStorage.getItem(ADMIN_SESSION_KEY) === "1";
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Attempts admin login with the provided password.
- * Returns true if successful.
- */
-export function adminLogin(password: string): boolean {
-  if (password === ADMIN_PASSWORD) {
-    localStorage.setItem(ADMIN_SESSION_KEY, "1");
-    return true;
-  }
-  return false;
-}
-
-/**
- * Clears the admin session.
- */
-export function adminLogout(): void {
-  localStorage.removeItem(ADMIN_SESSION_KEY);
-}
-
-// ─── React Guard Hook ─────────────────────────────────────────────────────────
-
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useAuth } from "@/contexts/AuthContext";
+import { supabase } from "@/lib/supabase";
 
-/**
- * React hook: redirects to /admin/login if not authenticated as admin.
- * Place at the top of any admin page component.
- *
- * @example
- * function AdminPage() {
- *   useAdminGuard();
- *   return <div>Admin content</div>;
- * }
- */
-export function useAdminGuard(redirectTo = "/admin/login"): void {
+/** Check if the currently logged-in user has admin role */
+export async function isAdmin(): Promise<boolean> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return false;
+
+  const { data } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user.id)
+    .single();
+
+  return data?.role === "admin";
+}
+
+/** Hook that redirects non-admin users away from admin pages */
+export function useAdminGuard() {
+  const { user, loading: authLoading } = useAuth();
   const navigate = useNavigate();
+  const [checking, setChecking] = useState(true);
+  const [isAdminUser, setIsAdminUser] = useState(false);
+
   useEffect(() => {
-    if (!isAdminLoggedIn()) {
-      navigate(redirectTo, { replace: true });
+    if (authLoading) return;
+
+    if (!user) {
+      navigate("/admin/login", { replace: true });
+      return;
     }
-  }, [navigate, redirectTo]);
+
+    supabase
+      .from("profiles")
+      .select("role")
+      .eq("id", user.id)
+      .single()
+      .then(({ data }) => {
+        if (data?.role !== "admin") {
+          navigate("/admin/login", { replace: true });
+        } else {
+          setIsAdminUser(true);
+        }
+        setChecking(false);
+      });
+  }, [user, authLoading, navigate]);
+
+  return { checking, isAdminUser };
+}
+
+/** Admin logout — signs out from Supabase entirely */
+export async function adminLogout() {
+  await supabase.auth.signOut();
 }

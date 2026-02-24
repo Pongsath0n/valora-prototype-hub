@@ -182,8 +182,8 @@ export default function CheckoutPage() {
                   <dd className="text-foreground">ยังไม่ชำระ</dd>
                 </div>
                 <div className="flex justify-between border-t pt-2 mt-2">
-                  <dt className="font-bold">ยอดสุทธิรวม VAT 7%</dt>
-                  <dd className="font-bold text-lg">{formatTHB(invoice.amount * 1.07)}</dd>
+                  <dt className="font-bold">ยอดสุทธิ</dt>
+                  <dd className="font-bold text-lg">{formatTHB(invoice.amount)}</dd>
                 </div>
               </dl>
             </div>

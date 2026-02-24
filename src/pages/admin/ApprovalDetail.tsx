@@ -1,11 +1,11 @@
 import { useState, useCallback } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useAdminGuard } from "@/lib/guards";
+import { useAuth } from "@/contexts/AuthContext";
 import { getApprovalRow, approvePayment, rejectPayment } from "@/services/adminService";
 import {
   formatTHB,
   formatDateTime,
-  formatDate,
   formatPlanLabel,
   formatCycleLabel,
   formatSubmissionStatus,
@@ -14,15 +14,16 @@ import {
 } from "@/lib/format";
 import { PLAN_PRICES } from "@/services/billingService";
 import {
-  ArrowLeft, CheckCircle2, XCircle, Clock, FileImage, ShieldCheck,
+  ArrowLeft, CheckCircle2, XCircle, Clock, FileImage, ShieldCheck, Loader2,
 } from "lucide-react";
 
-const ADMIN_EMAIL = "admin@valora.app"; // demo placeholder
-
 export default function ApprovalDetailPage() {
-  useAdminGuard();
+  const { checking } = useAdminGuard();
+  const { user } = useAuth();
   const { requestId } = useParams<{ requestId: string }>();
   const navigate = useNavigate();
+
+  const adminEmail = user?.email ?? "admin@valora.app";
 
   const [adminNote, setAdminNote] = useState("");
   const [rejectReason, setRejectReason] = useState("");
@@ -36,6 +37,17 @@ export default function ApprovalDetailPage() {
   const refresh = useCallback(() => setRefreshKey((k) => k + 1), []);
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   void refreshKey; // consumed to trigger re-render
+
+  if (checking) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="flex items-center gap-2 text-muted-foreground text-sm">
+          <Loader2 className="w-4 h-4 animate-spin" />
+          กำลังตรวจสอบสิทธิ์...
+        </div>
+      </div>
+    );
+  }
 
   if (!row) {
     return (
@@ -56,7 +68,7 @@ export default function ApprovalDetailPage() {
   const isPending = submission.status === "PAYMENT_SUBMITTED";
 
   const handleVerify = () => {
-    const result = approvePayment(submission.submission_id, ADMIN_EMAIL, adminNote);
+    const result = approvePayment(submission.submission_id, adminEmail, adminNote);
     if (result.ok === false) {
       setErrorMsg(result.error);
       return;
@@ -67,7 +79,7 @@ export default function ApprovalDetailPage() {
 
   const handleReject = () => {
     setErrorMsg("");
-    const result = rejectPayment(submission.submission_id, ADMIN_EMAIL, rejectReason);
+    const result = rejectPayment(submission.submission_id, adminEmail, rejectReason);
     if (result.ok === false) {
       setErrorMsg(result.error);
       return;
@@ -157,7 +169,7 @@ export default function ApprovalDetailPage() {
               <dl className="space-y-2.5 text-sm">
                 <div className="flex justify-between">
                   <dt className="text-muted-foreground">ผู้ใช้</dt>
-                  <dd className="font-medium text-foreground">demo@valora.app</dd>
+                  <dd className="font-medium text-foreground">{currentSub.user_email ?? "—"}</dd>
                 </div>
                 <div className="flex justify-between">
                   <dt className="text-muted-foreground">ยอดที่แจ้ง</dt>
@@ -220,7 +232,7 @@ export default function ApprovalDetailPage() {
 
                 <button
                   onClick={handleVerify}
-                  className="w-full flex items-center justify-center gap-2 bg-success/10 text-success border border-success/30 py-2.5 rounded-lg text-sm font-semibold hover:bg-success/15 transition-colors"
+                  className="w-full flex items-center justify-center gap-2 bg-success/10 text-success border border-success/30 py-2.5 rounded-lg text-sm font-semibold hover:bg-success/15 transition-colors cursor-pointer"
                 >
                   <CheckCircle2 className="w-4 h-4" /> ยืนยันการชำระเงิน (Verify)
                 </button>
@@ -229,7 +241,7 @@ export default function ApprovalDetailPage() {
                   {!showRejectForm ? (
                     <button
                       onClick={() => setShowRejectForm(true)}
-                      className="w-full flex items-center justify-center gap-2 bg-destructive/10 text-destructive border border-destructive/30 py-2.5 rounded-lg text-sm font-semibold hover:bg-destructive/15 transition-colors"
+                      className="w-full flex items-center justify-center gap-2 bg-destructive/10 text-destructive border border-destructive/30 py-2.5 rounded-lg text-sm font-semibold hover:bg-destructive/15 transition-colors cursor-pointer"
                     >
                       <XCircle className="w-4 h-4" /> ปฏิเสธการชำระเงิน
                     </button>
@@ -248,14 +260,14 @@ export default function ApprovalDetailPage() {
                       <div className="flex gap-2">
                         <button
                           onClick={() => setShowRejectForm(false)}
-                          className="flex-1 py-2 rounded-lg border text-sm font-medium text-foreground hover:bg-muted transition-colors"
+                          className="flex-1 py-2 rounded-lg border text-sm font-medium text-foreground hover:bg-muted transition-colors cursor-pointer"
                         >
                           ยกเลิก
                         </button>
                         <button
                           onClick={handleReject}
                           disabled={!rejectReason.trim()}
-                          className="flex-1 py-2 rounded-lg bg-destructive text-destructive-foreground text-sm font-semibold hover:opacity-90 transition-opacity disabled:opacity-40"
+                          className="flex-1 py-2 rounded-lg bg-destructive text-destructive-foreground text-sm font-semibold hover:opacity-90 transition-opacity disabled:opacity-40 cursor-pointer"
                         >
                           ยืนยันการปฏิเสธ
                         </button>
@@ -309,7 +321,7 @@ export default function ApprovalDetailPage() {
         </div>
 
         <p className="text-xs text-muted-foreground text-center">
-          Valora Admin Backoffice — ข้อมูลจัดเก็บในอุปกรณ์นี้ (prototype)
+          Valora Admin Backoffice — Approved by: {adminEmail}
         </p>
       </div>
     </div>

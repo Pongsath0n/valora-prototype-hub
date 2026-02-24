@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import { ArrowRight, Shield, BarChart3, Zap, CheckCircle2 } from "lucide-react";
+import LogoBrand from "@/components/LogoBrand";
 
 const features = [
   {
@@ -25,12 +26,9 @@ export default function LandingPage() {
       {/* Nav */}
       <header className="border-b bg-card/80 backdrop-blur-sm sticky top-0 z-30">
         <div className="max-w-6xl mx-auto flex items-center justify-between px-4 py-3">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
-              <span className="text-primary-foreground font-bold text-sm">V</span>
-            </div>
-            <span className="font-bold text-lg text-foreground">Valora</span>
-          </div>
+          <Link to="/" className="flex items-center">
+            <LogoBrand size="sm" />
+          </Link>
           <nav className="hidden md:flex items-center gap-6 text-sm text-muted-foreground">
             <Link to="/pricing" className="hover:text-foreground transition-colors">ราคา</Link>
             <Link
@@ -49,7 +47,10 @@ export default function LandingPage() {
       {/* Hero */}
       <section className="max-w-6xl mx-auto px-4 pt-16 pb-20 md:pt-28 md:pb-32 text-center md:text-left">
         <div className="max-w-3xl">
-          <h1 className="text-4xl md:text-6xl font-bold text-foreground leading-tight mb-6 tracking-tight">
+          <h1
+            className="text-4xl md:text-5xl font-bold text-foreground mb-6"
+            style={{ lineHeight: 1.8, letterSpacing: '0.01em' }}
+          >
             รู้ต้นทุน รู้กำไร<br />
             <span className="text-accent">ตัดสินใจได้มั่นใจ</span>
           </h1>
@@ -59,14 +60,14 @@ export default function LandingPage() {
           </p>
           <div className="flex flex-wrap gap-4 justify-center md:justify-start">
             <Link
-              to="/onboarding"
+              to="/auth/signup"
               className="inline-flex items-center gap-2 bg-primary text-primary-foreground px-8 py-3.5 rounded-xl font-semibold hover:opacity-90 transition-all shadow-lg shadow-primary/20 cursor-pointer"
             >
               เริ่มต้นใช้งาน
               <ArrowRight className="w-4 h-4" />
             </Link>
             <Link
-              to="/app/dashboard"
+              to="/overview"
               className="inline-flex items-center gap-2 bg-secondary text-secondary-foreground px-8 py-3.5 rounded-xl font-semibold hover:bg-secondary/80 transition-all cursor-pointer"
             >
               ดูตัวอย่างระบบ

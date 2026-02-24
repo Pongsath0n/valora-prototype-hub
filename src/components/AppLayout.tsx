@@ -12,6 +12,7 @@ import {
   CreditCard,
 } from "lucide-react";
 import { useState } from "react";
+import LogoBrand from "@/components/LogoBrand";
 
 const mainNav = [
   { title: "แดชบอร์ด", path: "/app/dashboard", icon: LayoutDashboard },
@@ -61,9 +62,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       <aside className="hidden md:flex flex-col w-56 bg-sidebar text-sidebar-foreground border-r border-sidebar-border fixed inset-y-0 left-0 z-40">
         {/* Logo */}
         <div className="flex items-center gap-2.5 px-4 py-5 border-b border-sidebar-border">
-          <div className="w-8 h-8 rounded-lg bg-sidebar-primary flex items-center justify-center flex-shrink-0">
-            <span className="text-sidebar-primary-foreground font-bold text-sm">V</span>
-          </div>
+          <LogoBrand size="sm" iconOnly dark />
           <div>
             <p className="font-bold text-sidebar-accent-foreground leading-none">Valora</p>
             <p className="text-[10px] text-sidebar-foreground/60 mt-0.5">Business Intelligence</p>
@@ -100,12 +99,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
       {/* ── Mobile Header ─────────────────────────────────── */}
       <header className="md:hidden fixed top-0 left-0 right-0 z-50 bg-card border-b h-14 flex items-center justify-between px-4 shadow-sm">
-        <div className="flex items-center gap-2">
-          <div className="w-7 h-7 rounded-lg bg-primary flex items-center justify-center">
-            <span className="text-primary-foreground font-bold text-xs">V</span>
-          </div>
-          <span className="font-bold text-foreground">Valora</span>
-        </div>
+        <LogoBrand size="sm" iconOnly />
         <button
           onClick={() => setSidebarOpen(!sidebarOpen)}
           className="p-2 text-foreground rounded-lg hover:bg-muted transition-colors"
@@ -182,8 +176,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       </nav>
 
       {/* ── Main Content ──────────────────────────────────── */}
-      <main className="flex-1 md:ml-56 pt-14 md:pt-0 pb-20 md:pb-0 min-h-screen">
-        <div className="max-w-5xl mx-auto px-4 md:px-6 py-6 animate-fade-in">
+      <main className="flex-1 md:ml-56 pt-14 md:pt-0 pb-20 md:pb-0 min-h-screen overflow-x-hidden">
+        <div className="max-w-5xl mx-auto px-3 sm:px-4 md:px-6 py-6 animate-fade-in">
           {children}
         </div>
       </main>

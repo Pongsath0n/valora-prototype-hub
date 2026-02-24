@@ -10,11 +10,12 @@ import {
   formatSubmissionStatus,
   submissionStatusColor,
 } from "@/lib/format";
-import { LogOut, Filter, ExternalLink } from "lucide-react";
+import LogoBrand from "@/components/LogoBrand";
+import { LogOut, Filter, ExternalLink, Loader2 } from "lucide-react";
 import type { SubmissionStatus } from "@/features/billing/types";
 
 export default function ApprovalsListPage() {
-  useAdminGuard();
+  const { checking } = useAdminGuard();
   const navigate = useNavigate();
 
   const [statusFilter, setStatusFilter] = useState<SubmissionStatus | "ALL">("ALL");
@@ -25,10 +26,21 @@ export default function ApprovalsListPage() {
     [statusFilter, planFilter]
   );
 
-  const handleLogout = () => {
-    adminLogout();
+  const handleLogout = async () => {
+    await adminLogout();
     navigate("/admin/login");
   };
+
+  if (checking) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="flex items-center gap-2 text-muted-foreground text-sm">
+          <Loader2 className="w-4 h-4 animate-spin" />
+          กำลังตรวจสอบสิทธิ์...
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background">
@@ -36,9 +48,7 @@ export default function ApprovalsListPage() {
       <header className="border-b bg-card/80 sticky top-0 z-30">
         <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-7 h-7 rounded-lg bg-primary flex items-center justify-center">
-              <span className="text-primary-foreground font-bold text-xs">V</span>
-            </div>
+            <LogoBrand size="sm" iconOnly />
             <span className="font-bold text-foreground">Valora Admin</span>
             <span className="text-xs bg-muted text-muted-foreground px-2 py-0.5 rounded-full">
               Backoffice
@@ -46,7 +56,7 @@ export default function ApprovalsListPage() {
           </div>
           <button
             onClick={handleLogout}
-            className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+            className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
           >
             <LogOut className="w-4 h-4" /> ออกจากระบบ
           </button>
@@ -126,8 +136,7 @@ export default function ApprovalsListPage() {
                       {formatDateTime(submission.paid_at)}
                     </td>
                     <td className="py-3 text-foreground font-medium text-xs">
-                      {/* Demo: single user */}
-                      demo@valora.app
+                      {submission.user_email ?? "—"}
                     </td>
                     <td className="py-3 font-semibold">{formatPlanLabel(invoice.plan)}</td>
                     <td className="py-3 text-muted-foreground">{formatCycleLabel(invoice.billing_cycle)}</td>
@@ -158,7 +167,7 @@ export default function ApprovalsListPage() {
         </div>
 
         <p className="text-xs text-muted-foreground text-center">
-          ข้อมูลจัดเก็บในอุปกรณ์นี้เท่านั้น (prototype) — รีเฟรชหน้าเพื่อดูข้อมูลล่าสุด
+          Valora Admin Backoffice — ข้อมูลจาก Supabase
         </p>
       </div>
     </div>

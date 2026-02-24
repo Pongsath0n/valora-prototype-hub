@@ -7,18 +7,46 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+# Dependencies
 node_modules
+.pnp
+.pnp.js
+
+# Production / Build
 dist
 dist-ssr
-*.local
+build
+out
 
-# Editor directories and files
+# Environment files - NEVER commit real credentials
+.env
+.env.development
+.env.development.local
+.env.test.local
+.env.production.local
+.env.local
+.env.*.local
+*.env
+
+# Supabase
+supabase/.temp
+
+# OS Specific
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor / IDE
 .vscode/*
 !.vscode/extensions.json
+!.vscode/launch.json
+!.vscode/settings.json
 .idea
-.DS_Store
 *.suo
 *.ntvs*
 *.njsproj
 *.sln
 *.sw?
+
+# Testing
+coverage

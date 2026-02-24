@@ -15,6 +15,9 @@ export type SubmissionStatus =
   | "VERIFIED"
   | "REJECTED";
 
+/** Payment method used for gateway charges */
+export type PaymentMethod = "credit_card" | "promptpay" | "bank_transfer";
+
 /** Notification event types for the notifier stub */
 export type NotificationEvent =
   | "PAYMENT_SUBMITTED"
@@ -48,6 +51,8 @@ export interface Invoice {
 export interface PaymentSubmission {
   submission_id: string;
   invoice_id: string;
+  /** Email of the user who submitted this payment */
+  user_email?: string;
   /** THB amount the user claims to have paid */
   paid_amount: number;
   /** ISO date string of when user transferred */
@@ -58,7 +63,12 @@ export interface PaymentSubmission {
   admin_note: string | null;
   approved_by: string | null;
   approved_at: string | null;
+  /** Payment method used (default: bank_transfer for legacy submissions) */
+  payment_method?: PaymentMethod;
+  /** Gateway charge ID (e.g. chrg_test_xxx) — null for manual transfers */
+  gateway_charge_id?: string | null;
 }
+
 
 export interface PlanChangeRequest {
   request_id: string;

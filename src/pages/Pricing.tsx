@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
-import { useState } from "react";
+import LogoBrand from "@/components/LogoBrand";
+import { useState, useEffect } from "react";
 import { Check, Minus, ChevronDown, ChevronUp, ShieldCheck } from "lucide-react";
 
 // ─── Plan Definitions ──────────────────────────────────────────────────────────
@@ -143,7 +144,7 @@ const PDPA_SECTIONS = [
   },
   {
     title: "7. ช่องทางติดต่อ",
-    content: "หากมีข้อสงสัยหรือต้องการใช้สิทธิตามนโยบายนี้ กรุณาติดต่อ: privacy@valora.app (อีเมลตัวอย่าง — ยังไม่ใช่ที่อยู่จริง) หรือผ่านแบบฟอร์มติดต่อในแอปพลิเคชัน",
+    content: "หากมีข้อสงสัยหรือต้องการใช้สิทธิตามนโยบายนี้ กรุณาติดต่อ: pongsathon.officialwork@gmail.com หรือผ่านแบบฟอร์มติดต่อในแอปพลิเคชัน",
   },
 ];
 
@@ -201,6 +202,10 @@ function PDPAItem({ title, content }: { title: string; content: string }) {
 export default function PricingPage() {
   const [yearly, setYearly] = useState(false);
 
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, []);
+
   const price = (plan: typeof PLANS[0]) => {
     if (plan.monthlyPrice === 0) return "฿0";
     const p = yearly ? plan.yearlyPrice : plan.monthlyPrice;
@@ -218,11 +223,8 @@ export default function PricingPage() {
       {/* ── Nav ─────────────────────────────────────────────────────────────── */}
       <header className="border-b bg-card/80 backdrop-blur-sm sticky top-0 z-30">
         <div className="max-w-6xl mx-auto flex items-center justify-between px-4 py-3">
-          <Link to="/" className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
-              <span className="text-primary-foreground font-bold text-sm">V</span>
-            </div>
-            <span className="font-bold text-lg text-foreground">Valora</span>
+          <Link to="/" className="flex items-center">
+            <LogoBrand size="sm" />
           </Link>
           <Link
             to="/auth/login"
@@ -236,7 +238,10 @@ export default function PricingPage() {
       <div className="max-w-5xl mx-auto px-4 py-16 space-y-16">
         {/* ── A) Header ───────────────────────────────────────────────────────── */}
         <div className="text-center space-y-4">
-          <h1 className="text-3xl md:text-4xl font-bold text-foreground">
+          <h1
+            className="text-3xl md:text-4xl font-bold text-foreground"
+            style={{ lineHeight: 1.6, letterSpacing: '0.01em' }}
+          >
             เลือกแผนที่เหมาะกับร้านคุณ
           </h1>
           <p className="text-muted-foreground max-w-xl mx-auto">
@@ -281,14 +286,14 @@ export default function PricingPage() {
         </div>
 
         {/* ── C) Plan Cards ───────────────────────────────────────────────────── */}
-        <div className="grid md:grid-cols-3 gap-8">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6 md:gap-8">
           {PLANS.map((plan) => {
             const saved = savings(plan);
             return (
               <div
                 key={plan.id}
                 className={`stat-card flex flex-col relative transition-all hover:translate-y-[-4px] ${
-                  plan.highlighted ? "ring-2 ring-primary shadow-xl scale-105 z-10" : "hover:shadow-md"
+                  plan.highlighted ? "ring-2 ring-primary shadow-xl md:scale-105 z-10" : "hover:shadow-md"
                 }`}
               >
                 {plan.badge && (

@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- Background circle -->
+  <circle cx="32" cy="32" r="32" fill="#1b2b4b"/>
+  <!-- Teal horizontal line -->
+  <line x1="10" y1="32" x2="54" y2="32" stroke="#38bdf8" stroke-width="4" stroke-linecap="round"/>
+  <!-- V shape top-left arm -->
+  <polyline points="10,14 32,38 54,14" fill="none" stroke="#e8ecf4" stroke-width="7" stroke-linejoin="round" stroke-linecap="round"/>
+  <!-- V bottom tip -->
+  <polyline points="32,38 32,50" fill="none" stroke="#1b2b4b" stroke-width="0"/>
+</svg>

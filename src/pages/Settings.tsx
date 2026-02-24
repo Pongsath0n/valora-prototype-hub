@@ -1,58 +1,31 @@
 import AppLayout from "@/components/AppLayout";
 import { useState } from "react";
 import { Save, Info, CheckCircle2 } from "lucide-react";
-
-const SECTIONS = [
-  {
-    id: "shop",
-    title: "ข้อมูลร้าน",
-    subtitle: "ชื่อร้านและผู้ดูแลระบบ",
-    fields: [
-      { id: "name", label: "ชื่อร้าน", type: "text", value: "ร้านกาแฟบ้านสวน", readOnly: false },
-      { id: "email", label: "อีเมลผู้ดูแล", type: "email", value: "owner@bansuan.cafe", readOnly: true },
-    ],
-  },
-  {
-    id: "display",
-    title: "การแสดงผลตัวเลข",
-    subtitle: "มีผลต่อทุกหน้าและรายงานที่ดาวน์โหลด",
-    selects: [
-      {
-        id: "currency",
-        label: "สกุลเงิน",
-        options: [{ value: "THB", label: "บาท (฿)" }, { value: "USD", label: "US Dollar ($)" }],
-        defaultValue: "THB",
-      },
-      {
-        id: "decimal",
-        label: "ทศนิยม",
-        options: [
-          { value: "0", label: "ไม่มีทศนิยม (฿100)" },
-          { value: "1", label: "1 ตำแหน่ง (฿100.0)" },
-          { value: "2", label: "2 ตำแหน่ง (฿100.00)" },
-        ],
-        defaultValue: "1",
-      },
-    ],
-  },
-];
-
-const FORMULA_ROWS = [
-  { label: "ต้นทุนวัตถุดิบ", formula: "= ผลรวมของ (ปริมาณส่วนผสม × ราคาต่อหน่วย) ตามสูตรที่กำหนด" },
-  { label: "อัตรากำไรขั้นต้น", formula: "= (ราคาขาย − ต้นทุนวัตถุดิบ) / ราคาขาย × 100" },
-  { label: "รายได้สุทธิ (Delivery)", formula: "= รายได้ − (รายได้ × อัตราค่าคอมมิชชัน)" },
-];
+import { shopService } from "@/services/mockStorage";
+import { useAuth } from "@/contexts/AuthContext";
 
 export default function SettingsPage() {
-  const [shopName, setShopName] = useState("ร้านกาแฟบ้านสวน");
+  const { user } = useAuth();
+  const shop = shopService.get();
+
+  const [shopName, setShopName] = useState(shop.name);
+  const [daysOpen, setDaysOpen] = useState(shop.daysOpen);
+  const [targetProfit, setTargetProfit] = useState(shop.targetProfit);
   const [currency, setCurrency] = useState("THB");
   const [rounding, setRounding] = useState("1");
   const [saved, setSaved] = useState(false);
 
   const handleSave = () => {
+    shopService.set({ name: shopName, daysOpen, targetProfit });
     setSaved(true);
     setTimeout(() => setSaved(false), 2500);
   };
+
+  const FORMULA_ROWS = [
+    { label: "ต้นทุนวัตถุดิบ", formula: "= ผลรวมของ (ปริมาณส่วนผสม × ราคาต่อหน่วย) ตามสูตรที่กำหนด" },
+    { label: "อัตรากำไรขั้นต้น", formula: "= (ราคาขาย − ต้นทุนวัตถุดิบ) / ราคาขาย × 100" },
+    { label: "รายได้สุทธิ (Delivery)", formula: "= รายได้ − (รายได้ × อัตราค่าคอมมิชชัน)" },
+  ];
 
   return (
     <AppLayout>
@@ -89,14 +62,35 @@ export default function SettingsPage() {
             />
           </div>
           <div className="form-group">
+            <label className="form-label">จำนวนวันเปิดต่อเดือน</label>
+            <input
+              type="number"
+              value={daysOpen}
+              onChange={(e) => setDaysOpen(Number(e.target.value))}
+              min={1}
+              max={31}
+              className="form-input tabular-nums"
+            />
+          </div>
+          <div className="form-group">
+            <label className="form-label">เป้าหมายกำไร (฿/เดือน)</label>
+            <input
+              type="number"
+              value={targetProfit}
+              onChange={(e) => setTargetProfit(Number(e.target.value))}
+              min={0}
+              className="form-input tabular-nums"
+            />
+          </div>
+          <div className="form-group">
             <label className="form-label">อีเมลผู้ดูแล</label>
             <input
               type="email"
-              value="owner@bansuan.cafe"
+              value={user?.email ?? "-"}
               readOnly
               className="form-input bg-muted text-muted-foreground cursor-not-allowed"
             />
-            <p className="form-hint">อีเมลไม่สามารถเปลี่ยนแปลงได้ในตอนนี้</p>
+            <p className="form-hint">อีเมลเชื่อมกับบัญชี Supabase Auth ไม่สามารถเปลี่ยนที่นี่ได้</p>
           </div>
         </div>
 
