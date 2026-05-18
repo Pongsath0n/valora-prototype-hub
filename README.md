@@ -47,6 +47,9 @@ npm install
 ```env
 VITE_SUPABASE_URL=your_supabase_url
 VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
+VITE_LIFF_ENABLED=false
+VITE_LIFF_ID=your_liff_id
+VITE_LINE_CHANNEL_ACCESS_TOKEN=your_line_channel_access_token
 ```
 
 _(ดูตัวอย่างได้จากไฟล์ `.env.example`)_
@@ -70,3 +73,12 @@ npm run dev
 ## 📄 License
 
 Copyright © 2026 Valora Hub. All rights reserved.
+
+
+## LINE LIFF Environment
+
+- `VITE_LIFF_ENABLED`: set `true` to enable real LIFF runtime.
+- `VITE_LIFF_ID`: LIFF app ID from LINE Developers.
+- `VITE_LINE_CHANNEL_ACCESS_TOKEN`: Messaging API token (for server-side confirmation messaging integration).
+
+When LIFF is disabled or not configured, Valora uses mock LINE profile data for development.

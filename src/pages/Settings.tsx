@@ -1,22 +1,35 @@
 import AppLayout from "@/components/AppLayout";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Save, Info, CheckCircle2 } from "lucide-react";
-import { shopService } from "@/services/mockStorage";
+import { storeSetupService } from "@/features/store/storeService";
 import { useAuth } from "@/contexts/AuthContext";
 
 export default function SettingsPage() {
   const { user } = useAuth();
-  const shop = shopService.get();
-
-  const [shopName, setShopName] = useState(shop.name);
-  const [daysOpen, setDaysOpen] = useState(shop.daysOpen);
-  const [targetProfit, setTargetProfit] = useState(shop.targetProfit);
+  const [shopName, setShopName] = useState("Brewway");
+  const [daysOpen, setDaysOpen] = useState(26);
+  const [targetProfit, setTargetProfit] = useState(30000);
+  const [loading, setLoading] = useState(true);
   const [currency, setCurrency] = useState("THB");
   const [rounding, setRounding] = useState("1");
   const [saved, setSaved] = useState(false);
 
-  const handleSave = () => {
-    shopService.set({ name: shopName, daysOpen, targetProfit });
+  useEffect(() => {
+    let mounted = true;
+    storeSetupService.get().then((store) => {
+      if (!mounted) return;
+      setShopName(store.name);
+      setDaysOpen(store.daysOpen);
+      setTargetProfit(store.targetProfit);
+      setLoading(false);
+    });
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const handleSave = async () => {
+    await storeSetupService.save({ name: shopName, daysOpen, targetProfit });
     setSaved(true);
     setTimeout(() => setSaved(false), 2500);
   };
@@ -41,7 +54,7 @@ export default function SettingsPage() {
             className="flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-lg text-sm font-semibold hover:opacity-90 transition-opacity cursor-pointer"
           >
             {saved ? <CheckCircle2 className="w-4 h-4" /> : <Save className="w-4 h-4" />}
-            {saved ? "บันทึกแล้ว" : "บันทึกการตั้งค่า"}
+            {loading ? "กำลังโหลด..." : saved ? "บันทึกแล้ว" : "บันทึกการตั้งค่า"}
           </button>
         </div>
 

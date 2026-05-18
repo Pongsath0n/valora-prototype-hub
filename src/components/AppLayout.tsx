@@ -1,9 +1,13 @@
 import { NavLink } from "react-router-dom";
 import {
   LayoutDashboard,
-  FlaskConical,
-  Tags,
-  Truck,
+  Soup,
+  Package,
+  BookOpenCheck,
+  Store,
+  Calculator,
+  ShoppingCart,
+  ClipboardList,
   BarChart3,
   Settings,
   LogOut,
@@ -16,9 +20,13 @@ import LogoBrand from "@/components/LogoBrand";
 
 const mainNav = [
   { title: "แดชบอร์ด", path: "/app/dashboard", icon: LayoutDashboard },
-  { title: "จำลองสถานการณ์", path: "/app/scenario", icon: FlaskConical },
-  { title: "โปรโมชัน", path: "/app/promo", icon: Tags },
-  { title: "จัดส่ง", path: "/app/delivery", icon: Truck },
+  { title: "เมนู", path: "/app/menu", icon: Soup },
+  { title: "วัตถุดิบ", path: "/app/ingredients", icon: Package },
+  { title: "สูตรและต้นทุน", path: "/app/recipes", icon: BookOpenCheck },
+  { title: "ช่องทางขาย", path: "/app/channels", icon: Store },
+  { title: "ราคาตามช่องทาง", path: "/app/channel-pricing", icon: Calculator },
+  { title: "POS", path: "/app/pos", icon: ShoppingCart },
+  { title: "ออเดอร์", path: "/app/orders", icon: ClipboardList },
   { title: "รายงาน", path: "/app/reports", icon: BarChart3 },
 ];
 
@@ -29,9 +37,9 @@ const utilityNav = [
 
 const mobileNav = [
   { title: "หน้าหลัก", path: "/app/dashboard", icon: LayoutDashboard },
-  { title: "จำลอง", path: "/app/scenario", icon: FlaskConical },
-  { title: "รายงาน", path: "/app/reports", icon: BarChart3 },
-  { title: "โปรโมชัน", path: "/app/promo", icon: Tags },
+  { title: "เมนู", path: "/app/menu", icon: Soup },
+  { title: "POS", path: "/app/pos", icon: ShoppingCart },
+  { title: "ออเดอร์", path: "/app/orders", icon: ClipboardList },
   { title: "ตั้งค่า", path: "/app/settings", icon: Settings },
 ];
 
