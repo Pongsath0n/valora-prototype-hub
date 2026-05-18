@@ -1,229 +1,70 @@
+import { useEffect, useState, type ReactNode } from "react";
 import AppLayout from "@/components/AppLayout";
-import DataQualityBadge from "@/components/DataQualityBadge";
-import AssumptionsDrawer from "@/components/AssumptionsDrawer";
-import InputAudit from "@/components/InputAudit";
-import WarningAlert from "@/components/WarningAlert";
-import { Target, TrendingUp, Coffee, DollarSign, BarChart3, Info } from "lucide-react";
-import { shopService, fixedCostService, menuService } from "@/services/mockStorage";
-import { calcBusinessKPIs, calcMenuMetrics } from "@/services/calculationEngine";
-import { useMemo } from "react";
-import { dashboardMock } from "@/features/store/mockData";
 import DataTable from "@/components/shared/DataTable";
+import LoadingState from "@/components/shared/LoadingState";
 import StatusBadge from "@/components/shared/StatusBadge";
-
-const statusLabel = (s: string) => {
-  if (s === "good") return { text: "กำไรดี", cls: "status-badge-success" };
-  if (s === "caution") return { text: "ควรระวัง", cls: "status-badge-warning" };
-  return { text: "ขาดทุน", cls: "status-badge-danger" };
-};
-
-const KPI_ITEMS = (kpis: ReturnType<typeof calcBusinessKPIs>) => [
-  { label: "จุดคุ้มทุน", value: isFinite(kpis.bepCupsMonth) ? kpis.bepCupsMonth.toLocaleString() : "N/A", unit: "แก้ว/เดือน", icon: Coffee },
-  { label: "จุดคุ้มทุน", value: isFinite(kpis.bepCupsDay) ? kpis.bepCupsDay.toLocaleString() : "N/A", unit: "แก้ว/วัน", icon: Coffee },
-  { label: "ยอดขายเพื่อกำไรเป้า", value: isFinite(kpis.requiredRevenueDay) ? `฿${kpis.requiredRevenueDay.toLocaleString()}` : "N/A", unit: "บาท/วัน", icon: DollarSign },
-  { label: "กำไรสุทธิประมาณการ", value: isFinite(kpis.estNetProfit) ? `฿${kpis.estNetProfit.toLocaleString()}` : "N/A", unit: "บาท/เดือน", icon: TrendingUp },
-  { label: "กำไรขั้นต้นเฉลี่ย", value: `฿${kpis.weightedCM.toFixed(1)}`, unit: "บาท/แก้ว", icon: BarChart3 },
-];
+import { dashboardReportService } from "@/features/store/dashboardReportService";
 
 export default function DashboardPage() {
-  const shop = useMemo(() => shopService.get(), []);
-  const fixedCostsTotal = useMemo(() => fixedCostService.total(), []);
-  const menuRows = useMemo(() => menuService.get(), []);
-  const menuWithMetrics = useMemo(() => menuRows.map(calcMenuMetrics), [menuRows]);
-  const kpis = useMemo(
-    () => calcBusinessKPIs(fixedCostsTotal, shop.targetProfit, shop.daysOpen, menuRows),
-    [fixedCostsTotal, shop, menuRows]
-  );
-  const now = new Date().toLocaleString("th-TH", { dateStyle: "medium", timeStyle: "short" });
+  const [data, setData] = useState<any>(null);
+
+  useEffect(() => {
+    dashboardReportService.getDashboard().then(setData);
+  }, []);
+
+  if (!data) return <AppLayout><LoadingState /></AppLayout>;
+
+  const s = data.summary;
 
   return (
     <AppLayout>
-      <div className="space-y-6">
-        {/* ── Page Header ─────────────────────────────── */}
-        <div className="page-header">
-          <div>
-            <h1 className="page-title">แดชบอร์ด</h1>
-            <p className="page-subtitle">อัปเดตล่าสุด: {now}</p>
-          </div>
-          <DataQualityBadge level="estimated" lastChecked={now} />
+      <div className="space-y-5">
+        <h1 className="page-title">แดชบอร์ดผลประกอบการวันนี้</h1>
+
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+          <Card label="Orders today" value={`${s.ordersToday}`} />
+          <Card label="Sales today" value={`฿${s.salesToday.toFixed(2)}`} />
+          <Card label="Cost today" value={`฿${s.costToday.toFixed(2)}`} />
+          <Card label="Gross profit today" value={`฿${s.grossProfitToday.toFixed(2)}`} />
+          <Card label="Avg profit/cup" value={`฿${s.avgProfitPerCup.toFixed(2)}`} />
         </div>
 
-        {/* ── Daily Target Guidance ────────────────────── */}
-        <div className="guidance-card">
-          <div className="flex items-start gap-3">
-            <Target className="w-5 h-5 text-accent flex-shrink-0 mt-0.5" />
-            <div>
-              <p className="text-sm font-semibold text-foreground">
-                วันนี้คุณต้องขายประมาณ{" "}
-                <span className="text-accent">
-                  {isFinite(kpis.targetCupsDay) ? kpis.targetCupsDay : "N/A"} แก้ว/วัน
-                </span>{" "}
-                เพื่อให้ถึงกำไรเป้าหมาย
-              </p>
-              <p className="text-sm text-muted-foreground mt-1">
-                อิงจากเป้ากำไรสุทธิ ฿{shop.targetProfit.toLocaleString()}/เดือน
-                และค่าใช้จ่ายคงที่ ฿{fixedCostsTotal.toLocaleString()}/เดือน
-              </p>
-            </div>
-          </div>
+        <div className="grid md:grid-cols-3 gap-3">
+          <Card label="Best seller" value={s.bestSeller} />
+          <Card label="Most profitable menu" value={s.mostProfitableMenu} />
+          <Card label="Best channel" value={s.bestChannel} />
         </div>
-
-        {/* ── Warnings ─────────────────────────────────── */}
-        {kpis.mixSum !== 100 && (
-          <WarningAlert
-            type="warning"
-            title={`สัดส่วนยอดขาย (Mix%) รวมได้ ${kpis.mixSum}% ไม่เท่ากับ 100%`}
-            description="ผลลัพธ์อาจคลาดเคลื่อน แนะนำให้ปรับ Mix% ให้รวมเป็น 100%"
-            action={{ label: "ปรับใน Onboarding", onClick: () => window.location.href = "/onboarding" }}
-          />
-        )}
-        {(!isFinite(kpis.weightedCM) || kpis.weightedCM <= 0) && (
-          <WarningAlert
-            type="error"
-            title="กำไรขั้นต้นติดลบ — ราคาขายต่ำกว่าต้นทุน"
-            description="ไม่สามารถคำนวณจุดคุ้มทุนได้ กรุณาตรวจสอบราคาและต้นทุนในหน้าตั้งค่าเมนู"
-          />
-        )}
-
-
-        <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
-          <div className="kpi-card"><p className="metric-label">Orders today</p><p className="metric-value">{dashboardMock.ordersToday}</p></div>
-          <div className="kpi-card"><p className="metric-label">Sales today</p><p className="metric-value">฿{dashboardMock.salesToday.toLocaleString()}</p></div>
-          <div className="kpi-card"><p className="metric-label">Cost today</p><p className="metric-value">฿{dashboardMock.costToday.toLocaleString()}</p></div>
-          <div className="kpi-card"><p className="metric-label">Gross profit</p><p className="metric-value">฿{dashboardMock.grossProfitToday.toLocaleString()}</p></div>
-          <div className="kpi-card"><p className="metric-label">Avg profit/cup</p><p className="metric-value">฿{dashboardMock.avgProfitPerCup}</p></div>
-        </div>
-        <div className="grid md:grid-cols-3 gap-4">
-          <div className="stat-card"><p className="text-sm text-muted-foreground">Best seller</p><p className="text-lg font-semibold">{dashboardMock.bestSeller}</p></div>
-          <div className="stat-card"><p className="text-sm text-muted-foreground">Most profitable</p><p className="text-lg font-semibold">{dashboardMock.mostProfitable}</p></div>
-          <div className="stat-card"><p className="text-sm text-muted-foreground">Low stock alert</p><p className="text-lg font-semibold">{dashboardMock.lowStockCount} รายการ</p></div>
-        </div>
-
-        {/* ── KPI Cards ────────────────────────────────── */}
-        <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
-          {KPI_ITEMS(kpis).map((kpi, i) => (
-            <div key={i} className="kpi-card">
-              <kpi.icon className="w-4 h-4 text-accent mb-2" />
-              <p className="metric-label">{kpi.label}</p>
-              <p className="metric-value mt-1">{kpi.value}</p>
-              <p className="text-xs text-muted-foreground mt-0.5">{kpi.unit}</p>
-            </div>
-          ))}
-        </div>
-
-        {/* ── Input Audit ───────────────────────────────── */}
-        <InputAudit
-          lastUpdated={now}
-          rows={[
-            { label: "ชื่อร้าน", value: shop.name },
-            { label: "ค่าใช้จ่ายคงที่รวม", value: `฿${fixedCostsTotal.toLocaleString()}`, unit: "/เดือน" },
-            { label: "ราคาเฉลี่ยถ่วงน้ำหนัก", value: `฿${kpis.weightedPrice.toFixed(1)}`, unit: "/แก้ว" },
-            { label: "ต้นทุนเฉลี่ยถ่วงน้ำหนัก", value: `฿${kpis.weightedCost.toFixed(1)}`, unit: "/แก้ว" },
-            { label: "สัดส่วนยอดขาย (Mix%) รวม", value: `${kpis.mixSum}%` },
-            { label: "จำนวนวันเปิดขาย", value: `${shop.daysOpen}`, unit: "วัน/เดือน" },
-            { label: "เป้ากำไรสุทธิ", value: `฿${shop.targetProfit.toLocaleString()}`, unit: "/เดือน" },
-          ]}
-        />
-
-        {/* ── Menu Metrics Table ────────────────────────── */}
-        <div className="stat-card overflow-x-auto">
-          <div className="panel-header">
-            <h2 className="section-title">ตัวชี้วัดรายเมนู</h2>
-            <DataQualityBadge level="estimated" lastChecked={now} />
-          </div>
-          <table className="data-table min-w-[680px]">
-            <thead>
-              <tr>
-                <th>เมนู</th>
-                <th className="text-right">ราคา (฿)</th>
-                <th className="text-right">ต้นทุน/แก้ว (฿)</th>
-                <th className="text-right">กำไรขั้นต้น/แก้ว (฿)</th>
-                <th className="text-right">CM%</th>
-                <th className="text-right">Mix%</th>
-                <th className="text-center">สถานะ</th>
-              </tr>
-            </thead>
-            <tbody>
-              {menuWithMetrics.map((m, i) => {
-                const st = statusLabel(m.status);
-                return (
-                  <tr key={i}>
-                    <td className="text-foreground font-medium">{m.name}</td>
-                    <td className="text-right tabular-nums">{m.price.toFixed(0)}</td>
-                    <td className="text-right tabular-nums">{m.totalCost.toFixed(1)}</td>
-                    <td className="text-right tabular-nums font-medium">{m.grossProfit.toFixed(1)}</td>
-                    <td className="text-right tabular-nums">{m.cmPercent.toFixed(1)}%</td>
-                    <td className="text-right tabular-nums">{m.mix}%</td>
-                    <td className="text-center">
-                      <span className={`status-badge ${st.cls}`}>{st.text}</span>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-            <tfoot>
-              <tr className="border-t font-semibold text-foreground">
-                <td className="pt-3">เฉลี่ยถ่วงน้ำหนัก</td>
-                <td className="pt-3 text-right tabular-nums">{kpis.weightedPrice.toFixed(1)}</td>
-                <td className="pt-3 text-right tabular-nums">{kpis.weightedCost.toFixed(1)}</td>
-                <td className="pt-3 text-right tabular-nums">{kpis.weightedCM.toFixed(1)}</td>
-                <td className="pt-3 text-right tabular-nums">
-                  {kpis.weightedPrice > 0 ? ((kpis.weightedCM / kpis.weightedPrice) * 100).toFixed(1) : "N/A"}%
-                </td>
-                <td className="pt-3 text-right tabular-nums">{kpis.mixSum}%</td>
-                <td />
-              </tr>
-            </tfoot>
-          </table>
-          <div className="mt-3 pt-3 border-t flex items-start gap-2 text-xs text-muted-foreground">
-            <Info className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
-            <span>
-              CM% = กำไรขั้นต้น / ราคาขาย × 100 &nbsp;|&nbsp;
-              สถานะ: กำไรดี (CM% ≥ 40%), ควรระวัง (CM% &lt; 40%), ขาดทุน (กำไรขั้นต้น ≤ 0)
-            </span>
-          </div>
-        </div>
-
-        {/* ── Methodology ──────────────────────────────── */}
-        <AssumptionsDrawer
-          inputSources={[
-            "ค่าใช้จ่ายคงที่รายเดือน (กรอกในหน้า Onboarding → ค่าใช้จ่ายคงที่)",
-            "ราคาขายและต้นทุนวัตถุดิบต่อแก้ว (กรอกในหน้า Onboarding → เมนูและต้นทุน)",
-            "สัดส่วนยอดขาย (Mix%) แต่ละเมนู (กรอกในหน้า Onboarding → เมนูและต้นทุน)",
-            "จำนวนวันเปิดขายต่อเดือน (กรอกในหน้า Onboarding → ข้อมูลร้าน)",
-          ]}
-          formulas={[
-            { label: "กำไรขั้นต้นถ่วงน้ำหนัก (Weighted CM)", formula: "= ผลรวมของ (กำไรขั้นต้น/แก้ว × Mix%) ทุกเมนู" },
-            { label: "จุดคุ้มทุน (แก้ว/เดือน)", formula: "= ค่าใช้จ่ายคงที่รวม / กำไรขั้นต้นถ่วงน้ำหนัก" },
-            { label: "จุดคุ้มทุน (แก้ว/วัน)", formula: "= จุดคุ้มทุน (แก้ว/เดือน) / จำนวนวันเปิดขาย" },
-            { label: "ยอดขายเพื่อกำไรเป้า (บาท/วัน)", formula: "= (ค่าใช้จ่ายคงที่ + เป้ากำไร) / Weighted CM / วันเปิดขาย × ราคาเฉลี่ยถ่วงน้ำหนัก" },
-            { label: "กำไรสุทธิประมาณการ", formula: "= (แก้วเป้า/วัน × วันเปิดขาย × Weighted CM) - ค่าใช้จ่ายคงที่" },
-          ]}
-          assumptions={[
-            { text: "ค่าใช้จ่ายคงที่เป็นค่าใช้จ่ายรายเดือนที่ไม่เปลี่ยนแปลงตามยอดขาย" },
-            { text: "สัดส่วนยอดขาย (Mix%) เป็นค่าประมาณการ อาจแตกต่างจากยอดขายจริง" },
-            { text: "ต้นทุนต่อแก้วยังไม่รวมค่าแรงผลิต ค่าน้ำ ค่าไฟ ที่ใช้ต่อแก้ว" },
-            { text: "กำไรสุทธิไม่รวมภาษีและค่าใช้จ่ายพิเศษอื่นๆ" },
-          ]}
-        />
-
 
         <div className="grid lg:grid-cols-2 gap-4">
-          <div className="stat-card">
-            <h2 className="section-title mb-3">Recent orders</h2>
-            <DataTable columns={[{key:"no",header:"Order"},{key:"channel",header:"Channel"},{key:"amount",header:"Amount"},{key:"status",header:"Status",render:(r)=> <StatusBadge label={String(r.status)} tone="info"/>}]} rows={dashboardMock.recentOrders} />
-          </div>
-          <div className="stat-card">
-            <h2 className="section-title mb-3">Sales by channel</h2>
-            <DataTable columns={[{key:"name",header:"Channel"},{key:"sales",header:"Sales"},{key:"profit",header:"Profit"}]} rows={dashboardMock.salesByChannel} />
-          </div>
+          <Section title="Best-selling menu table">
+            <DataTable columns={[{ key: "menuName", header: "Menu" }, { key: "qty", header: "Qty" }, { key: "sales", header: "Sales" }]} rows={data.byMenu} />
+          </Section>
+          <Section title="Profit by menu table">
+            <DataTable columns={[{ key: "menuName", header: "Menu" }, { key: "profit", header: "Profit" }, { key: "sales", header: "Sales" }]} rows={data.byProfitMenu} />
+          </Section>
         </div>
 
-        {/* ── Footer ───────────────────────────────────── */}
-        <p className="text-center text-xs text-muted-foreground pt-4 border-t">
-          ข้อมูลนี้เป็นแบบจำลองเพื่อการวางแผน โปรดตรวจสอบต้นทุนจริงเป็นระยะ
-        </p>
+        <div className="grid lg:grid-cols-2 gap-4">
+          <Section title="Sales by channel / Profit by channel">
+            <DataTable columns={[{ key: "channel", header: "Channel" }, { key: "orders", header: "Orders" }, { key: "sales", header: "Sales" }, { key: "profit", header: "Profit" }]} rows={data.byChannel} />
+          </Section>
+          <Section title="Low stock alert">
+            <DataTable columns={[{ key: "name", header: "Ingredient" }, { key: "currentStock", header: "Current" }, { key: "lowStockThreshold", header: "Threshold" }, { key: "status", header: "Status", render: () => <StatusBadge label="LOW" tone="warning" /> }]} rows={data.lowStock} />
+          </Section>
+        </div>
+
+        <Section title="Recent orders table">
+          <DataTable columns={[{ key: "id", header: "Order" }, { key: "channelName", header: "Channel" }, { key: "totalAmount", header: "Sales" }, { key: "grossProfit", header: "Profit" }, { key: "status", header: "Status", render: (r) => <StatusBadge label={r.status} tone="info" /> }]} rows={data.recentOrders} />
+        </Section>
       </div>
     </AppLayout>
   );
+}
+
+function Card({ label, value }: { label: string; value: string }) {
+  return <div className="kpi-card"><p className="metric-label">{label}</p><p className="metric-value">{value}</p></div>;
+}
+
+function Section({ title, children }: { title: string; children: ReactNode }) {
+  return <div className="stat-card"><h2 className="section-title mb-3">{title}</h2>{children}</div>;
 }
