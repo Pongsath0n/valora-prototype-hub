@@ -9,7 +9,6 @@ import {
   formatTHB,
   formatDateTime,
   formatPlanLabel,
-  formatCycleLabel,
 } from "@/lib/format";
 import {
   ArrowLeft,
@@ -87,14 +86,14 @@ export default function CheckoutPage() {
           <div className="space-y-2">
             <h1 className="text-2xl font-bold text-foreground">แจ้งชำระเงินสำเร็จ</h1>
             <p className="text-muted-foreground">
-              เราได้รับข้อมูลการชำระเงินของคุณแล้ว ทีมงานจะทำการตรวจสอบและเริ่มใช้งานแผนของคุณภายใน 1 วันทำการ
+              เราได้รับข้อมูลการชำระเงินของคุณแล้ว ทีมงานจะทำการตรวจสอบและเปิดใช้งานแพ็กเกจของคุณภายใน 1 วันทำการ
             </p>
           </div>
           <Link
             to="/app/billing"
             className="block w-full bg-primary text-primary-foreground py-3 rounded-lg font-semibold hover:opacity-90 transition-opacity"
           >
-            ไปที่หน้าการสมัครสมาชิก
+            ไปที่หน้าแพ็กเกจ
           </Link>
         </div>
       </AppLayout>
@@ -174,8 +173,8 @@ export default function CheckoutPage() {
               <h2 className="font-bold text-foreground mb-4">สรุปใบแจ้งหนี้</h2>
               <dl className="space-y-2 text-sm">
                 <div className="flex justify-between">
-                  <dt className="text-muted-foreground">แผน</dt>
-                  <dd className="font-semibold">{formatPlanLabel(invoice.plan)} ({formatCycleLabel(invoice.billing_cycle)})</dd>
+                  <dt className="text-muted-foreground">แพ็กเกจ</dt>
+                  <dd className="font-semibold">{formatPlanLabel(invoice.plan)}</dd>
                 </div>
                 <div className="flex justify-between">
                   <dt className="text-muted-foreground">สถานะ</dt>

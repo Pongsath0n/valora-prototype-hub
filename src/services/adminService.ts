@@ -58,31 +58,15 @@ export function getApprovalRow(submissionId: string): ApprovalRow | null {
   return { submission: sub, invoice, userPlan };
 }
 
-// ─── Active Until Calculator ──────────────────────────────────────────────────
-
-function calcActiveUntil(cycle: "monthly" | "yearly"): string {
-  const now = new Date();
-  if (cycle === "yearly") {
-    now.setFullYear(now.getFullYear() + 1);
-  } else {
-    now.setDate(now.getDate() + 30);
-  }
-  return now.toISOString();
-}
-
 // ─── Atomic Approval ──────────────────────────────────────────────────────────
 
 /**
- * Approves a payment submission and activates the user's plan.
- *
- * This function MUST update both PaymentSubmission and UserPlan atomically.
- * In a real backend this would be a database transaction.
- * In this mock, we write both in sequence and consider it "atomic" for prototype purposes.
+ * Approves a payment submission and activates the user's plan (one-time purchase).
  *
  * Steps:
  * 1. Mark submission as VERIFIED
  * 2. Mark invoice as PAID
- * 3. Update UserPlan to ACTIVE with calculated active_until
+ * 3. Update UserPlan to ACTIVE with purchased_at timestamp
  * 4. Fire PAYMENT_VERIFIED notification
  */
 export function approvePayment(
@@ -112,13 +96,12 @@ export function approvePayment(
   const updatedInvoice: Invoice = { ...row.invoice, status: "PAID" };
   invoiceService.update(updatedInvoice);
 
-  // 3. Activate user plan (atomic with steps above in mock context)
+  // 3. Activate user plan (one-time purchase — no expiry)
   const updatedPlan: UserPlan = {
     ...row.userPlan,
     current_plan: row.invoice.plan,
-    billing_cycle: row.invoice.billing_cycle,
     status: "ACTIVE",
-    active_until: calcActiveUntil(row.invoice.billing_cycle),
+    purchased_at: now,
   };
   userPlanService.set(updatedPlan);
 

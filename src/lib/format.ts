@@ -90,7 +90,6 @@ const PLAN_STATUS_LABELS: Record<string, string> = {
   FREE: "แผนฟรี",
   PENDING: "รอการตรวจสอบ",
   ACTIVE: "ใช้งานอยู่",
-  EXPIRED: "หมดอายุ",
 };
 
 const PLAN_LABELS: Record<string, string> = {
@@ -99,10 +98,7 @@ const PLAN_LABELS: Record<string, string> = {
   pro: "Pro",
 };
 
-const CYCLE_LABELS: Record<string, string> = {
-  monthly: "รายเดือน",
-  yearly: "รายปี",
-};
+
 
 export function formatSubmissionStatus(status: string): string {
   return SUBMISSION_STATUS_LABELS[status] ?? status;
@@ -120,10 +116,6 @@ export function formatPlanLabel(plan: string): string {
   return PLAN_LABELS[plan] ?? plan;
 }
 
-export function formatCycleLabel(cycle: string): string {
-  return CYCLE_LABELS[cycle] ?? cycle;
-}
-
 /** Status badge color class mapping */
 export function submissionStatusColor(status: string): string {
   const map: Record<string, string> = {
@@ -139,7 +131,6 @@ export function planStatusColor(status: string): string {
     FREE: "bg-muted text-muted-foreground",
     PENDING: "bg-warning/15 text-warning",
     ACTIVE: "bg-success/15 text-success",
-    EXPIRED: "bg-destructive/15 text-destructive",
   };
   return map[status] ?? "bg-muted text-muted-foreground";
 }

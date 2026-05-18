@@ -6,7 +6,6 @@ import {
   formatTHB,
   formatDateTime,
   formatPlanLabel,
-  formatCycleLabel,
   formatSubmissionStatus,
   submissionStatusColor,
 } from "@/lib/format";
@@ -90,13 +89,13 @@ export default function ApprovalsListPage() {
               </select>
             </div>
             <div className="flex items-center gap-2">
-              <label className="text-sm font-medium text-foreground">แผน:</label>
+              <label className="text-sm font-medium text-foreground">แพ็กเกจ:</label>
               <select
                 value={planFilter}
                 onChange={(e) => setPlanFilter(e.target.value)}
                 className="px-3 py-1.5 rounded-lg border bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-ring"
               >
-                <option value="ALL">ทุกแผน</option>
+                <option value="ALL">ทุกแพ็กเกจ</option>
                 <option value="starter">Starter</option>
                 <option value="pro">Pro</option>
               </select>
@@ -121,8 +120,7 @@ export default function ApprovalsListPage() {
                 <tr>
                   <th>วันที่แจ้ง</th>
                   <th>ผู้ใช้ (email)</th>
-                  <th>แผน</th>
-                  <th>รอบ</th>
+                  <th>แพ็กเกจ</th>
                   <th className="text-right">ยอด (THB)</th>
                   <th>Ref Code</th>
                   <th>สถานะ</th>
@@ -139,7 +137,6 @@ export default function ApprovalsListPage() {
                       {submission.user_email ?? "—"}
                     </td>
                     <td className="py-3 font-semibold">{formatPlanLabel(invoice.plan)}</td>
-                    <td className="py-3 text-muted-foreground">{formatCycleLabel(invoice.billing_cycle)}</td>
                     <td className="py-3 text-right tabular-nums font-medium">
                       {formatTHB(submission.paid_amount)}
                     </td>

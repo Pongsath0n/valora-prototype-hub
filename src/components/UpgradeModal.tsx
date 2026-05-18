@@ -89,8 +89,8 @@ const TRIGGER_CONFIG: Record<UpgradeTrigger, TriggerConfig> = {
 };
 
 const PLAN_LABELS: Record<"starter" | "pro", { name: string; price: string }> = {
-  starter: { name: "Starter", price: "฿199/เดือน" },
-  pro: { name: "Pro", price: "฿499/เดือน" },
+  starter: { name: "Starter", price: "฿590" },
+  pro: { name: "Pro", price: "฿1,490" },
 };
 
 // ─── Component ──────────────────────────────────────────────────────────────
@@ -164,14 +164,14 @@ export default function UpgradeModal({ trigger, onClose }: UpgradeModalProps) {
           {/* Suggested plan */}
           <div className="border rounded-lg px-4 py-3 flex items-center justify-between">
             <div>
-              <p className="text-sm font-semibold text-foreground">แผน {plan.name}</p>
+              <p className="text-sm font-semibold text-foreground">แพ็กเกจ {plan.name}</p>
               <p className="text-xs text-muted-foreground mt-0.5">
                 เปิดใช้งานฟีเจอร์นี้ได้ทันที
               </p>
             </div>
             <div className="text-right">
               <p className="text-sm font-bold text-foreground tabular-nums">{plan.price}</p>
-              <p className="text-xs text-muted-foreground">+ VAT 7%</p>
+              <p className="text-xs text-muted-foreground">ครั้งเดียว + VAT 7%</p>
             </div>
           </div>
         </div>
@@ -183,7 +183,7 @@ export default function UpgradeModal({ trigger, onClose }: UpgradeModalProps) {
             onClick={onClose}
             className="block text-center py-2.5 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:opacity-90 transition-opacity"
           >
-            ดูแผนและอัปเกรด
+            ดูแพ็กเกจและซื้อ
           </Link>
           <button
             onClick={onClose}
@@ -192,7 +192,7 @@ export default function UpgradeModal({ trigger, onClose }: UpgradeModalProps) {
             ใช้แผน Free ต่อ
           </button>
           <p className="text-center text-xs text-muted-foreground">
-            ยกเลิกได้ทุกเมื่อ — ไม่ต้องผูกมัดระยะยาว
+            ชำระครั้งเดียว — ใช้งานได้ตลอดไป
           </p>
         </div>
       </div>

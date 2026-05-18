@@ -3,7 +3,6 @@ import type {
   Invoice,
   PaymentSubmission,
   PlanId,
-  BillingCycle,
 } from "@/features/billing/types";
 
 // ─── Storage Keys ─────────────────────────────────────────────────────────────
@@ -11,11 +10,11 @@ const KEY_USER_PLAN = "valora:user_plan";
 const KEY_INVOICES = "valora:invoices";
 const KEY_SUBMISSIONS = "valora:submissions";
 
-// ─── Plan Pricing ─────────────────────────────────────────────────────────────
-export const PLAN_PRICES: Record<PlanId, Record<BillingCycle, number>> = {
-  free: { monthly: 0, yearly: 0 },
-  starter: { monthly: 199, yearly: 159 },
-  pro: { monthly: 499, yearly: 399 },
+// ─── Plan Pricing (one-time purchase) ─────────────────────────────────────────
+export const PLAN_PRICES: Record<PlanId, number> = {
+  free: 0,
+  starter: 590,
+  pro: 1490,
 };
 
 // ─── Demo Seed Data ───────────────────────────────────────────────────────────
@@ -25,9 +24,8 @@ const DEMO_EMAIL = "demo@valora.app";
 const SEED_USER_PLAN: UserPlan = {
   user_id: DEMO_USER_ID,
   current_plan: "free",
-  billing_cycle: "monthly",
   status: "FREE",
-  active_until: null,
+  purchased_at: null,
 };
 
 const SEED_INVOICES: Invoice[] = [
@@ -35,8 +33,7 @@ const SEED_INVOICES: Invoice[] = [
     invoice_id: "INV-001",
     user_id: DEMO_USER_ID,
     plan: "starter",
-    billing_cycle: "monthly",
-    amount: 199,
+    amount: 590,
     reference_code: "VAL-20250223-4821",
     status: "UNPAID",
     created_at: "2026-02-23T06:00:00.000Z",
@@ -45,8 +42,7 @@ const SEED_INVOICES: Invoice[] = [
     invoice_id: "INV-002",
     user_id: DEMO_USER_ID,
     plan: "pro",
-    billing_cycle: "yearly",
-    amount: 399 * 12,
+    amount: 1490,
     reference_code: "VAL-20250210-7734",
     status: "PAID",
     created_at: "2026-02-10T09:00:00.000Z",
@@ -57,7 +53,7 @@ const SEED_SUBMISSIONS: PaymentSubmission[] = [
   {
     submission_id: "SUB-001",
     invoice_id: "INV-001",
-    paid_amount: 199,
+    paid_amount: 590,
     paid_at: "2026-02-23T08:30:00.000Z",
     proof_url: null,
     status: "PAYMENT_SUBMITTED",
@@ -68,7 +64,7 @@ const SEED_SUBMISSIONS: PaymentSubmission[] = [
   {
     submission_id: "SUB-002",
     invoice_id: "INV-002",
-    paid_amount: 4788,
+    paid_amount: 1490,
     paid_at: "2026-02-10T12:00:00.000Z",
     proof_url: null,
     status: "VERIFIED",
@@ -140,14 +136,13 @@ export const invoiceService = {
     return this.getAll().filter((inv) => inv.user_id === userId);
   },
 
-  /** Create a new UNPAID invoice for a plan upgrade */
-  create(plan: PlanId, cycle: BillingCycle): Invoice {
-    const amount = PLAN_PRICES[plan][cycle] * (cycle === "yearly" ? 12 : 1);
+  /** Create a new UNPAID invoice for a one-time plan purchase */
+  create(plan: PlanId): Invoice {
+    const amount = PLAN_PRICES[plan];
     const invoice: Invoice = {
       invoice_id: genId("INV"),
       user_id: userPlanService.getUserId(),
       plan,
-      billing_cycle: cycle,
       amount,
       reference_code: genRefCode(),
       status: "UNPAID",

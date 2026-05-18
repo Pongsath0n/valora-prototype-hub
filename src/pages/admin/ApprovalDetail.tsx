@@ -7,7 +7,6 @@ import {
   formatTHB,
   formatDateTime,
   formatPlanLabel,
-  formatCycleLabel,
   formatSubmissionStatus,
   submissionStatusColor,
   formatInvoiceStatus,
@@ -63,8 +62,7 @@ export default function ApprovalDetailPage() {
   }
 
   const { submission, invoice } = row;
-  const expectedAmount = PLAN_PRICES[invoice.plan][invoice.billing_cycle] *
-    (invoice.billing_cycle === "yearly" ? 12 : 1);
+  const expectedAmount = PLAN_PRICES[invoice.plan];
   const isPending = submission.status === "PAYMENT_SUBMITTED";
 
   const handleVerify = () => {
@@ -132,12 +130,8 @@ export default function ApprovalDetailPage() {
                   <dd className="font-mono text-foreground">{invoice.invoice_id}</dd>
                 </div>
                 <div className="flex justify-between">
-                  <dt className="text-muted-foreground">แผน</dt>
+                  <dt className="text-muted-foreground">แพ็กเกจ</dt>
                   <dd className="font-semibold text-foreground">{formatPlanLabel(invoice.plan)}</dd>
-                </div>
-                <div className="flex justify-between">
-                  <dt className="text-muted-foreground">รอบชำระ</dt>
-                  <dd className="text-foreground">{formatCycleLabel(invoice.billing_cycle)}</dd>
                 </div>
                 <div className="flex justify-between">
                   <dt className="text-muted-foreground">ยอดที่คาดว่าจะชำระ</dt>

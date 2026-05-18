@@ -1,10 +1,9 @@
 // ─── Plan & Billing Domain Types ──────────────────────────────────────────────
 
 export type PlanId = "free" | "starter" | "pro";
-export type BillingCycle = "monthly" | "yearly";
 
-/** Overall subscription status for the user */
-export type PlanStatus = "FREE" | "PENDING" | "ACTIVE" | "EXPIRED";
+/** Overall purchase status for the user */
+export type PlanStatus = "FREE" | "PENDING" | "ACTIVE";
 
 /** Invoice payment status */
 export type InvoiceStatus = "UNPAID" | "PAID" | "EXPIRED";
@@ -29,18 +28,16 @@ export type NotificationEvent =
 export interface UserPlan {
   user_id: string;
   current_plan: PlanId;
-  billing_cycle: BillingCycle;
   status: PlanStatus;
-  /** ISO 8601 date string — null for FREE / PENDING plans */
-  active_until: string | null;
+  /** ISO 8601 date string when the purchase was activated — null for FREE / PENDING */
+  purchased_at: string | null;
 }
 
 export interface Invoice {
   invoice_id: string;
   user_id: string;
   plan: PlanId;
-  billing_cycle: BillingCycle;
-  /** THB amount before VAT */
+  /** THB amount before VAT (one-time) */
   amount: number;
   /** Unique reference code user quotes when transferring */
   reference_code: string;
@@ -74,7 +71,6 @@ export interface PlanChangeRequest {
   request_id: string;
   user_id: string;
   plan: PlanId;
-  cycle: BillingCycle;
   invoice_id: string;
   status: "PENDING" | "APPROVED" | "REJECTED";
   created_at: string;

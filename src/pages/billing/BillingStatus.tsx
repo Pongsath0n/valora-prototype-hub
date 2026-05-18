@@ -9,11 +9,8 @@ import {
 } from "@/services/billingService";
 import {
   formatTHB,
-  formatDate,
   formatDateTime,
-  daysRemaining,
   formatPlanLabel,
-  formatCycleLabel,
   formatPlanStatus,
   formatSubmissionStatus,
   planStatusColor,
@@ -34,9 +31,7 @@ export default function BillingStatusPage() {
     [latestInvoice]
   );
 
-  const monthlyEquiv = userPlan.current_plan === "free"
-    ? 0
-    : PLAN_PRICES[userPlan.current_plan][userPlan.billing_cycle];
+  const planPrice = PLAN_PRICES[userPlan.current_plan];
 
   return (
     <AppLayout>
@@ -44,14 +39,14 @@ export default function BillingStatusPage() {
         {/* ── Page Header ─────────────────────────────── */}
         <div className="page-header">
           <div>
-            <h1 className="page-title">การสมัครและการชำระเงิน</h1>
-            <p className="page-subtitle">ดูสถานะแผนและประวัติการชำระเงินของคุณ</p>
+            <h1 className="page-title">แพ็กเกจและการชำระเงิน</h1>
+            <p className="page-subtitle">ดูสถานะแพ็กเกจและประวัติการชำระเงินของคุณ</p>
           </div>
           <Link
             to="/pricing"
             className="flex items-center gap-1.5 bg-secondary text-secondary-foreground px-4 py-2 rounded-lg text-sm font-medium hover:bg-secondary/80 transition-colors"
           >
-            <RefreshCw className="w-4 h-4" /> เปลี่ยนแผน
+            <RefreshCw className="w-4 h-4" /> เปลี่ยนแพ็กเกจ
           </Link>
         </div>
 
@@ -59,7 +54,7 @@ export default function BillingStatusPage() {
         <div className="stat-card">
           <div className="flex items-start justify-between flex-wrap gap-4">
             <div className="space-y-1">
-              <p className="text-sm text-muted-foreground font-medium">แผนปัจจุบัน</p>
+              <p className="text-sm text-muted-foreground font-medium">แพ็กเกจปัจจุบัน</p>
               <div className="flex items-center gap-3">
                 <span className="text-3xl font-bold text-foreground">
                   {formatPlanLabel(userPlan.current_plan)}
@@ -70,23 +65,14 @@ export default function BillingStatusPage() {
               </div>
               {userPlan.current_plan !== "free" && (
                 <p className="text-sm text-muted-foreground">
-                  {formatCycleLabel(userPlan.billing_cycle)} — {formatTHB(monthlyEquiv)}/เดือน
+                  ซื้อขาด — {formatTHB(planPrice)}
                 </p>
               )}
             </div>
 
             <div className="text-right space-y-1">
-              {userPlan.active_until ? (
-                <>
-                  <p className="text-sm text-muted-foreground">ใช้งานถึง</p>
-                  <p className="font-semibold text-foreground tabular-nums">
-                    {formatDate(userPlan.active_until)}
-                  </p>
-                  <p className="text-xs text-muted-foreground">{daysRemaining(userPlan.active_until)}</p>
-                </>
-              ) : (
-                <p className="text-sm text-muted-foreground">ไม่มีวันหมดอายุ</p>
-              )}
+              <p className="text-sm text-muted-foreground">ไม่มีวันหมดอายุ</p>
+              <p className="text-xs text-success font-semibold">ใช้งานได้ตลอดไป</p>
             </div>
           </div>
 
@@ -125,9 +111,9 @@ export default function BillingStatusPage() {
                 className="flex items-center justify-between bg-accent/10 border border-accent/20 rounded-lg px-4 py-3 hover:bg-accent/15 transition-colors group"
               >
                 <div>
-                  <p className="text-sm font-semibold text-foreground">อัปเกรดเป็น Starter</p>
+                  <p className="text-sm font-semibold text-foreground">ซื้อแพ็กเกจ Starter</p>
                   <p className="text-xs text-muted-foreground mt-0.5">
-                    เปิดใช้งานเมนู 30 รายการ + ส่งออก PDF/PNG เริ่มต้น {formatTHB(199)}/เดือน
+                    เปิดใช้งานเมนู 30 รายการ + ส่งออก PDF/PNG เพียง {formatTHB(590)} ครั้งเดียว
                   </p>
                 </div>
                 <ArrowRight className="w-4 h-4 text-accent group-hover:translate-x-1 transition-transform" />
@@ -149,7 +135,7 @@ export default function BillingStatusPage() {
                 <dd className="font-mono text-foreground text-xs mt-1">{latestInvoice.invoice_id}</dd>
               </div>
               <div>
-                <dt className="metric-label">แผน</dt>
+                <dt className="metric-label">แพ็กเกจ</dt>
                 <dd className="font-semibold text-foreground mt-1">{formatPlanLabel(latestInvoice.plan)}</dd>
               </div>
               <div>

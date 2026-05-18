@@ -1,15 +1,14 @@
 import { Link } from "react-router-dom";
 import LogoBrand from "@/components/LogoBrand";
-import { useState, useEffect } from "react";
-import { Check, Minus, ChevronDown, ChevronUp, ShieldCheck } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Check, Minus, ChevronDown, ChevronUp, ShieldCheck, Sparkles } from "lucide-react";
 
 // ─── Plan Definitions ──────────────────────────────────────────────────────────
 const PLANS = [
   {
     id: "free",
     name: "Free",
-    monthlyPrice: 0,
-    yearlyPrice: 0,
+    price: 0,
     audience: "เหมาะสำหรับร้านที่เพิ่งเริ่มต้น หรือต้องการทดลองใช้งาน",
     features: [
       "เมนูสูงสุด 10 รายการ",
@@ -28,8 +27,7 @@ const PLANS = [
   {
     id: "starter",
     name: "Starter",
-    monthlyPrice: 199,
-    yearlyPrice: 159,
+    price: 590,
     audience: "เหมาะสำหรับร้านที่ต้องการวิเคราะห์โปรโมชันและช่องทางจัดส่ง",
     features: [
       "เมนูสูงสุด 30 รายการ",
@@ -41,17 +39,16 @@ const PLANS = [
       "หน่วยมาตรฐาน: ฿/แก้ว, แก้ว/วัน, %",
     ],
     notIncluded: ["สถานการณ์ไม่จำกัด", "โปรโมชันซื้อ 1 แถม 1 / คูปอง", "แชร์ลิงก์รายงาน"],
-    cta: "เลือกแผน Starter",
+    cta: "ซื้อแพ็กเกจ Starter",
     ctaLink: "/auth/login",
-    microcopy: "ยกเลิกได้ทุกเมื่อ",
+    microcopy: "ชำระครั้งเดียว ใช้ได้ตลอดไป",
     highlighted: true,
     badge: "แนะนำ",
   },
   {
     id: "pro",
     name: "Pro",
-    monthlyPrice: 499,
-    yearlyPrice: 399,
+    price: 1490,
     audience: "เหมาะสำหรับเจ้าของร้านที่ต้องการข้อมูลเชิงลึกเพื่อการตัดสินใจเชิงธุรกิจ",
     features: [
       "เมนูไม่จำกัด",
@@ -64,7 +61,7 @@ const PLANS = [
       "หน่วยมาตรฐาน: ฿/แก้ว, แก้ว/วัน, % ครบทุกรายงาน",
     ],
     notIncluded: [],
-    cta: "อัปเกรดเป็น Pro",
+    cta: "ซื้อแพ็กเกจ Pro",
     ctaLink: "/auth/login",
     microcopy: "เหมาะสำหรับการตัดสินใจเชิงธุรกิจ",
     highlighted: false,
@@ -92,11 +89,11 @@ const COMPARE_ROWS = [
 const FAQS = [
   {
     q: "ต้องใช้บัตรเครดิตในการเริ่มต้นใช้งานไหม",
-    a: "แผน Free ไม่ต้องใช้บัตรเครดิตหรือข้อมูลการชำระเงินใดๆ สามารถเริ่มต้นได้ทันที สำหรับแผน Starter และ Pro จะต้องระบุวิธีชำระเงินเมื่อเลือกอัปเกรด",
+    a: "แพ็กเกจ Free ไม่ต้องใช้บัตรเครดิตหรือข้อมูลการชำระเงินใดๆ สามารถเริ่มต้นได้ทันที สำหรับแพ็กเกจ Starter และ Pro จะต้องระบุวิธีชำระเงินเมื่อซื้อ",
   },
   {
-    q: "ยกเลิกการสมัครได้เมื่อใด",
-    a: "สามารถยกเลิกได้ทุกเมื่อจากหน้าตั้งค่าบัญชี โดยที่ไม่มีค่าธรรมเนียมการยกเลิก การยกเลิกมีผลเมื่อสิ้นสุดรอบชำระเงินปัจจุบัน และระบบจะไม่คิดค่าบริการในรอบถัดไป",
+    q: "ซื้อแล้วใช้ได้ตลอดไปเลยหรือมีวันหมดอายุ",
+    a: "ใช่ครับ เป็นระบบซื้อขาด (จ่ายครั้งเดียว) ไม่มีค่าบริการรายเดือนหรือรายปี เมื่อชำระเงินแล้ว ใช้งานได้ตลอดไปไม่มีวันหมดอายุ",
   },
   {
     q: "ราคาที่แสดงรวม VAT แล้วหรือยัง",
@@ -111,8 +108,8 @@ const FAQS = [
     a: "ได้ครับ เจ้าของข้อมูลมีสิทธิขอลบข้อมูลทั้งหมดได้ตลอดเวลาผ่านการติดต่อทีมงาน Valora ภายใน 30 วันทำการข้อมูลจะถูกลบออกจากระบบถาวร ยกเว้นที่กฎหมายกำหนดให้เก็บรักษา",
   },
   {
-    q: "อัปเกรด/ดาวน์เกรดแผนกระทบกับข้อมูลที่มีอยู่ไหม",
-    a: "การอัปเกรดไม่กระทบข้อมูลใดๆ สำหรับการดาวน์เกรด หากจำนวนเมนูหรือสถานการณ์เกินขีดจำกัดของแผนใหม่ ระบบจะแจ้งให้ลบหรือเก็บรักษาข้อมูลก่อนดำเนินการ",
+    q: "อัปเกรดแพ็กเกจกระทบกับข้อมูลที่มีอยู่ไหม",
+    a: "การอัปเกรดไม่กระทบข้อมูลใดๆ ข้อมูลเดิมจะยังคงอยู่ครบถ้วน แพ็กเกจใหม่จะเปิดฟีเจอร์เพิ่มเติมตามระดับที่ซื้อ",
   },
 ];
 
@@ -200,22 +197,13 @@ function PDPAItem({ title, content }: { title: string; content: string }) {
 
 // ─── Main Page ─────────────────────────────────────────────────────────────────
 export default function PricingPage() {
-  const [yearly, setYearly] = useState(false);
-
   useEffect(() => {
     window.scrollTo(0, 0);
   }, []);
 
   const price = (plan: typeof PLANS[0]) => {
-    if (plan.monthlyPrice === 0) return "฿0";
-    const p = yearly ? plan.yearlyPrice : plan.monthlyPrice;
-    return `฿${p.toLocaleString()}`;
-  };
-
-  const savings = (plan: typeof PLANS[0]) => {
-    if (plan.monthlyPrice === 0) return null;
-    const saved = Math.round(((plan.monthlyPrice - plan.yearlyPrice) / plan.monthlyPrice) * 100);
-    return saved;
+    if (plan.price === 0) return "฿0";
+    return `฿${plan.price.toLocaleString()}`;
   };
 
   return (
@@ -242,11 +230,11 @@ export default function PricingPage() {
             className="text-3xl md:text-4xl font-bold text-foreground"
             style={{ lineHeight: 1.6, letterSpacing: '0.01em' }}
           >
-            เลือกแผนที่เหมาะกับร้านคุณ
+            เลือกแพ็กเกจที่เหมาะกับร้านคุณ
           </h1>
           <p className="text-muted-foreground max-w-xl mx-auto">
-            ทุกแผนแสดงที่มาของตัวเลขและสมมติฐานการคำนวณ พร้อมหน่วยมาตรฐาน
-            (บาท/แก้ว, แก้ว/วัน, %) ครบถ้วน เพื่อข้อมูลที่โปร่งใสและตรวจสอบได้
+            ชำระครั้งเดียว ใช้งานได้ตลอดไปไม่มีค่าบริการรายเดือนหรือรายปี
+            พร้อมหน่วยมาตรฐาน (บาท/แก้ว, แก้ว/วัน, %) ครบถ้วน
           </p>
 
           {/* Transparency badge */}
@@ -256,39 +244,17 @@ export default function PricingPage() {
           </div>
         </div>
 
-        {/* ── B) Billing Toggle ───────────────────────────────────────────────── */}
+        {/* ── B) One-time Purchase Badge ─────────────────────────────────────── */}
         <div className="flex justify-center">
-          <div className="inline-flex items-center gap-2 bg-muted rounded-xl p-1.5 border">
-            <button
-              onClick={() => setYearly(false)}
-              className={`px-6 py-2.5 rounded-lg text-sm font-semibold transition-all cursor-pointer ${
-                !yearly
-                  ? "bg-card text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              รายเดือน
-            </button>
-            <button
-              onClick={() => setYearly(true)}
-              className={`px-6 py-2.5 rounded-lg text-sm font-semibold transition-all flex items-center gap-2 cursor-pointer ${
-                yearly
-                  ? "bg-card text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              รายปี
-              <span className="bg-success text-success-foreground text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider">
-                -20%
-              </span>
-            </button>
+          <div className="inline-flex items-center gap-2 bg-success/10 border border-success/30 rounded-full px-5 py-2 text-sm font-semibold text-foreground">
+            <Sparkles className="w-4 h-4 text-success" />
+            ชำระครั้งเดียว — ไม่มีค่าบริการรายเดือน / รายปี
           </div>
         </div>
 
         {/* ── C) Plan Cards ───────────────────────────────────────────────────── */}
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6 md:gap-8">
           {PLANS.map((plan) => {
-            const saved = savings(plan);
             return (
               <div
                 key={plan.id}
@@ -316,20 +282,15 @@ export default function PricingPage() {
                     <span className="text-4xl font-bold text-foreground tabular-nums tracking-tight">
                       {price(plan)}
                     </span>
-                    <span className="text-sm text-muted-foreground font-medium">/เดือน</span>
+                    {plan.price > 0 && (
+                      <span className="text-sm text-muted-foreground font-medium">ครั้งเดียว</span>
+                    )}
                   </div>
-                  {yearly && saved && (
-                    <div className="mt-2 flex flex-col gap-1">
-                      <p className="text-xs text-success font-semibold flex items-center gap-1">
-                         ประหยัด {saved}%
-                      </p>
-                      <p className="text-[11px] text-muted-foreground">
-                        (ชำระ ฿{(plan.yearlyPrice * 12).toLocaleString()} ต่อปี)
-                      </p>
-                    </div>
-                  )}
-                  {plan.monthlyPrice === 0 && (
+                  {plan.price === 0 && (
                     <p className="text-xs text-muted-foreground mt-2">ใช้งานได้ทันที ไม่จำกัดเวลา</p>
+                  )}
+                  {plan.price > 0 && (
+                    <p className="text-xs text-success font-semibold mt-2">ซื้อขาด ไม่มีค่าบริการรายเดือน/รายปี</p>
                   )}
                 </div>
 
@@ -375,7 +336,7 @@ export default function PricingPage() {
 
         {/* ── D) Comparison Table ─────────────────────────────────────────────── */}
         <div className="stat-card overflow-x-auto">
-          <h2 className="section-title mb-6">เปรียบเทียบแผนอย่างละเอียด</h2>
+          <h2 className="section-title mb-6">เปรียบเทียบแพ็กเกจอย่างละเอียด</h2>
           <table className="w-full text-sm min-w-[540px]">
             <thead>
               <tr className="border-b">
@@ -414,12 +375,12 @@ export default function PricingPage() {
                 </td>
                 <td className="pt-4 text-center bg-accent/5">
                   <Link to="/auth/login" className="text-xs font-medium text-accent hover:underline">
-                    เลือก Starter
+                    ซื้อ Starter
                   </Link>
                 </td>
                 <td className="pt-4 text-center">
                   <Link to="/auth/login" className="text-xs font-medium text-accent hover:underline">
-                    เลือก Pro
+                    ซื้อ Pro
                   </Link>
                 </td>
               </tr>
@@ -431,7 +392,7 @@ export default function PricingPage() {
         <div className="stat-card">
           <h2 className="section-title mb-2">คำถามที่พบบ่อย</h2>
           <p className="text-sm text-muted-foreground mb-6">
-            คำถามที่ผู้ใช้มักถามก่อนตัดสินใจเลือกแผน
+            คำถามที่ผู้ใช้มักถามก่อนตัดสินใจซื้อ
           </p>
           <div>
             {FAQS.map((faq, i) => (
@@ -468,7 +429,7 @@ export default function PricingPage() {
             ราคาที่แสดงยังไม่รวม VAT 7% — ราคาสุทธิจะแสดงในหน้ายืนยันการชำระเงิน
           </p>
           <p className="text-xs text-muted-foreground font-medium">
-            ยกเลิกได้ทุกเมื่อ — ไม่มีค่าธรรมเนียมการยกเลิก
+            ชำระครั้งเดียว — ไม่มีค่าบริการรายเดือนหรือรายปี
           </p>
           <div className="flex items-center justify-center gap-4">
             <Link to="#" className="text-xs text-accent hover:underline">
