@@ -4,7 +4,7 @@
 
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import type { Session, User } from "@supabase/supabase-js";
-import { supabase } from "@/lib/supabase";
+import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 
 interface AuthContextValue {
   user: User | null;
@@ -22,6 +22,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (!isSupabaseConfigured()) {
+      console.warn("[Auth] Supabase is not configured — skipping auth. Public pages will still work.");
+      setLoading(false);
+      return;
+    }
+
     // Get initial session
     supabase.auth.getSession().then(({ data }) => {
       setSession(data.session);
@@ -39,6 +45,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signOut = async () => {
+    if (!isSupabaseConfigured()) return;
     await supabase.auth.signOut();
   };
 
