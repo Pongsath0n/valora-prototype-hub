@@ -13,7 +13,6 @@ import {
   LogOut,
   Menu,
   X,
-  CreditCard,
 } from "lucide-react";
 import { useState } from "react";
 import LogoBrand from "@/components/LogoBrand";
@@ -31,7 +30,6 @@ const mainNav = [
 ];
 
 const utilityNav = [
-  { title: "การเงิน", path: "/app/billing", icon: CreditCard },
   { title: "ตั้งค่า", path: "/app/settings", icon: Settings },
 ];
 
