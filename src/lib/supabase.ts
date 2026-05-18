@@ -5,6 +5,13 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 // without env vars in development (e.g. when using the mock payment gateway).
 let _client: SupabaseClient | null = null;
 
+/** Returns true when both VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY are set */
+export function isSupabaseConfigured(): boolean {
+  const url = import.meta.env.VITE_SUPABASE_URL;
+  const key = import.meta.env.VITE_SUPABASE_ANON_KEY;
+  return Boolean(url && key);
+}
+
 export function getSupabase(): SupabaseClient {
   if (_client) return _client;
 
