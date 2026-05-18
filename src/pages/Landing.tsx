@@ -1,5 +1,4 @@
-import { Link } from "react-router-dom";
-import { ArrowRight, Shield, BarChart3, Zap, CheckCircle2 } from "lucide-react";
+import { BarChart3, CheckCircle2, Shield, Zap } from "lucide-react";
 import LogoBrand from "@/components/LogoBrand";
 
 const features = [
@@ -23,61 +22,26 @@ const features = [
 export default function LandingPage() {
   return (
     <div className="min-h-screen bg-background">
-      {/* Nav */}
       <header className="border-b bg-card/80 backdrop-blur-sm sticky top-0 z-30">
         <div className="max-w-6xl mx-auto flex items-center justify-between px-4 py-3">
-          <Link to="/" className="flex items-center">
-            <LogoBrand size="sm" />
-          </Link>
-          <nav className="hidden md:flex items-center gap-6 text-sm text-muted-foreground">
-            <Link to="/pricing" className="hover:text-foreground transition-colors">ราคา</Link>
-            <Link
-              to="/auth/login"
-              className="bg-primary text-primary-foreground px-4 py-2 rounded-lg text-sm font-medium hover:opacity-90 transition-opacity"
-            >
-              เข้าสู่ระบบ
-            </Link>
-          </nav>
-          <Link to="/auth/login" className="md:hidden bg-primary text-primary-foreground px-4 py-2 rounded-lg text-sm font-medium">
-            เข้าสู่ระบบ
-          </Link>
+          <LogoBrand size="sm" />
+          <span className="text-xs text-muted-foreground">Internal-first platform by Brewway</span>
         </div>
       </header>
 
-      {/* Hero */}
-      <section className="max-w-6xl mx-auto px-4 pt-16 pb-20 md:pt-28 md:pb-32 text-center md:text-left">
+      <section className="max-w-6xl mx-auto px-4 pt-16 pb-20 md:pt-28 md:pb-28 text-center md:text-left">
         <div className="max-w-3xl">
-          <h1
-            className="text-4xl md:text-5xl font-bold text-foreground mb-6"
-            style={{ lineHeight: 1.8, letterSpacing: '0.01em' }}
-          >
+          <h1 className="text-4xl md:text-5xl font-bold text-foreground mb-6" style={{ lineHeight: 1.7 }}>
             รู้ต้นทุน รู้กำไร<br />
             <span className="text-accent">ตัดสินใจได้มั่นใจ</span>
           </h1>
-          <p className="text-lg md:text-xl text-muted-foreground mb-10 max-w-xl mx-auto md:mx-0 leading-relaxed">
-            เครื่องมือวิเคราะห์ต้นทุนและจำลองสถานการณ์ ออกแบบสำหรับร้านอาหารและคาเฟ่ไทย
-            ให้ข้อมูลที่เชื่อถือได้ โปร่งใส ตรวจสอบได้ทุกขั้นตอน
+          <p className="text-lg md:text-xl text-muted-foreground mb-2 max-w-xl leading-relaxed">
+            Valora Engine คือระบบภายในสำหรับ Brewway ที่รวมต้นทุน กำไร สต็อก และออเดอร์ไว้ในระบบเดียว
           </p>
-          <div className="flex flex-wrap gap-4 justify-center md:justify-start">
-            <Link
-              to="/auth/signup"
-              className="inline-flex items-center gap-2 bg-primary text-primary-foreground px-8 py-3.5 rounded-xl font-semibold hover:opacity-90 transition-all shadow-lg shadow-primary/20 cursor-pointer"
-            >
-              เริ่มต้นใช้งาน
-              <ArrowRight className="w-4 h-4" />
-            </Link>
-            <Link
-              to="/overview"
-              className="inline-flex items-center gap-2 bg-secondary text-secondary-foreground px-8 py-3.5 rounded-xl font-semibold hover:bg-secondary/80 transition-all cursor-pointer"
-            >
-              ดูตัวอย่างระบบ
-            </Link>
-          </div>
         </div>
       </section>
 
-      {/* Features */}
-      <section className="max-w-6xl mx-auto px-4 pb-24">
+      <section className="max-w-6xl mx-auto px-4 pb-20">
         <div className="grid md:grid-cols-3 gap-8">
           {features.map((f) => (
             <div key={f.title} className="stat-card hover:shadow-md transition-shadow">
@@ -91,24 +55,34 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* Trust bar */}
       <section className="border-t bg-muted/50">
-        <div className="max-w-6xl mx-auto px-4 py-12">
-          <div className="flex flex-wrap items-center justify-center gap-8 text-sm text-muted-foreground">
+        <div className="max-w-6xl mx-auto px-4 py-12 space-y-8">
+          <div>
+            <h2 className="text-2xl font-bold text-foreground mb-3">สนใจใช้ Valora Engine กับธุรกิจของคุณ?</h2>
+            <p className="text-muted-foreground leading-relaxed">
+              Valora Engine เปิดให้ใช้งานในรูปแบบติดต่อเพื่อติดตั้งและปรับระบบให้เหมาะกับธุรกิจของคุณ เหมาะสำหรับร้านกาแฟ ร้านเครื่องดื่ม และธุรกิจขนาดเล็กที่ต้องการรู้ต้นทุน กำไรจริง สต็อก และออเดอร์ในระบบเดียว
+            </p>
+          </div>
+
+          <div className="space-y-3">
+            <h3 className="font-semibold text-foreground">ช่องทางติดต่อ</h3>
+            <div>
+              <p className="text-sm font-medium">Instagram</p>
+              {/* MARKING: Add Brewway / Valora Instagram username or URL here later */}
+              <p className="text-sm text-muted-foreground">[MARKING: เพิ่มชื่อ IG หรือ URL ภายหลัง]</p>
+            </div>
+            <div>
+              <p className="text-sm font-medium">Email</p>
+              <p className="text-sm text-muted-foreground">pongsathon.po@kkumail.com</p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-8 text-sm text-muted-foreground">
             <span className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-success" /> ข้อมูลเข้ารหัสทุกขั้นตอน</span>
             <span className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-success" /> แสดงสมมติฐานทุกการคำนวณ</span>
-            <span className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-success" /> ตรวจสอบที่มาข้อมูลได้</span>
           </div>
         </div>
       </section>
-
-      {/* Footer */}
-      <footer className="border-t">
-        <div className="max-w-6xl mx-auto px-4 py-6 flex items-center justify-between text-xs text-muted-foreground">
-          <span>Valora v1.0 — สร้างเพื่อผู้ประกอบการไทย</span>
-          <Link to="/pricing" className="hover:text-foreground transition-colors">ดูราคา</Link>
-        </div>
-      </footer>
     </div>
   );
 }
