@@ -1,11 +1,58 @@
+import { useEffect, useMemo, useState } from "react";
 import AppLayout from "@/components/AppLayout";
 import DataTable from "@/components/shared/DataTable";
-
-const rows = [
-  { menu: "Iced Latte", menuCost: 31.2, sellPrice: 75, gross: 43.8 },
-  { menu: "Americano", menuCost: 18.5, sellPrice: 60, gross: 41.5 },
-];
+import FormField from "@/components/shared/FormField";
+import { ingredientService, menuCatalogService, recipeService, type IngredientItem, type MenuItem } from "@/features/store/catalogService";
 
 export default function RecipeCosting() {
-  return <AppLayout><div className="space-y-4"><h1 className="page-title">คำนวณต้นทุนสูตร</h1><DataTable columns={[{key:"menu",header:"เมนู"},{key:"menuCost",header:"ต้นทุน"},{key:"sellPrice",header:"ราคาขาย"},{key:"gross",header:"กำไรขั้นต้น"}]} rows={rows} /></div></AppLayout>;
+  const [menus, setMenus] = useState<MenuItem[]>([]);
+  const [ingredients, setIngredients] = useState<IngredientItem[]>([]);
+  const [selectedMenu, setSelectedMenu] = useState("");
+  const [ingredientId, setIngredientId] = useState("");
+  const [qty, setQty] = useState("1");
+  const [tick, setTick] = useState(0);
+
+  useEffect(() => { Promise.all([menuCatalogService.list(), ingredientService.list()]).then(([m, i]) => { setMenus(m); setIngredients(i); if (m[0]) setSelectedMenu(m[0].id); }); }, []);
+  const recipeRows = useMemo(() => selectedMenu ? recipeService.listByMenu(selectedMenu) : [], [selectedMenu, tick]);
+  const enriched = useMemo(() => recipeRows.map((r) => {
+    const ing = ingredients.find((x) => x.id === r.ingredientId);
+    const costPerUnit = ing?.costPerUnit ?? 0;
+    return { ...r, ingredient: ing?.name ?? "Unknown", unit: ing?.unit ?? "", costPerUnit, lineCost: Number((r.quantityUsed * costPerUnit).toFixed(2)) };
+  }), [recipeRows, ingredients]);
+
+  const menu = menus.find((m) => m.id === selectedMenu);
+  const menuCost = enriched.reduce((s, r) => s + r.lineCost, 0);
+  const grossProfit = (menu?.basePrice ?? 0) - menuCost;
+  const grossMarginPercent = (menu?.basePrice ?? 0) > 0 ? (grossProfit / (menu?.basePrice ?? 1)) * 100 : 0;
+
+  function addRow() {
+    if (!selectedMenu || !ingredientId || Number(qty) <= 0) return;
+    const rows = recipeService.listByMenu(selectedMenu);
+    const exists = rows.find((r) => r.ingredientId === ingredientId);
+    const next = exists ? rows.map((r) => r.ingredientId === ingredientId ? { ...r, quantityUsed: Number(qty) } : r) : [...rows, { ingredientId, quantityUsed: Number(qty) }];
+    recipeService.setByMenu(selectedMenu, next);
+    setQty("1");
+    setTick((x) => x + 1);
+  }
+
+  function removeRow(target: string) {
+    const rows = recipeService.listByMenu(selectedMenu).filter((r) => r.ingredientId !== target);
+    recipeService.setByMenu(selectedMenu, rows);
+    setTick((x) => x + 1);
+  }
+
+  return <AppLayout><div className="space-y-4"><h1 className="page-title">สูตรและต้นทุนเมนู</h1>
+    <div className="stat-card grid md:grid-cols-4 gap-3">
+      <FormField label="เลือกเมนู"><select className="form-input" value={selectedMenu} onChange={(e)=>setSelectedMenu(e.target.value)}>{menus.map((m)=><option key={m.id} value={m.id}>{m.name}</option>)}</select></FormField>
+      <FormField label="วัตถุดิบ"><select className="form-input" value={ingredientId} onChange={(e)=>setIngredientId(e.target.value)}><option value="">เลือกวัตถุดิบ</option>{ingredients.map((i)=><option key={i.id} value={i.id}>{i.name}</option>)}</select></FormField>
+      <FormField label="ปริมาณที่ใช้"><input className="form-input" type="number" value={qty} onChange={(e)=>setQty(e.target.value)} /></FormField>
+      <div className="flex items-end"><button className="bg-primary text-primary-foreground px-4 py-2 rounded" onClick={addRow}>เพิ่ม/อัปเดตสูตร</button></div>
+    </div>
+    <div className="grid md:grid-cols-3 gap-3">
+      <div className="kpi-card"><p className="metric-label">Menu Cost</p><p className="metric-value">฿{menuCost.toFixed(2)}</p></div>
+      <div className="kpi-card"><p className="metric-label">Gross Profit</p><p className="metric-value">฿{grossProfit.toFixed(2)}</p></div>
+      <div className="kpi-card"><p className="metric-label">Gross Margin %</p><p className="metric-value">{grossMarginPercent.toFixed(1)}%</p></div>
+    </div>
+    <DataTable columns={[{key:"ingredient",header:"วัตถุดิบ"},{key:"quantityUsed",header:"ปริมาณ"},{key:"unit",header:"หน่วย"},{key:"costPerUnit",header:"ต้นทุน/หน่วย"},{key:"lineCost",header:"ต้นทุนรวม"},{key:"remove",header:"",render:(r)=><button className="text-red-600" onClick={()=>removeRow(r.ingredientId)}>ลบ</button>}]} rows={enriched as any} />
+  </div></AppLayout>;
 }
