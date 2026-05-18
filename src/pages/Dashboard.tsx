@@ -7,6 +7,9 @@ import { Target, TrendingUp, Coffee, DollarSign, BarChart3, Info } from "lucide-
 import { shopService, fixedCostService, menuService } from "@/services/mockStorage";
 import { calcBusinessKPIs, calcMenuMetrics } from "@/services/calculationEngine";
 import { useMemo } from "react";
+import { dashboardMock } from "@/features/store/mockData";
+import DataTable from "@/components/shared/DataTable";
+import StatusBadge from "@/components/shared/StatusBadge";
 
 const statusLabel = (s: string) => {
   if (s === "good") return { text: "กำไรดี", cls: "status-badge-success" };
@@ -81,6 +84,20 @@ export default function DashboardPage() {
             description="ไม่สามารถคำนวณจุดคุ้มทุนได้ กรุณาตรวจสอบราคาและต้นทุนในหน้าตั้งค่าเมนู"
           />
         )}
+
+
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+          <div className="kpi-card"><p className="metric-label">Orders today</p><p className="metric-value">{dashboardMock.ordersToday}</p></div>
+          <div className="kpi-card"><p className="metric-label">Sales today</p><p className="metric-value">฿{dashboardMock.salesToday.toLocaleString()}</p></div>
+          <div className="kpi-card"><p className="metric-label">Cost today</p><p className="metric-value">฿{dashboardMock.costToday.toLocaleString()}</p></div>
+          <div className="kpi-card"><p className="metric-label">Gross profit</p><p className="metric-value">฿{dashboardMock.grossProfitToday.toLocaleString()}</p></div>
+          <div className="kpi-card"><p className="metric-label">Avg profit/cup</p><p className="metric-value">฿{dashboardMock.avgProfitPerCup}</p></div>
+        </div>
+        <div className="grid md:grid-cols-3 gap-4">
+          <div className="stat-card"><p className="text-sm text-muted-foreground">Best seller</p><p className="text-lg font-semibold">{dashboardMock.bestSeller}</p></div>
+          <div className="stat-card"><p className="text-sm text-muted-foreground">Most profitable</p><p className="text-lg font-semibold">{dashboardMock.mostProfitable}</p></div>
+          <div className="stat-card"><p className="text-sm text-muted-foreground">Low stock alert</p><p className="text-lg font-semibold">{dashboardMock.lowStockCount} รายการ</p></div>
+        </div>
 
         {/* ── KPI Cards ────────────────────────────────── */}
         <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
@@ -189,6 +206,18 @@ export default function DashboardPage() {
             { text: "กำไรสุทธิไม่รวมภาษีและค่าใช้จ่ายพิเศษอื่นๆ" },
           ]}
         />
+
+
+        <div className="grid lg:grid-cols-2 gap-4">
+          <div className="stat-card">
+            <h2 className="section-title mb-3">Recent orders</h2>
+            <DataTable columns={[{key:"no",header:"Order"},{key:"channel",header:"Channel"},{key:"amount",header:"Amount"},{key:"status",header:"Status",render:(r)=> <StatusBadge label={String(r.status)} tone="info"/>}]} rows={dashboardMock.recentOrders} />
+          </div>
+          <div className="stat-card">
+            <h2 className="section-title mb-3">Sales by channel</h2>
+            <DataTable columns={[{key:"name",header:"Channel"},{key:"sales",header:"Sales"},{key:"profit",header:"Profit"}]} rows={dashboardMock.salesByChannel} />
+          </div>
+        </div>
 
         {/* ── Footer ───────────────────────────────────── */}
         <p className="text-center text-xs text-muted-foreground pt-4 border-t">
