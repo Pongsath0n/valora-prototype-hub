@@ -15,6 +15,15 @@ export type Order = {
   totalAmount: number; totalCost: number; totalChannelFee: number; grossProfit: number; createdAt: string;
 };
 
+
+export type CustomerPickupPayload = {
+  lineUserId: string;
+  lineDisplayName: string;
+  phone?: string;
+  pickupTime: string;
+  orderNote?: string;
+};
+
 type StockMovement = { id: string; orderId: string; ingredientId: string; ingredientName: string; quantity: number; movementType: "out"|"restore"; reason: string; createdAt: string };
 
 const K_ORD = "valora:orders:v1";
@@ -125,5 +134,16 @@ export const orderService = {
 
     save(K_ORD, [...orders]);
     return order;
+  },
+};
+
+
+export const customerOrderService = {
+  async createPickupOrder(channelId: string, inputs: OrderItemInput[], customer: CustomerPickupPayload) {
+    const order = await orderService.createManualOrder(channelId, inputs, "pending_payment", "unpaid");
+    const enriched = { ...order, orderType: "pickup", lineUserId: customer.lineUserId, lineDisplayName: customer.lineDisplayName, phone: customer.phone ?? null, pickupTime: customer.pickupTime, orderNote: customer.orderNote ?? null };
+    const all = orderService.list().map((o)=>o.id===order.id ? enriched as any : o as any);
+    localStorage.setItem("valora:orders:v1", JSON.stringify(all));
+    return enriched;
   },
 };

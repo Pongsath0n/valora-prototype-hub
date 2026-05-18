@@ -33,6 +33,12 @@ import POSManualOrder from "./pages/POSManualOrder";
 import OrdersPage from "./pages/Orders";
 import OrderDetailPage from "./pages/OrderDetail";
 
+import CustomerMenuPage from "./pages/liff/CustomerMenu";
+import MenuDetailPage from "./pages/liff/MenuDetail";
+import CartPage from "./pages/liff/Cart";
+import OrderConfirmPage from "./pages/liff/OrderConfirm";
+import OrderSuccessPage from "./pages/liff/OrderSuccess";
+
 // Admin pages
 import AdminLogin from "./pages/admin/AdminLogin";
 import AdminDashboard from "./pages/admin/AdminDashboard";
@@ -91,6 +97,13 @@ function AppRoutes() {
       <Route path="/app/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
       <Route path="/app/billing" element={<ProtectedRoute><BillingStatus /></ProtectedRoute>} />
       <Route path="/checkout" element={<ProtectedRoute><Checkout /></ProtectedRoute>} />
+
+
+      <Route path="/liff/menu" element={<CustomerMenuPage />} />
+      <Route path="/liff/menu/:id" element={<MenuDetailPage />} />
+      <Route path="/liff/cart" element={<CartPage />} />
+      <Route path="/liff/confirm" element={<OrderConfirmPage />} />
+      <Route path="/liff/success" element={<OrderSuccessPage />} />
 
       {/* Admin (separate auth) */}
       <Route path="/admin/login" element={<AdminLogin />} />
