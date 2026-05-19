@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import { useEffect, useState } from "react";
-import AppLayout from "@/components/AppLayout";
+import AdminLayout from "@/components/AdminLayout";
 import { supabase } from "@/lib/supabase";
 import { useRoleGuard } from "@/lib/guards";
 
@@ -20,7 +20,7 @@ export default function AdminDashboardPage() {
   if (checking) return <div className="min-h-screen flex items-center justify-center">กำลังโหลด...</div>;
   if (accessDenied) return <div className="min-h-screen flex items-center justify-center text-xl font-semibold">Access Denied</div>;
   return (
-    <AppLayout>
+    <AdminLayout>
       <div className="space-y-6">
         <div className="stat-card">
           <span className="text-xs rounded-full px-2 py-1 bg-accent/10 text-accent">Internal System Console</span>
@@ -49,6 +49,6 @@ export default function AdminDashboardPage() {
           ))}
         </div>
       </div>
-    </AppLayout>
+    </AdminLayout>
   );
 }
