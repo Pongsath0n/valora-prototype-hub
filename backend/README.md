@@ -57,3 +57,17 @@ Recommended run order:
 1. Start backend (`uvicorn app.main:app --reload --port 8000`)
 2. Execute each curl step from `docs/phase1-api-test.md`
 3. Validate order/payment status transitions and log tables
+
+
+## LINE OA / LIFF Setup (Phase 1)
+
+1. Create a **LINE Messaging API channel** in LINE Developers.
+2. Enable Messaging API and issue a **Channel access token (long-lived)**.
+3. Set token in backend env:
+   - `LINE_CHANNEL_ACCESS_TOKEN`
+   - `LINE_CHANNEL_SECRET`
+4. Create a **LIFF app** in the same LINE channel and set LIFF URL to your frontend LIFF route (example: `https://your-domain/liff/menu`).
+5. Configure LINE OA Rich Menu action URL to open LIFF route, e.g.:
+   - `https://your-domain/liff/menu`
+
+> Important: LINE token is backend-only and must never be exposed to frontend code.

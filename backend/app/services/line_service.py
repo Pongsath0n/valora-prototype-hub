@@ -1,41 +1,66 @@
-import requests
 from datetime import datetime, timezone
+import requests
 from ..core.config import settings
+from ..core.supabase import get_supabase
 
 
 class LineService:
-    def __init__(self, db):
-        self.db = db
+    def __init__(self):
+        self.db = get_supabase()
 
-    def push(self, store_id: str, line_user_id: str, message: str, order_id: str | None = None, customer_id: str | None = None):
-        ok = False
-        err = None
-        resp_body = None
+    def _build_text(self, message_type: str, text: str, extra_reason: str | None = None) -> str:
+        base = text.strip()
+        if message_type in {"payment_rejected", "order_cancelled"} and extra_reason:
+            return f"{base}\nเหตุผล: {extra_reason}"
+        return base
+
+    def push_message(self, line_user_id: str, message_type: str, text: str, order_id: str | None = None, customer_id: str | None = None):
+        send_status = "pending"
+        error_message = None
+        provider_response = None
+
+        payload_text = self._build_text(message_type, text)
+
         try:
-            if not settings.line_channel_access_token:
-                raise RuntimeError('LINE_CHANNEL_ACCESS_TOKEN is missing')
-            r = requests.post(
-                'https://api.line.me/v2/bot/message/push',
-                headers={'Authorization': f'Bearer {settings.line_channel_access_token}', 'Content-Type': 'application/json'},
-                json={'to': line_user_id, 'messages': [{'type': 'text', 'text': message}]},
+            token = settings.line_channel_access_token
+            if not token:
+                raise RuntimeError("LINE_CHANNEL_ACCESS_TOKEN is missing")
+            resp = requests.post(
+                "https://api.line.me/v2/bot/message/push",
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json",
+                },
+                json={"to": line_user_id, "messages": [{"type": "text", "text": payload_text}]},
                 timeout=10,
             )
-            ok = r.status_code < 300
-            resp_body = r.text
-            if not ok:
-                err = f'HTTP {r.status_code}'
-        except Exception as e:
-            err = str(e)
-        finally:
-            self.db.table('line_notification_logs').insert({
-                'store_id': store_id,
-                'order_id': order_id,
-                'customer_id': customer_id,
-                'line_user_id': line_user_id,
-                'message': message,
-                'status': 'success' if ok else 'failed',
-                'error_message': err,
-                'provider_response': resp_body,
-                'created_at': datetime.now(timezone.utc).isoformat(),
+            provider_response = resp.text
+            if resp.status_code < 300:
+                send_status = "success"
+            else:
+                send_status = "failed"
+                error_message = f"HTTP {resp.status_code}"
+        except Exception as exc:
+            send_status = "failed"
+            error_message = str(exc)
+
+        try:
+            self.db.table("line_notification_logs").insert({
+                "order_id": order_id,
+                "customer_id": customer_id,
+                "line_user_id": line_user_id,
+                "message_type": message_type,
+                "message": payload_text,
+                "send_status": send_status,
+                "provider_response": provider_response,
+                "error_message": error_message,
+                "created_at": datetime.now(timezone.utc).isoformat(),
             }).execute()
-        return {'ok': ok, 'error': err}
+        except Exception:
+            pass
+
+        return {
+            "ok": send_status == "success",
+            "send_status": send_status,
+            "error": error_message,
+        }

@@ -30,3 +30,7 @@ class OrderRepo:
         if filters.get('end_date'):
             q = q.lte('created_at', filters['end_date'])
         return q.order('created_at', desc=True).execute().data
+
+
+    def get_order_with_customer(self, order_id: str):
+        return self.db.table('orders').select('*,customers(*)').eq('id', order_id).limit(1).execute().data

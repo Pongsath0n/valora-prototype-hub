@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 from ..repositories.order_repo import OrderRepo
 from ..utils.order_no import generate_order_no
+from .line_service import LineService
 
 
 class OrderService:
@@ -39,7 +40,24 @@ class OrderService:
         if order_status == 'cancelled':
             payload['cancelled_reason'] = cancelled_reason
             payload['cancelled_at'] = datetime.now(timezone.utc).isoformat()
-        return self.repo.patch_order(order_id, payload)
+        updated = self.repo.patch_order(order_id, payload)
+
+        warn = None
+        if order_status in {'ready', 'cancelled'}:
+            rows = self.repo.get_order_with_customer(order_id)
+            if rows:
+                o = rows[0]
+                c = o.get('customers') or {}
+                line_user_id = c.get('line_user_id')
+                if line_user_id:
+                    if order_status == 'ready':
+                        notify = LineService().push_message(line_user_id, 'order_ready', 'ออเดอร์ของคุณพร้อมรับที่ร้านแล้วค่ะ', order_id=order_id, customer_id=o.get('customer_id'))
+                    else:
+                        reason = cancelled_reason or 'ไม่ระบุเหตุผล'
+                        notify = LineService().push_message(line_user_id, 'order_cancelled', f'ออเดอร์ของคุณถูกยกเลิก ({reason})', order_id=order_id, customer_id=o.get('customer_id'))
+                    if not notify['ok']:
+                        warn = {'notification': notify}
+        return {'order': updated[0] if updated else None, 'warning': warn}
 
     def list_admin_orders(self, **filters):
         return self.repo.list_admin_orders(**filters)
