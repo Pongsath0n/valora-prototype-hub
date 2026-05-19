@@ -1,49 +1,53 @@
-import { useRoleGuard } from "@/lib/guards";
+import { Link } from "react-router-dom";
+import { useEffect, useState } from "react";
 import AppLayout from "@/components/AppLayout";
-import { Activity, Settings, ShieldCheck, Store, Users } from "lucide-react";
+import { supabase } from "@/lib/supabase";
+import { useRoleGuard } from "@/lib/guards";
 
-const cards = [
-  { title: "User management", desc: "จัดการผู้ใช้งาน เพิ่ม/ปิดการใช้งาน และรีเซ็ตสถานะ", icon: Users },
-  { title: "Role management", desc: "กำหนด role เช่น owner/admin/manager/staff และสิทธิ์การเข้าถึง", icon: ShieldCheck },
-  { title: "Store settings", desc: "ตั้งค่าร้าน ชื่อสาขา เวลาเปิด/ปิด และค่าเริ่มต้นธุรกิจ", icon: Store },
-  { title: "Sales channel settings", desc: "กำหนดช่องทางขาย เช่น หน้าร้าน เดลิเวอรี และค่าธรรมเนียม", icon: Activity },
-  { title: "System settings", desc: "ตั้งค่าระบบกลาง, locale, การแจ้งเตือน และค่าพื้นฐาน", icon: Settings },
-  { title: "System health", desc: "ดูสถานะระบบพื้นฐานและบันทึกเหตุการณ์ (basic logs)", icon: Activity },
+const navCards = [
+  { title: "จัดการผู้ใช้", desc: "เพิ่ม ตรวจสอบ และจัดการผู้ใช้งานในระบบ พร้อมบทบาทและร้านที่เกี่ยวข้อง", route: "/admin/users" },
+  { title: "จัดการสิทธิ์", desc: "ตรวจสอบสิทธิ์ของ owner, admin, manager และ staff ว่าแต่ละบทบาทเข้าถึงส่วนใดได้บ้าง", route: "/admin/roles" },
+  { title: "ตั้งค่าร้าน", desc: "จัดการข้อมูลพื้นฐานของร้าน เช่น ชื่อร้าน สกุลเงิน และข้อมูลสำหรับการใช้งานระบบ", route: "/admin/store" },
+  { title: "ตั้งค่าช่องทางขาย", desc: "จัดการช่องทางขาย เช่น Pick-up, LINE OA, Grab, LINE MAN, Shopee Food และค่าธรรมเนียม", route: "/admin/sales-channels" },
+  { title: "ตรวจสอบระบบ", desc: "ตรวจสอบสถานะ Auth, Profile, Store, Database, Storage และข้อมูลตั้งต้นของระบบ", route: "/admin/system" },
+  { title: "บันทึกเหตุการณ์", desc: "ดูเหตุการณ์สำคัญของระบบ เช่น การสร้างออเดอร์ การแก้ไขเมนู การปรับสต็อก และการเปลี่ยนสถานะออเดอร์", route: "/admin/audit-logs" },
 ];
 
 export default function AdminDashboardPage() {
   const { checking, accessDenied } = useRoleGuard(["owner", "admin"]);
-
+  const [overview, setOverview] = useState<any>({});
+  useEffect(() => {(async()=>{const {data:a}=await supabase.auth.getUser();const uid=a.user?.id;let storeName="Brewway";if(uid){const {data:p}=await supabase.from("profiles").select("store_id").eq("id",uid).maybeSingle();if(p?.store_id){const {data:s}=await supabase.from("stores").select("name").eq("id",p.store_id).maybeSingle();storeName=s?.name??storeName;}}const {count:u}=await supabase.from("profiles").select("id",{count:"exact",head:true});const {count:ad}=await supabase.from("profiles").select("id",{count:"exact",head:true}).in("role",["owner","admin"]);const {count:ac}=await supabase.from("sales_channels").select("id",{count:"exact",head:true}).eq("is_active",true);setOverview({storeName,totalUsers:u??0,totalAdmins:ad??0,activeChannels:ac??0});})();},[]);
   if (checking) return <div className="min-h-screen flex items-center justify-center">กำลังโหลด...</div>;
   if (accessDenied) return <div className="min-h-screen flex items-center justify-center text-xl font-semibold">Access Denied</div>;
   return (
     <AppLayout>
       <div className="space-y-6">
-        <div>
-          <h1 className="page-title">Admin Panel</h1>
-          <p className="page-subtitle">Internal control panel for Brewway / Valora Engine</p>
+        <div className="stat-card">
+          <span className="text-xs rounded-full px-2 py-1 bg-accent/10 text-accent">Internal System Console</span>
+          <h1 className="page-title mt-2">ศูนย์ควบคุมระบบ Valora</h1>
+          <p className="page-subtitle">สำหรับจัดการผู้ใช้ สิทธิ์การเข้าถึง การตั้งค่าร้าน สถานะระบบ และบันทึกเหตุการณ์สำคัญของ Valora Engine</p>
+          <p className="text-sm text-muted-foreground mt-3">หน้านี้ใช้สำหรับควบคุมระบบ Valora Engine ในระดับผู้ดูแล ไม่ใช่หน้าสำหรับบันทึกยอดขายประจำวัน หากต้องการจัดการออเดอร์ เมนู สต็อก หรือรายงาน ให้ใช้เมนูหลักของระบบร้าน</p>
+        </div>
+
+        <div className="grid md:grid-cols-3 gap-3">
+          <div className="kpi-card"><p className="metric-label">ร้านที่เชื่อมต่อ</p><p className="metric-value">{overview.storeName ?? "Brewway"}</p></div>
+          <div className="kpi-card"><p className="metric-label">ผู้ใช้ทั้งหมด</p><p className="metric-value">{overview.totalUsers ?? 0}</p></div>
+          <div className="kpi-card"><p className="metric-label">ผู้ดูแลระบบ</p><p className="metric-value">{overview.totalAdmins ?? 0}</p></div>
+          <div className="kpi-card"><p className="metric-label">ช่องทางขายที่เปิดใช้งาน</p><p className="metric-value">{overview.activeChannels ?? 0}</p></div>
+          <div className="kpi-card"><p className="metric-label">สถานะ Storage</p><p className="metric-value text-base">ตรวจสอบจาก Supabase Storage</p></div>
+          <div className="kpi-card"><p className="metric-label">โหมดระบบ</p><p className="metric-value text-base">Internal Use / One-time Sale Ready</p><p className="text-xs text-muted-foreground">Subscription Mode: Disabled</p></div>
         </div>
 
         <div className="grid md:grid-cols-2 gap-4">
-          {cards.map((item) => (
-            <section key={item.title} className="stat-card">
-              <div className="flex items-center gap-3 mb-3">
-                <div className="w-9 h-9 rounded-lg bg-accent/10 flex items-center justify-center">
-                  <item.icon className="w-5 h-5 text-accent" />
-                </div>
-                <h2 className="font-semibold text-foreground">{item.title}</h2>
-              </div>
+          {navCards.map((item) => (
+            <section key={item.route} className="stat-card space-y-2">
+              <h2 className="font-semibold">{item.title}</h2>
               <p className="text-sm text-muted-foreground">{item.desc}</p>
+              <p className="text-xs text-muted-foreground">{item.route}</p>
+              <Link to={item.route} className="inline-block bg-primary text-primary-foreground px-3 py-2 rounded text-sm">เปิดจัดการ</Link>
             </section>
           ))}
         </div>
-
-        <section className="stat-card">
-          <h2 className="section-title mb-2">Initial owner/admin bootstrap</h2>
-          <p className="text-sm text-muted-foreground">
-            สร้างผู้ใช้ผ่าน Supabase Auth แล้วเพิ่มข้อมูลใน profiles ให้ role = owner และ store_name = Brewway
-          </p>
-        </section>
       </div>
     </AppLayout>
   );
