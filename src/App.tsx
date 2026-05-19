@@ -39,6 +39,7 @@ import AdminStorePage from "./pages/admin/AdminStore";
 import AdminSystemPage from "./pages/admin/AdminSystem";
 import AdminAuditLogsPage from "./pages/admin/AdminAuditLogs";
 import AdminLoginPage from "./pages/admin/AdminLogin";
+import OrderQueuePage from "./pages/admin/OrderQueue";
 
 
 const queryClient = new QueryClient();
@@ -63,6 +64,8 @@ function AppRoutes() {
       <Route path="/admin" element={<RoleProtectedRoute allowedRoles={["owner", "admin"]} redirectTo="/admin-access"><AdminDashboardPage /></RoleProtectedRoute>} />
       <Route path="/admin/approvals" element={<RoleProtectedRoute allowedRoles={["owner", "admin"]} redirectTo="/admin-access"><ApprovalsList /></RoleProtectedRoute>} />
       <Route path="/admin/approvals/:requestId" element={<RoleProtectedRoute allowedRoles={["owner", "admin"]} redirectTo="/admin-access"><ApprovalDetail /></RoleProtectedRoute>} />
+      <Route path="/admin/orders" element={<RoleProtectedRoute allowedRoles={["owner", "admin"]} redirectTo="/admin-access"><OrderQueuePage /></RoleProtectedRoute>} />
+      <Route path="/admin/orders/:requestId" element={<RoleProtectedRoute allowedRoles={["owner", "admin"]} redirectTo="/admin-access"><ApprovalDetail /></RoleProtectedRoute>} />
       <Route path="/admin/users" element={<RoleProtectedRoute allowedRoles={["owner", "admin"]} redirectTo="/admin-access"><AdminUsersPage /></RoleProtectedRoute>} />
       <Route path="/admin/roles" element={<RoleProtectedRoute allowedRoles={["owner", "admin"]} redirectTo="/admin-access"><AdminRolesPage /></RoleProtectedRoute>} />
       <Route path="/admin/store" element={<RoleProtectedRoute allowedRoles={["owner", "admin"]} redirectTo="/admin-access"><AdminStorePage /></RoleProtectedRoute>} />
