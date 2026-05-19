@@ -3,27 +3,14 @@ import { ingredientService, menuCatalogService, recipeService, type IngredientIt
 export type OrderStatus = "draft"|"pending_payment"|"paid"|"accepted"|"preparing"|"ready_for_pickup"|"completed"|"cancelled";
 export type PaymentStatus = "unpaid"|"pending"|"paid"|"rejected"|"refunded";
 export type FeeType = "percent"|"fixed"|"none";
+export type ChannelType = "direct"|"delivery"|"manual";
 
-export type SalesChannel = { id: string; name: string; feeType: FeeType; feeValue: number };
+export type SalesChannel = { id: string; name: string; type: ChannelType; feeType: FeeType; feeValue: number; isActive: boolean };
 export type OrderItemInput = { menuId: string; quantity: number; note?: string };
-export type OrderItem = {
-  menuId: string; menuName: string; quantity: number; note?: string;
-  unitPrice: number; unitCost: number; channelFeePerItem: number; lineAmount: number; lineCost: number; lineFee: number; lineProfit: number;
-};
-export type Order = {
-  id: string; channelId: string; channelName: string; status: OrderStatus; paymentStatus: PaymentStatus; items: OrderItem[];
-  totalAmount: number; totalCost: number; totalChannelFee: number; grossProfit: number; createdAt: string;
-};
+export type OrderItem = { menuId: string; menuName: string; quantity: number; note?: string; unitPrice: number; unitCost: number; channelFeePerItem: number; lineAmount: number; lineCost: number; lineFee: number; lineProfit: number };
+export type Order = { id: string; channelId: string; channelName: string; status: OrderStatus; paymentStatus: PaymentStatus; items: OrderItem[]; totalAmount: number; totalCost: number; totalChannelFee: number; grossProfit: number; createdAt: string };
 
-
-export type CustomerPickupPayload = {
-  lineUserId: string;
-  lineDisplayName: string;
-  phone?: string;
-  pickupTime: string;
-  orderNote?: string;
-};
-
+export type CustomerPickupPayload = { lineUserId: string; lineDisplayName: string; phone?: string; pickupTime: string; orderNote?: string };
 type StockMovement = { id: string; orderId: string; ingredientId: string; ingredientName: string; quantity: number; movementType: "out"|"restore"; reason: string; createdAt: string };
 
 const K_ORD = "valora:orders:v1";
@@ -32,28 +19,73 @@ const K_CHANNEL = "valora:channels:v1";
 const K_CH_PRICE = "valora:channel_prices:v1";
 
 const seedChannels: SalesChannel[] = [
-  { id: "c1", name: "Pick-up", feeType: "none", feeValue: 0 },
-  { id: "c2", name: "LINE OA", feeType: "fixed", feeValue: 5 },
-  { id: "c3", name: "Grab", feeType: "percent", feeValue: 30 },
-  { id: "c4", name: "LINE MAN", feeType: "percent", feeValue: 27 },
-  { id: "c5", name: "Shopee Food", feeType: "percent", feeValue: 25 },
+  { id: "c1", name: "Pick-up", type: "direct", feeType: "none", feeValue: 0, isActive: true },
+  { id: "c2", name: "LINE OA", type: "direct", feeType: "fixed", feeValue: 5, isActive: true },
+  { id: "c3", name: "Grab", type: "delivery", feeType: "percent", feeValue: 30, isActive: true },
+  { id: "c4", name: "LINE MAN", type: "delivery", feeType: "percent", feeValue: 27, isActive: true },
+  { id: "c5", name: "Shopee Food", type: "delivery", feeType: "percent", feeValue: 25, isActive: true },
+  { id: "c6", name: "Manual / Other", type: "manual", feeType: "none", feeValue: 0, isActive: true },
 ];
-const seedPrices: Record<string, Record<string, number>> = { c1: { m1: 75, m2: 60 }, c2: { m1: 80, m2: 65 }, c3: { m1: 95, m2: 79 }, c4: { m1: 90, m2: 75 }, c5: { m1: 88, m2: 73 } };
+const seedPrices: Record<string, Record<string, number>> = { c1: { m1: 75, m2: 60 }, c2: { m1: 80, m2: 65 }, c3: { m1: 95, m2: 79 }, c4: { m1: 90, m2: 75 }, c5: { m1: 88, m2: 73 }, c6: { m1: 75, m2: 60 } };
 
 const load=<T,>(k:string,f:T):T=>{ try{const r=localStorage.getItem(k); return r?JSON.parse(r):f;}catch{return f;} };
 const save=<T,>(k:string,v:T)=>localStorage.setItem(k,JSON.stringify(v));
 const uid=(p:string)=>`${p}_${Date.now()}_${Math.floor(Math.random()*10000)}`;
 
+function normalizeChannel(raw: any): SalesChannel {
+  const feeType: FeeType = raw?.feeType === "percent" || raw?.feeType === "fixed" ? raw.feeType : "none";
+  return {
+    id: raw?.id ?? uid("c"),
+    name: raw?.name ?? "Channel",
+    type: raw?.type === "delivery" || raw?.type === "manual" ? raw.type : "direct",
+    feeType,
+    feeValue: feeType === "none" ? 0 : Number(raw?.feeValue ?? 0),
+    isActive: raw?.isActive !== false,
+  };
+}
+
+function withDefaultChannels(channels: SalesChannel[]): SalesChannel[] {
+  const names = new Set(channels.map((c) => c.name));
+  const missing = seedChannels.filter((c) => !names.has(c.name));
+  return [...channels, ...missing].map(normalizeChannel);
+}
+
 export const orderService = {
-  listChannels(): SalesChannel[] { return load(K_CHANNEL, seedChannels); },
+  listChannels(includeInactive = true): SalesChannel[] {
+    const current = load<SalesChannel[]>(K_CHANNEL, seedChannels).map(normalizeChannel);
+    const merged = withDefaultChannels(current);
+    save(K_CHANNEL, merged);
+    return includeInactive ? merged : merged.filter((c) => c.isActive);
+  },
+  upsertChannel(payload: Partial<SalesChannel> & { name: string; type: ChannelType; feeType: FeeType; feeValue: number }) {
+    const all = this.listChannels(true);
+    const item: SalesChannel = {
+      id: payload.id ?? uid("c"),
+      name: payload.name.trim(),
+      type: payload.type,
+      feeType: payload.feeType,
+      feeValue: payload.feeType === "none" ? 0 : Number(payload.feeValue || 0),
+      isActive: payload.isActive ?? true,
+    };
+    const next = payload.id ? all.map((c) => c.id === payload.id ? item : c) : [item, ...all];
+    save(K_CHANNEL, next);
+  },
+  setChannelActive(channelId: string, isActive: boolean) {
+    const all = this.listChannels(true);
+    save(K_CHANNEL, all.map((c) => c.id === channelId ? { ...c, isActive } : c));
+  },
+  channelUsedByOrders(channelId: string): boolean {
+    return this.list().some((o) => o.channelId === channelId);
+  },
+
   list(): Order[] { return load(K_ORD, [] as Order[]); },
   get(id: string): Order | null { return this.list().find(o=>o.id===id) ?? null; },
   listMovements(orderId?: string): StockMovement[] { const all=load(K_MOV, [] as StockMovement[]); return orderId?all.filter(x=>x.orderId===orderId):all; },
 
   async quote(channelId: string, inputs: OrderItemInput[]) {
     const menus = await menuCatalogService.list();
-    const channels = this.listChannels();
-    const channel = channels.find(c=>c.id===channelId) ?? channels[0];
+    const channels = this.listChannels(false);
+    const channel = channels.find(c=>c.id===channelId) ?? channels[0] ?? this.listChannels(true)[0];
     const chPrice = load<Record<string, Record<string, number>>>(K_CH_PRICE, seedPrices)[channel.id] ?? {};
     const items: OrderItem[] = inputs.map((it) => {
       const menu = menus.find(m=>m.id===it.menuId);
@@ -68,14 +100,7 @@ export const orderService = {
       const lineProfit = lineAmount - lineCost - lineFee;
       return { menuId: it.menuId, menuName: menu?.name ?? "Unknown", quantity: it.quantity, note: it.note, unitPrice: price, unitCost: menuCost, channelFeePerItem, lineAmount, lineCost, lineFee, lineProfit };
     });
-    return {
-      items,
-      totalAmount: items.reduce((s,i)=>s+i.lineAmount,0),
-      totalCost: items.reduce((s,i)=>s+i.lineCost,0),
-      totalChannelFee: items.reduce((s,i)=>s+i.lineFee,0),
-      grossProfit: items.reduce((s,i)=>s+i.lineProfit,0),
-      channel,
-    };
+    return { items, totalAmount: items.reduce((s,i)=>s+i.lineAmount,0), totalCost: items.reduce((s,i)=>s+i.lineCost,0), totalChannelFee: items.reduce((s,i)=>s+i.lineFee,0), grossProfit: items.reduce((s,i)=>s+i.lineProfit,0), channel };
   },
 
   async createManualOrder(channelId: string, inputs: OrderItemInput[], status: OrderStatus = "accepted", paymentStatus: PaymentStatus = "unpaid") {
@@ -83,7 +108,6 @@ export const orderService = {
     const ingredients = await ingredientService.list();
     const nextIngredients = ingredients.map(i=>({...i}));
     const movements: StockMovement[] = [];
-
     if (["accepted","preparing","ready_for_pickup","completed"].includes(status)) {
       for (const item of inputs) {
         const recipe = recipeService.listByMenu(item.menuId);
@@ -97,10 +121,8 @@ export const orderService = {
         }
       }
     }
-
     const order: Order = { id: uid("ord"), channelId: q.channel.id, channelName: q.channel.name, status, paymentStatus, items: q.items, totalAmount: q.totalAmount, totalCost: q.totalCost, totalChannelFee: q.totalChannelFee, grossProfit: q.grossProfit, createdAt: new Date().toISOString() };
     movements.forEach(m=>m.orderId=order.id);
-
     save("valora:ingredients:v2", nextIngredients);
     save(K_MOV, [...load(K_MOV, [] as StockMovement[]), ...movements]);
     save(K_ORD, [order, ...this.list()]);
@@ -109,11 +131,8 @@ export const orderService = {
 
   async updateStatus(orderId: string, nextStatus: OrderStatus) {
     const orders = this.list();
-    const order = orders.find(o=>o.id===orderId);
-    if (!order) throw new Error("Order not found");
-    const prev = order.status;
-    order.status = nextStatus;
-
+    const order = orders.find(o=>o.id===orderId); if (!order) throw new Error("Order not found");
+    const prev = order.status; order.status = nextStatus;
     if (nextStatus === "cancelled" && ["draft","pending_payment","paid","accepted"].includes(prev)) {
       const ingredients = await ingredientService.list();
       const map = ingredients.map(x=>({...x}));
@@ -121,8 +140,7 @@ export const orderService = {
       for (const item of order.items) {
         const recipe = recipeService.listByMenu(item.menuId);
         for (const rr of recipe) {
-          const ing = map.find(x=>x.id===rr.ingredientId);
-          if (!ing) continue;
+          const ing = map.find(x=>x.id===rr.ingredientId); if (!ing) continue;
           const qty = rr.quantityUsed * item.quantity;
           ing.currentStock += qty;
           restoreMovements.push({ id: uid("mov"), orderId: order.id, ingredientId: ing.id, ingredientName: ing.name, quantity: qty, movementType: "restore", reason: "cancel_before_preparing", createdAt: new Date().toISOString() });
@@ -131,12 +149,10 @@ export const orderService = {
       save("valora:ingredients:v2", map);
       save(K_MOV, [...load(K_MOV, [] as StockMovement[]), ...restoreMovements]);
     }
-
     save(K_ORD, [...orders]);
     return order;
   },
 };
-
 
 export const customerOrderService = {
   async createPickupOrder(channelId: string, inputs: OrderItemInput[], customer: CustomerPickupPayload) {
