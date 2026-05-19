@@ -111,23 +111,32 @@ Then verify storage policies allow authenticated upload and public read as neede
 
 Valora Phase 1 now includes a **FastAPI transaction layer** so LIFF / Admin clients do not write directly to Supabase transaction tables.
 
-### Backend setup
+### Backend setup (confirmed)
 
 ```bash
-pip install -r backend_requirements.txt
+cd backend
+pip install -r requirements.txt
 export SUPABASE_URL=...
 export SUPABASE_SERVICE_ROLE_KEY=...
-uvicorn backend_app:app --reload --port 8000
+export DEFAULT_STORE_ID=348544d2-9a2c-4ba4-8875-bc106fed752e
+uvicorn app.main:app --reload --port 8000
+```
+
+Or from repository root:
+
+```bash
+uvicorn backend.app.main:app --host 0.0.0.0 --port ${PORT:-8000}
 ```
 
 ### Frontend setup
 
 ```env
-VITE_TRANSACTION_API_URL=http://localhost:8000
+VITE_API_BASE_URL=http://localhost:8000
 ```
 
-- LIFF order submit now posts to `POST /v1/orders/line-oa` (order_type=`manual`, channel=`line_oa`, pickup_type=`pickup`).
-- Admin approval flow endpoint is `POST /v1/admin/payments/{payment_id}/approve`.
+- LIFF order flow uses Phase 1 endpoints under `/api/*`.
+- Admin order/payment workflows also use `/api/*` endpoints.
+- `backend_app.py` is deprecated and must not be used.
 
 ## Valora Phase 1 Documentation
 
