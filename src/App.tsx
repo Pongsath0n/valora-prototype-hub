@@ -33,6 +33,12 @@ import AdminDashboardPage from "./pages/admin/AdminDashboard";
 import ApprovalsList from "./pages/admin/ApprovalsList";
 import ApprovalDetail from "./pages/admin/ApprovalDetail";
 import InsightsPage from "./pages/Insights";
+import AdminUsersPage from "./pages/admin/AdminUsers";
+import AdminRolesPage from "./pages/admin/AdminRoles";
+import AdminStorePage from "./pages/admin/AdminStore";
+import AdminSystemPage from "./pages/admin/AdminSystem";
+import AdminAuditLogsPage from "./pages/admin/AdminAuditLogs";
+
 
 const queryClient = new QueryClient();
 
@@ -55,7 +61,21 @@ function AppRoutes() {
       <Route path="/admin" element={<RoleProtectedRoute allowedRoles={["owner", "admin"]}><AdminDashboardPage /></RoleProtectedRoute>} />
       <Route path="/admin/approvals" element={<RoleProtectedRoute allowedRoles={["owner", "admin"]}><ApprovalsList /></RoleProtectedRoute>} />
       <Route path="/admin/approvals/:requestId" element={<RoleProtectedRoute allowedRoles={["owner", "admin"]}><ApprovalDetail /></RoleProtectedRoute>} />
+      <Route path="/admin/users" element={<RoleProtectedRoute allowedRoles={["owner", "admin"]}><AdminUsersPage /></RoleProtectedRoute>} />
+      <Route path="/admin/roles" element={<RoleProtectedRoute allowedRoles={["owner", "admin"]}><AdminRolesPage /></RoleProtectedRoute>} />
+      <Route path="/admin/store" element={<RoleProtectedRoute allowedRoles={["owner", "admin"]}><AdminStorePage /></RoleProtectedRoute>} />
+      <Route path="/admin/sales-channels" element={<RoleProtectedRoute allowedRoles={["owner", "admin"]}><SalesChannels /></RoleProtectedRoute>} />
+      <Route path="/admin/system" element={<RoleProtectedRoute allowedRoles={["owner", "admin"]}><AdminSystemPage /></RoleProtectedRoute>} />
+      <Route path="/admin/audit-logs" element={<RoleProtectedRoute allowedRoles={["owner", "admin"]}><AdminAuditLogsPage /></RoleProtectedRoute>} />
 
+
+      <Route path="/menus" element={<RoleProtectedRoute allowedRoles={["owner", "admin", "manager", "staff"]}><MenuManagement /></RoleProtectedRoute>} />
+      <Route path="/ingredients" element={<RoleProtectedRoute allowedRoles={["owner", "admin", "manager", "staff"]}><IngredientsStock /></RoleProtectedRoute>} />
+      <Route path="/recipes" element={<RoleProtectedRoute allowedRoles={["owner", "admin", "manager", "staff"]}><RecipeCosting /></RoleProtectedRoute>} />
+      <Route path="/sales-channels" element={<RoleProtectedRoute allowedRoles={["owner", "admin", "manager", "staff"]}><SalesChannels /></RoleProtectedRoute>} />
+      <Route path="/pos" element={<RoleProtectedRoute allowedRoles={["owner", "admin", "manager", "staff"]}><POSManualOrder /></RoleProtectedRoute>} />
+      <Route path="/orders" element={<RoleProtectedRoute allowedRoles={["owner", "admin", "manager", "staff"]}><OrdersPage /></RoleProtectedRoute>} />
+      <Route path="/reports" element={<RoleProtectedRoute allowedRoles={["owner", "admin", "manager", "staff"]}><Reports /></RoleProtectedRoute>} />
       <Route path="/app/dashboard" element={<RoleProtectedRoute allowedRoles={["owner", "admin", "manager", "staff"]}><Dashboard /></RoleProtectedRoute>} />
       <Route path="/app/scenario" element={<RoleProtectedRoute allowedRoles={["owner", "admin", "manager", "staff"]}><Scenario /></RoleProtectedRoute>} />
       <Route path="/app/promo" element={<RoleProtectedRoute allowedRoles={["owner", "admin", "manager", "staff"]}><Promo /></RoleProtectedRoute>} />
