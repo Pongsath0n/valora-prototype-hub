@@ -27,6 +27,7 @@ const mainNav = [
   { title: "POS", path: "/app/pos", icon: ShoppingCart },
   { title: "ออเดอร์", path: "/app/orders", icon: ClipboardList },
   { title: "รายงาน", path: "/app/reports", icon: BarChart3 },
+  { title: "วิเคราะห์สถานการณ์", path: "/dashboard/insights", icon: BarChart3 },
 ];
 
 const utilityNav = [

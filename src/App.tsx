@@ -32,6 +32,7 @@ import OrderSuccessPage from "./pages/liff/OrderSuccess";
 import AdminDashboardPage from "./pages/admin/AdminDashboard";
 import ApprovalsList from "./pages/admin/ApprovalsList";
 import ApprovalDetail from "./pages/admin/ApprovalDetail";
+import InsightsPage from "./pages/Insights";
 
 const queryClient = new QueryClient();
 
@@ -50,6 +51,7 @@ function AppRoutes() {
 
       <Route path="/onboarding" element={<RoleProtectedRoute allowedRoles={["owner", "admin", "manager", "staff"]}><Onboarding /></RoleProtectedRoute>} />
       <Route path="/dashboard" element={<RoleProtectedRoute allowedRoles={["owner", "admin", "manager", "staff"]}><Dashboard /></RoleProtectedRoute>} />
+      <Route path="/dashboard/insights" element={<RoleProtectedRoute allowedRoles={["owner", "admin", "manager"]}><InsightsPage /></RoleProtectedRoute>} />
       <Route path="/admin" element={<RoleProtectedRoute allowedRoles={["owner", "admin"]}><AdminDashboardPage /></RoleProtectedRoute>} />
       <Route path="/admin/approvals" element={<RoleProtectedRoute allowedRoles={["owner", "admin"]}><ApprovalsList /></RoleProtectedRoute>} />
       <Route path="/admin/approvals/:requestId" element={<RoleProtectedRoute allowedRoles={["owner", "admin"]}><ApprovalDetail /></RoleProtectedRoute>} />
