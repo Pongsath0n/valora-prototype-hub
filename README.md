@@ -95,3 +95,13 @@ for select
 to authenticated
 using (id = auth.uid());
 ```
+
+## Supabase Storage setup (menu-images)
+
+If image upload fails because bucket is missing, create the bucket manually in Supabase Dashboard:
+
+1. Storage → New bucket
+2. Bucket name: `menu-images`
+3. Public bucket: enabled (for public image URL)
+
+Then verify storage policies allow authenticated upload and public read as needed by your project security model.

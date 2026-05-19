@@ -44,20 +44,45 @@ function load<T>(k: string, fallback: T): T {
   } catch { return fallback; }
 }
 function save<T>(k: string, v: T) { localStorage.setItem(k, JSON.stringify(v)); }
-
 function uid(prefix: string) { return `${prefix}_${Date.now()}_${Math.floor(Math.random()*9999)}`; }
 
 export const menuCatalogService = {
   async list(): Promise<MenuItem[]> {
     try {
-      const { data } = await supabase.from("products").select("id,name,base_price,is_active,product_categories(name)").order("created_at", { ascending: false });
-      if (data) {
-        return data.map((r: any) => ({ id: r.id, name: r.name, category: r.product_categories?.name ?? "General", basePrice: Number(r.base_price ?? 0), isActive: !!r.is_active, imageUrl: null }));
+      const { data, error } = await supabase
+        .from("products")
+        .select("id,name,base_price,image_url,is_active,product_categories(name)")
+        .order("created_at", { ascending: false });
+
+      if (!error && data) {
+        return data.map((r: any) => ({
+          id: r.id,
+          name: r.name,
+          category: r.product_categories?.name ?? "General",
+          basePrice: Number(r.base_price ?? 0),
+          isActive: !!r.is_active,
+          imageUrl: r.image_url ?? null,
+        }));
       }
     } catch {}
     return load<MenuItem[]>(K_MENU, seedMenu);
   },
+
   async upsert(item: Partial<MenuItem> & { name: string; category: string; basePrice: number }): Promise<void> {
+    try {
+      if (item.id) {
+        const { error } = await supabase
+          .from("products")
+          .update({
+            name: item.name,
+            base_price: item.basePrice,
+            image_url: item.imageUrl ?? null,
+          })
+          .eq("id", item.id);
+        if (!error) return;
+      }
+    } catch {}
+
     const local = load<MenuItem[]>(K_MENU, seedMenu);
     if (item.id) {
       save(K_MENU, local.map((m) => m.id === item.id ? { ...m, ...item } as MenuItem : m));
@@ -65,7 +90,13 @@ export const menuCatalogService = {
       save(K_MENU, [{ id: uid("m"), isActive: true, imageUrl: null, ...item } as MenuItem, ...local]);
     }
   },
+
   async setActive(id: string, isActive: boolean) {
+    try {
+      const { error } = await supabase.from("products").update({ is_active: isActive }).eq("id", id);
+      if (!error) return;
+    } catch {}
+
     const local = load<MenuItem[]>(K_MENU, seedMenu);
     save(K_MENU, local.map((m) => m.id === id ? { ...m, isActive } : m));
   },
