@@ -49,7 +49,6 @@ VITE_SUPABASE_URL=your_supabase_url
 VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
 VITE_LIFF_ENABLED=false
 VITE_LIFF_ID=your_liff_id
-VITE_LINE_CHANNEL_ACCESS_TOKEN=your_line_channel_access_token
 ```
 
 _(ดูตัวอย่างได้จากไฟล์ `.env.example`)_
@@ -79,7 +78,6 @@ Copyright © 2026 Valora Hub. All rights reserved.
 
 - `VITE_LIFF_ENABLED`: set `true` to enable real LIFF runtime.
 - `VITE_LIFF_ID`: LIFF app ID from LINE Developers.
-- `VITE_LINE_CHANNEL_ACCESS_TOKEN`: Messaging API token (for server-side confirmation messaging integration).
 
 When LIFF is disabled or not configured, Valora uses mock LINE profile data for development.
 
@@ -170,8 +168,9 @@ LINE_CHANNEL_SECRET=
 > Frontend (`.env`)
 
 ```env
-LIFF_ID=
-API_BASE_URL=http://localhost:8000
+VITE_API_BASE_URL=http://localhost:8000
+VITE_LIFF_ID=
+VITE_DEFAULT_STORE_ID=348544d2-9a2c-4ba4-8875-bc106fed752e
 ```
 
 > หมายเหตุ implementation ปัจจุบันอาจใช้ prefix `VITE_` / `NEXT_PUBLIC_` ใน frontend build env ตาม framework
@@ -242,3 +241,60 @@ API_BASE_URL=http://localhost:8000
 - Delivery platform integration
 - Advanced stock deduction
 - Multi-branch advanced routing
+
+
+## Phase 1 Secure Environment & Architecture
+
+### Architecture (single path)
+
+```text
+LINE OA / Rich Menu
+→ LIFF POS (Frontend)
+→ FastAPI REST API (backend/app/main.py)
+→ Supabase Database + Storage
+→ Admin Dashboard
+→ LINE Messaging API
+→ Customer LINE
+```
+
+- Frontend (LIFF/Admin) calls FastAPI only.
+- FastAPI calls LINE Messaging API.
+- Frontend must never call LINE Messaging API directly.
+
+### Backend env (`backend/.env`)
+
+```env
+SUPABASE_URL=
+SUPABASE_SERVICE_ROLE_KEY=
+DEFAULT_STORE_ID=348544d2-9a2c-4ba4-8875-bc106fed752e
+LINE_CHANNEL_ACCESS_TOKEN=
+LINE_CHANNEL_SECRET=
+```
+
+### Frontend env (`.env`)
+
+```env
+VITE_API_BASE_URL=http://localhost:8000
+VITE_LIFF_ID=
+VITE_DEFAULT_STORE_ID=348544d2-9a2c-4ba4-8875-bc106fed752e
+```
+
+### Security note (important)
+
+- Never expose `SUPABASE_SERVICE_ROLE_KEY` to frontend.
+- Never expose `LINE_CHANNEL_ACCESS_TOKEN` to frontend.
+- Never prefix backend secrets with `VITE_` or `NEXT_PUBLIC_`.
+
+### Backend startup (confirmed)
+
+```bash
+cd backend
+pip install -r requirements.txt
+uvicorn app.main:app --reload --port 8000
+```
+
+Or from repository root:
+
+```bash
+uvicorn backend.app.main:app --host 0.0.0.0 --port ${PORT:-8000}
+```
