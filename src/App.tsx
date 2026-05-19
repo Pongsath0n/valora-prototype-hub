@@ -38,12 +38,13 @@ import AdminRolesPage from "./pages/admin/AdminRoles";
 import AdminStorePage from "./pages/admin/AdminStore";
 import AdminSystemPage from "./pages/admin/AdminSystem";
 import AdminAuditLogsPage from "./pages/admin/AdminAuditLogs";
+import AdminLoginPage from "./pages/admin/AdminLogin";
 
 
 const queryClient = new QueryClient();
 
-function RoleProtectedRoute({ children, allowedRoles }: { children: React.ReactNode; allowedRoles: AppRole[] }) {
-  const { checking, accessDenied } = useRoleGuard(allowedRoles);
+function RoleProtectedRoute({ children, allowedRoles, redirectTo }: { children: React.ReactNode; allowedRoles: AppRole[]; redirectTo?: string }) {
+  const { checking, accessDenied } = useRoleGuard(allowedRoles, { redirectTo });
   if (checking) return <div className="min-h-screen flex items-center justify-center">กำลังโหลด...</div>;
   if (accessDenied) return <div className="min-h-screen flex items-center justify-center text-xl font-semibold">Access Denied</div>;
   return <>{children}</>;
@@ -54,42 +55,43 @@ function AppRoutes() {
     <Routes>
       <Route path="/" element={<Landing />} />
       <Route path="/client-access" element={<Login />} />
+      <Route path="/admin-access" element={<AdminLoginPage />} />
 
-      <Route path="/onboarding" element={<RoleProtectedRoute allowedRoles={["owner", "admin", "manager", "staff"]}><Onboarding /></RoleProtectedRoute>} />
-      <Route path="/dashboard" element={<RoleProtectedRoute allowedRoles={["owner", "admin", "manager", "staff"]}><Dashboard /></RoleProtectedRoute>} />
-      <Route path="/dashboard/insights" element={<RoleProtectedRoute allowedRoles={["owner", "admin", "manager"]}><InsightsPage /></RoleProtectedRoute>} />
-      <Route path="/admin" element={<RoleProtectedRoute allowedRoles={["owner", "admin"]}><AdminDashboardPage /></RoleProtectedRoute>} />
-      <Route path="/admin/approvals" element={<RoleProtectedRoute allowedRoles={["owner", "admin"]}><ApprovalsList /></RoleProtectedRoute>} />
-      <Route path="/admin/approvals/:requestId" element={<RoleProtectedRoute allowedRoles={["owner", "admin"]}><ApprovalDetail /></RoleProtectedRoute>} />
-      <Route path="/admin/users" element={<RoleProtectedRoute allowedRoles={["owner", "admin"]}><AdminUsersPage /></RoleProtectedRoute>} />
-      <Route path="/admin/roles" element={<RoleProtectedRoute allowedRoles={["owner", "admin"]}><AdminRolesPage /></RoleProtectedRoute>} />
-      <Route path="/admin/store" element={<RoleProtectedRoute allowedRoles={["owner", "admin"]}><AdminStorePage /></RoleProtectedRoute>} />
-      <Route path="/admin/sales-channels" element={<RoleProtectedRoute allowedRoles={["owner", "admin"]}><SalesChannels /></RoleProtectedRoute>} />
-      <Route path="/admin/system" element={<RoleProtectedRoute allowedRoles={["owner", "admin"]}><AdminSystemPage /></RoleProtectedRoute>} />
-      <Route path="/admin/audit-logs" element={<RoleProtectedRoute allowedRoles={["owner", "admin"]}><AdminAuditLogsPage /></RoleProtectedRoute>} />
+      <Route path="/onboarding" element={<RoleProtectedRoute allowedRoles={["owner", "admin", "manager", "staff"]} redirectTo="/client-access"><Onboarding /></RoleProtectedRoute>} />
+      <Route path="/dashboard" element={<RoleProtectedRoute allowedRoles={["owner", "admin", "manager", "staff"]} redirectTo="/client-access"><Dashboard /></RoleProtectedRoute>} />
+      <Route path="/dashboard/insights" element={<RoleProtectedRoute allowedRoles={["owner", "admin", "manager"]} redirectTo="/client-access"><InsightsPage /></RoleProtectedRoute>} />
+      <Route path="/admin" element={<RoleProtectedRoute allowedRoles={["owner", "admin"]} redirectTo="/admin-access"><AdminDashboardPage /></RoleProtectedRoute>} />
+      <Route path="/admin/approvals" element={<RoleProtectedRoute allowedRoles={["owner", "admin"]} redirectTo="/admin-access"><ApprovalsList /></RoleProtectedRoute>} />
+      <Route path="/admin/approvals/:requestId" element={<RoleProtectedRoute allowedRoles={["owner", "admin"]} redirectTo="/admin-access"><ApprovalDetail /></RoleProtectedRoute>} />
+      <Route path="/admin/users" element={<RoleProtectedRoute allowedRoles={["owner", "admin"]} redirectTo="/admin-access"><AdminUsersPage /></RoleProtectedRoute>} />
+      <Route path="/admin/roles" element={<RoleProtectedRoute allowedRoles={["owner", "admin"]} redirectTo="/admin-access"><AdminRolesPage /></RoleProtectedRoute>} />
+      <Route path="/admin/store" element={<RoleProtectedRoute allowedRoles={["owner", "admin"]} redirectTo="/admin-access"><AdminStorePage /></RoleProtectedRoute>} />
+      <Route path="/admin/sales-channels" element={<RoleProtectedRoute allowedRoles={["owner", "admin"]} redirectTo="/admin-access"><SalesChannels /></RoleProtectedRoute>} />
+      <Route path="/admin/system" element={<RoleProtectedRoute allowedRoles={["owner", "admin"]} redirectTo="/admin-access"><AdminSystemPage /></RoleProtectedRoute>} />
+      <Route path="/admin/audit-logs" element={<RoleProtectedRoute allowedRoles={["owner", "admin"]} redirectTo="/admin-access"><AdminAuditLogsPage /></RoleProtectedRoute>} />
 
 
-      <Route path="/menus" element={<RoleProtectedRoute allowedRoles={["owner", "admin", "manager", "staff"]}><MenuManagement /></RoleProtectedRoute>} />
-      <Route path="/ingredients" element={<RoleProtectedRoute allowedRoles={["owner", "admin", "manager", "staff"]}><IngredientsStock /></RoleProtectedRoute>} />
-      <Route path="/recipes" element={<RoleProtectedRoute allowedRoles={["owner", "admin", "manager", "staff"]}><RecipeCosting /></RoleProtectedRoute>} />
-      <Route path="/sales-channels" element={<RoleProtectedRoute allowedRoles={["owner", "admin", "manager", "staff"]}><SalesChannels /></RoleProtectedRoute>} />
-      <Route path="/pos" element={<RoleProtectedRoute allowedRoles={["owner", "admin", "manager", "staff"]}><POSManualOrder /></RoleProtectedRoute>} />
-      <Route path="/orders" element={<RoleProtectedRoute allowedRoles={["owner", "admin", "manager", "staff"]}><OrdersPage /></RoleProtectedRoute>} />
-      <Route path="/reports" element={<RoleProtectedRoute allowedRoles={["owner", "admin", "manager", "staff"]}><Reports /></RoleProtectedRoute>} />
-      <Route path="/app/dashboard" element={<RoleProtectedRoute allowedRoles={["owner", "admin", "manager", "staff"]}><Dashboard /></RoleProtectedRoute>} />
-      <Route path="/app/scenario" element={<RoleProtectedRoute allowedRoles={["owner", "admin", "manager", "staff"]}><Scenario /></RoleProtectedRoute>} />
-      <Route path="/app/promo" element={<RoleProtectedRoute allowedRoles={["owner", "admin", "manager", "staff"]}><Promo /></RoleProtectedRoute>} />
-      <Route path="/app/delivery" element={<RoleProtectedRoute allowedRoles={["owner", "admin", "manager", "staff"]}><Delivery /></RoleProtectedRoute>} />
-      <Route path="/app/reports" element={<RoleProtectedRoute allowedRoles={["owner", "admin", "manager", "staff"]}><Reports /></RoleProtectedRoute>} />
-      <Route path="/app/menu" element={<RoleProtectedRoute allowedRoles={["owner", "admin", "manager", "staff"]}><MenuManagement /></RoleProtectedRoute>} />
-      <Route path="/app/ingredients" element={<RoleProtectedRoute allowedRoles={["owner", "admin", "manager", "staff"]}><IngredientsStock /></RoleProtectedRoute>} />
-      <Route path="/app/recipes" element={<RoleProtectedRoute allowedRoles={["owner", "admin", "manager", "staff"]}><RecipeCosting /></RoleProtectedRoute>} />
-      <Route path="/app/channels" element={<RoleProtectedRoute allowedRoles={["owner", "admin", "manager", "staff"]}><SalesChannels /></RoleProtectedRoute>} />
-      <Route path="/app/channel-pricing" element={<RoleProtectedRoute allowedRoles={["owner", "admin", "manager", "staff"]}><ChannelPricing /></RoleProtectedRoute>} />
-      <Route path="/app/pos" element={<RoleProtectedRoute allowedRoles={["owner", "admin", "manager", "staff"]}><POSManualOrder /></RoleProtectedRoute>} />
-      <Route path="/app/orders" element={<RoleProtectedRoute allowedRoles={["owner", "admin", "manager", "staff"]}><OrdersPage /></RoleProtectedRoute>} />
-      <Route path="/app/orders/:id" element={<RoleProtectedRoute allowedRoles={["owner", "admin", "manager", "staff"]}><OrderDetailPage /></RoleProtectedRoute>} />
-      <Route path="/app/settings" element={<RoleProtectedRoute allowedRoles={["owner", "admin", "manager", "staff"]}><Settings /></RoleProtectedRoute>} />
+      <Route path="/menus" element={<RoleProtectedRoute allowedRoles={["owner", "admin", "manager", "staff"]} redirectTo="/client-access"><MenuManagement /></RoleProtectedRoute>} />
+      <Route path="/ingredients" element={<RoleProtectedRoute allowedRoles={["owner", "admin", "manager", "staff"]} redirectTo="/client-access"><IngredientsStock /></RoleProtectedRoute>} />
+      <Route path="/recipes" element={<RoleProtectedRoute allowedRoles={["owner", "admin", "manager", "staff"]} redirectTo="/client-access"><RecipeCosting /></RoleProtectedRoute>} />
+      <Route path="/sales-channels" element={<RoleProtectedRoute allowedRoles={["owner", "admin", "manager", "staff"]} redirectTo="/client-access"><SalesChannels /></RoleProtectedRoute>} />
+      <Route path="/pos" element={<RoleProtectedRoute allowedRoles={["owner", "admin", "manager", "staff"]} redirectTo="/client-access"><POSManualOrder /></RoleProtectedRoute>} />
+      <Route path="/orders" element={<RoleProtectedRoute allowedRoles={["owner", "admin", "manager", "staff"]} redirectTo="/client-access"><OrdersPage /></RoleProtectedRoute>} />
+      <Route path="/reports" element={<RoleProtectedRoute allowedRoles={["owner", "admin", "manager", "staff"]} redirectTo="/client-access"><Reports /></RoleProtectedRoute>} />
+      <Route path="/app/dashboard" element={<RoleProtectedRoute allowedRoles={["owner", "admin", "manager", "staff"]} redirectTo="/client-access"><Dashboard /></RoleProtectedRoute>} />
+      <Route path="/app/scenario" element={<RoleProtectedRoute allowedRoles={["owner", "admin", "manager", "staff"]} redirectTo="/client-access"><Scenario /></RoleProtectedRoute>} />
+      <Route path="/app/promo" element={<RoleProtectedRoute allowedRoles={["owner", "admin", "manager", "staff"]} redirectTo="/client-access"><Promo /></RoleProtectedRoute>} />
+      <Route path="/app/delivery" element={<RoleProtectedRoute allowedRoles={["owner", "admin", "manager", "staff"]} redirectTo="/client-access"><Delivery /></RoleProtectedRoute>} />
+      <Route path="/app/reports" element={<RoleProtectedRoute allowedRoles={["owner", "admin", "manager", "staff"]} redirectTo="/client-access"><Reports /></RoleProtectedRoute>} />
+      <Route path="/app/menu" element={<RoleProtectedRoute allowedRoles={["owner", "admin", "manager", "staff"]} redirectTo="/client-access"><MenuManagement /></RoleProtectedRoute>} />
+      <Route path="/app/ingredients" element={<RoleProtectedRoute allowedRoles={["owner", "admin", "manager", "staff"]} redirectTo="/client-access"><IngredientsStock /></RoleProtectedRoute>} />
+      <Route path="/app/recipes" element={<RoleProtectedRoute allowedRoles={["owner", "admin", "manager", "staff"]} redirectTo="/client-access"><RecipeCosting /></RoleProtectedRoute>} />
+      <Route path="/app/channels" element={<RoleProtectedRoute allowedRoles={["owner", "admin", "manager", "staff"]} redirectTo="/client-access"><SalesChannels /></RoleProtectedRoute>} />
+      <Route path="/app/channel-pricing" element={<RoleProtectedRoute allowedRoles={["owner", "admin", "manager", "staff"]} redirectTo="/client-access"><ChannelPricing /></RoleProtectedRoute>} />
+      <Route path="/app/pos" element={<RoleProtectedRoute allowedRoles={["owner", "admin", "manager", "staff"]} redirectTo="/client-access"><POSManualOrder /></RoleProtectedRoute>} />
+      <Route path="/app/orders" element={<RoleProtectedRoute allowedRoles={["owner", "admin", "manager", "staff"]} redirectTo="/client-access"><OrdersPage /></RoleProtectedRoute>} />
+      <Route path="/app/orders/:id" element={<RoleProtectedRoute allowedRoles={["owner", "admin", "manager", "staff"]} redirectTo="/client-access"><OrderDetailPage /></RoleProtectedRoute>} />
+      <Route path="/app/settings" element={<RoleProtectedRoute allowedRoles={["owner", "admin", "manager", "staff"]} redirectTo="/client-access"><Settings /></RoleProtectedRoute>} />
 
       <Route path="/liff/menu" element={<CustomerMenuPage />} />
       <Route path="/liff/menu/:id" element={<MenuDetailPage />} />

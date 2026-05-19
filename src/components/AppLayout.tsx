@@ -1,8 +1,6 @@
 import { NavLink } from "react-router-dom";
 import { LayoutDashboard, Soup, Package, BookOpenCheck, Store, Calculator, ShoppingCart, ClipboardList, BarChart3, Settings, LogOut, Menu, X } from "lucide-react";
-import { useEffect, useState } from "react";
-import { useAuth } from "@/contexts/AuthContext";
-import { supabase } from "@/lib/supabase";
+import { useState } from "react";
 import LogoBrand from "@/components/LogoBrand";
 
 function NavItem({ path, icon: Icon, title }: { path: string; icon: React.ElementType; title: string }) {
@@ -11,11 +9,6 @@ function NavItem({ path, icon: Icon, title }: { path: string; icon: React.Elemen
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const { user } = useAuth();
-  const [role, setRole] = useState<string | null>(null);
-
-  useEffect(() => { if (!user) return; supabase.from("profiles").select("role").eq("id", user.id).maybeSingle().then(({ data }) => setRole(data?.role ?? null)); }, [user]);
-
   const mainNav = [
     { title: "แดชบอร์ด", path: "/app/dashboard", icon: LayoutDashboard },
     { title: "เมนู", path: "/app/menu", icon: Soup },
@@ -28,7 +21,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     { title: "รายงาน", path: "/app/reports", icon: BarChart3 },
     { title: "วิเคราะห์สถานการณ์", path: "/dashboard/insights", icon: BarChart3 },
   ];
-  const systemNav = role === "owner" || role === "admin" ? [{ title: "ศูนย์ควบคุมระบบ", path: "/admin", icon: Settings }] : [];
   const utilityNav = [{ title: "ตั้งค่า", path: "/app/settings", icon: Settings }];
 
   return <div className="min-h-screen flex w-full bg-background">
@@ -37,9 +29,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       <nav className="flex-1 py-4 px-3 space-y-0.5 overflow-y-auto">
         <p className="text-[10px] font-semibold text-sidebar-foreground/40 uppercase tracking-widest px-3 mb-2">เมนูหลัก</p>
         {mainNav.map((item) => <NavItem key={item.path} {...item} />)}
-        {systemNav.length ? <><p className="text-[10px] font-semibold text-sidebar-foreground/40 uppercase tracking-widest px-3 mt-4 mb-2">System Control</p>{systemNav.map((item)=><NavItem key={item.path} {...item} />)}</> : null}
+        
       </nav>
-      <div className="px-3 py-4 border-t border-sidebar-border space-y-0.5"><p className="text-[10px] font-semibold text-sidebar-foreground/40 uppercase tracking-widest px-3 mb-2">บัญชี</p>{utilityNav.map((item) => <NavItem key={item.path} {...item} />)}<NavLink to="/" className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-sidebar-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground transition-colors cursor-pointer"><LogOut className="w-4 h-4 flex-shrink-0" /><span>ออกจากระบบ</span></NavLink></div>
+      <div className="px-3 py-4 border-t border-sidebar-border space-y-0.5"><p className="text-[10px] font-semibold text-sidebar-foreground/40 uppercase tracking-widest px-3 mb-2">บัญชี</p>{utilityNav.map((item) => <NavItem key={item.path} {...item} />)}<NavLink to="/client-access" className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-sidebar-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground transition-colors cursor-pointer"><LogOut className="w-4 h-4 flex-shrink-0" /><span>ออกจากระบบ</span></NavLink></div>
     </aside>
     <header className="md:hidden fixed top-0 left-0 right-0 z-50 bg-card border-b h-14 flex items-center justify-between px-4 shadow-sm"><LogoBrand size="sm" iconOnly /><button onClick={() => setSidebarOpen(!sidebarOpen)} className="p-2 text-foreground rounded-lg hover:bg-muted transition-colors">{sidebarOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}</button></header>
     <main className="flex-1 md:ml-56 pt-14 md:pt-0 pb-20 md:pb-0 min-h-screen overflow-x-hidden"><div className="max-w-5xl mx-auto px-3 sm:px-4 md:px-6 py-6 animate-fade-in">{children}</div></main>

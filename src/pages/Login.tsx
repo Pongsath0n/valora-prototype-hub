@@ -32,8 +32,7 @@ export default function LoginPage() {
       }
 
       // Check if user has completed Onboarding
-      const hasOnboarded = localStorage.getItem("valora:onboarded") === "1";
-      navigate(hasOnboarded ? "/dashboard" : "/onboarding", { replace: true });
+      navigate("/dashboard", { replace: true });
     } catch {
       setError("เกิดข้อผิดพลาด กรุณาลองใหม่");
     } finally {
@@ -49,9 +48,9 @@ export default function LoginPage() {
           <div className="flex justify-center mb-4">
             <LogoBrand size="md" />
           </div>
-          <h1 className="text-2xl font-bold text-foreground leading-snug">เข้าสู่ระบบ Valora</h1>
+          <h1 className="text-2xl font-bold text-foreground leading-snug">เข้าสู่ระบบร้าน</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            กรอกอีเมลและรหัสผ่านเพื่อเข้าใช้งาน
+            สำหรับผู้ใช้งานที่ต้องการเข้าสู่ระบบจัดการร้าน เช่น เมนู ออเดอร์ สต็อก รายงาน และการวิเคราะห์สถานการณ์
           </p>
         </div>
 
