@@ -4,9 +4,9 @@ import DataTable from "@/components/shared/DataTable";
 import FormField from "@/components/shared/FormField";
 import LoadingState from "@/components/shared/LoadingState";
 import StatusBadge from "@/components/shared/StatusBadge";
-import { ingredientService, type IngredientItem } from "@/features/store/catalogService";
+import { ingredientService, UNIT_OPTIONS, type IngredientItem } from "@/features/store/catalogService";
 
-const empty = { id: "", name: "", unit: "g", costPerUnit: "", currentStock: "", lowStockThreshold: "" };
+const empty = { id: "", name: "", unit: "gram", costPerUnit: "", currentStock: "", lowStockThreshold: "" };
 
 export default function IngredientsStock() {
   const [rows, setRows] = useState<IngredientItem[]>([]);
@@ -26,7 +26,7 @@ export default function IngredientsStock() {
   return <AppLayout><div className="space-y-4"><h1 className="page-title">วัตถุดิบและสต็อก</h1>
     <div className="stat-card grid md:grid-cols-3 gap-3">
       <FormField label="ชื่อ"><input className="form-input" value={form.name} onChange={(e)=>setForm({...form,name:e.target.value})}/></FormField>
-      <FormField label="หน่วย"><input className="form-input" value={form.unit} onChange={(e)=>setForm({...form,unit:e.target.value})}/></FormField>
+      <FormField label="หน่วย"><select className="form-input" value={form.unit} onChange={(e)=>setForm({...form,unit:e.target.value})}>{UNIT_OPTIONS.map((u)=><option key={u} value={u}>{u}</option>)}</select></FormField>
       <FormField label="ต้นทุนต่อหน่วย"><input type="number" className="form-input" value={form.costPerUnit} onChange={(e)=>setForm({...form,costPerUnit:e.target.value})}/></FormField>
       <FormField label="สต็อกปัจจุบัน"><input type="number" className="form-input" value={form.currentStock} onChange={(e)=>setForm({...form,currentStock:e.target.value})}/></FormField>
       <FormField label="จุดเตือนต่ำ"><input type="number" className="form-input" value={form.lowStockThreshold} onChange={(e)=>setForm({...form,lowStockThreshold:e.target.value})}/></FormField>

@@ -14,10 +14,12 @@ export default function RecipeCosting() {
 
   useEffect(() => { Promise.all([menuCatalogService.list(), ingredientService.list()]).then(([m, i]) => { setMenus(m); setIngredients(i); if (m[0]) setSelectedMenu(m[0].id); }); }, []);
   const recipeRows = useMemo(() => selectedMenu ? recipeService.listByMenu(selectedMenu) : [], [selectedMenu, tick]);
+  const selectedIngredient = ingredients.find((i) => i.id === ingredientId);
+
   const enriched = useMemo(() => recipeRows.map((r) => {
     const ing = ingredients.find((x) => x.id === r.ingredientId);
     const costPerUnit = ing?.costPerUnit ?? 0;
-    return { ...r, ingredient: ing?.name ?? "Unknown", unit: ing?.unit ?? "", costPerUnit, lineCost: Number((r.quantityUsed * costPerUnit).toFixed(2)) };
+    return { ...r, ingredient: ing?.name ?? "Unknown", unit: r.unit || ing?.unit || "", costPerUnit, lineCost: Number((r.quantityUsed * costPerUnit).toFixed(2)) };
   }), [recipeRows, ingredients]);
 
   const menu = menus.find((m) => m.id === selectedMenu);
@@ -29,7 +31,7 @@ export default function RecipeCosting() {
     if (!selectedMenu || !ingredientId || Number(qty) <= 0) return;
     const rows = recipeService.listByMenu(selectedMenu);
     const exists = rows.find((r) => r.ingredientId === ingredientId);
-    const next = exists ? rows.map((r) => r.ingredientId === ingredientId ? { ...r, quantityUsed: Number(qty) } : r) : [...rows, { ingredientId, quantityUsed: Number(qty) }];
+    const next = exists ? rows.map((r) => r.ingredientId === ingredientId ? { ...r, quantityUsed: Number(qty), unit: selectedIngredient?.unit ?? r.unit ?? "" } : r) : [...rows, { ingredientId, quantityUsed: Number(qty), unit: selectedIngredient?.unit ?? "" }];
     recipeService.setByMenu(selectedMenu, next);
     setQty("1");
     setTick((x) => x + 1);
@@ -45,7 +47,7 @@ export default function RecipeCosting() {
     <div className="stat-card grid md:grid-cols-4 gap-3">
       <FormField label="เลือกเมนู"><select className="form-input" value={selectedMenu} onChange={(e)=>setSelectedMenu(e.target.value)}>{menus.map((m)=><option key={m.id} value={m.id}>{m.name}</option>)}</select></FormField>
       <FormField label="วัตถุดิบ"><select className="form-input" value={ingredientId} onChange={(e)=>setIngredientId(e.target.value)}><option value="">เลือกวัตถุดิบ</option>{ingredients.map((i)=><option key={i.id} value={i.id}>{i.name}</option>)}</select></FormField>
-      <FormField label="ปริมาณที่ใช้"><input className="form-input" type="number" value={qty} onChange={(e)=>setQty(e.target.value)} /></FormField>
+      <FormField label="ปริมาณที่ใช้"><div className="flex items-center gap-2"><input className="form-input" type="number" value={qty} onChange={(e)=>setQty(e.target.value)} /><span className="text-sm text-muted-foreground min-w-16">{selectedIngredient?.unit ?? "-"}</span></div></FormField>
       <div className="flex items-end"><button className="bg-primary text-primary-foreground px-4 py-2 rounded" onClick={addRow}>เพิ่ม/อัปเดตสูตร</button></div>
     </div>
     <div className="grid md:grid-cols-3 gap-3">
