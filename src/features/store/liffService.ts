@@ -10,7 +10,7 @@ const MOCK: LiffProfile = {
 };
 
 export async function getLiffProfile(): Promise<LiffProfile> {
-  const liffId = import.meta.env.VITE_LIFF_ID;
+  const liffId = import.meta.env.VITE_LIFF_ID || import.meta.env.NEXT_PUBLIC_LIFF_ID;
   const enabled = import.meta.env.VITE_LIFF_ENABLED === "true";
 
   if (!enabled || !liffId || typeof window === "undefined") return MOCK;
