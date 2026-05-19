@@ -82,3 +82,16 @@ Copyright © 2026 Valora Hub. All rights reserved.
 - `VITE_LINE_CHANNEL_ACCESS_TOKEN`: Messaging API token (for server-side confirmation messaging integration).
 
 When LIFF is disabled or not configured, Valora uses mock LINE profile data for development.
+
+
+## Supabase RLS policy (profiles)
+
+If `/admin` shows `Access Denied` even for valid roles, ensure `profiles` allows users to read their own row (`profiles.id = auth.uid()`).
+
+```sql
+create policy "Users can read own profile"
+on public.profiles
+for select
+to authenticated
+using (id = auth.uid());
+```

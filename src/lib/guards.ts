@@ -1,60 +1,84 @@
-// ─── Admin Guards ─────────────────────────────────────────────────────────────
-// Role-based admin access via Supabase Auth + profiles.role column.
-// Replaces the old hardcoded password approach.
-
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/lib/supabase";
 
-/** Check if the currently logged-in user has admin role */
-export async function isAdmin(): Promise<boolean> {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return false;
+export type AppRole = "owner" | "admin" | "manager" | "staff" | null;
 
-  const { data } = await supabase
-    .from("profiles")
-    .select("role")
-    .eq("id", user.id)
-    .single();
+type GuardProfile = {
+  id: string;
+  email: string | null;
+  role: AppRole;
+  store_id?: string | null;
+};
 
-  return data?.role === "admin";
-}
-
-/** Hook that redirects non-admin users away from admin pages */
-export function useAdminGuard() {
+export function useRoleGuard(allowedRoles: AppRole[]) {
   const { user, loading: authLoading } = useAuth();
   const navigate = useNavigate();
   const [checking, setChecking] = useState(true);
-  const [isAdminUser, setIsAdminUser] = useState(false);
+  const [role, setRole] = useState<AppRole>(null);
+  const [accessDenied, setAccessDenied] = useState(false);
+
+  const normalizedAllowedRoles = useMemo(
+    () => allowedRoles.map((r) => (r ?? "").toLowerCase()),
+    [allowedRoles]
+  );
 
   useEffect(() => {
     if (authLoading) return;
 
     if (!user) {
-      navigate("/admin/login", { replace: true });
+      navigate("/client-access", { replace: true });
       return;
     }
 
     supabase
       .from("profiles")
-      .select("role")
+      .select("id, email, role, store_id")
       .eq("id", user.id)
-      .single()
-      .then(({ data }) => {
-        if (data?.role !== "admin") {
-          navigate("/admin/login", { replace: true });
-        } else {
-          setIsAdminUser(true);
+      .maybeSingle()
+      .then(({ data, error }) => {
+        const profile = (data as GuardProfile | null) ?? null;
+        const profileRole = ((profile?.role ?? null) as AppRole);
+        const normalizedProfileRole = (profileRole ?? "").toLowerCase();
+
+        if (import.meta.env.DEV) {
+          console.log("[useRoleGuard]", {
+            authUserId: user.id,
+            authEmail: user.email ?? null,
+            profileId: profile?.id ?? null,
+            profileEmail: profile?.email ?? null,
+            profileRole: profileRole,
+            storeId: profile?.store_id ?? null,
+            allowedRoles,
+          });
+          if (error) console.log("[useRoleGuard:error]", error);
         }
+
+        setRole(profileRole);
+
+        if (error || !profile || !normalizedAllowedRoles.includes(normalizedProfileRole)) {
+          setAccessDenied(true);
+        }
+
+        setChecking(false);
+      })
+      .catch((err) => {
+        if (import.meta.env.DEV) {
+          console.log("[useRoleGuard:catch]", err);
+        }
+        setAccessDenied(true);
         setChecking(false);
       });
-  }, [user, authLoading, navigate]);
+  }, [authLoading, user, navigate, allowedRoles, normalizedAllowedRoles]);
 
-  return { checking, isAdminUser };
+  return { checking, role, accessDenied };
 }
 
-/** Admin logout — signs out from Supabase entirely */
+export function useAdminGuard() {
+  return useRoleGuard(["owner", "admin"]);
+}
+
 export async function adminLogout() {
   await supabase.auth.signOut();
 }

@@ -1,6 +1,6 @@
 import { useState, useCallback } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
-import { useAdminGuard } from "@/lib/guards";
+import { useRoleGuard } from "@/lib/guards";
 import { useAuth } from "@/contexts/AuthContext";
 import { getApprovalRow, approvePayment, rejectPayment } from "@/services/adminService";
 import {
@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 
 export default function ApprovalDetailPage() {
-  const { checking } = useAdminGuard();
+  const { checking, accessDenied } = useRoleGuard(["owner", "admin"]);
   const { user } = useAuth();
   const { requestId } = useParams<{ requestId: string }>();
   const navigate = useNavigate();
@@ -49,6 +49,10 @@ export default function ApprovalDetailPage() {
     );
   }
 
+
+  if (accessDenied) {
+    return <div className="min-h-screen bg-background flex items-center justify-center text-xl font-semibold">Access Denied</div>;
+  }
   if (!row) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">

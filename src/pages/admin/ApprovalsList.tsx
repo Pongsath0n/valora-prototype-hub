@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { useAdminGuard, adminLogout } from "@/lib/guards";
+import { useRoleGuard, adminLogout } from "@/lib/guards";
 import { getApprovalRows, type ApprovalFilter } from "@/services/adminService";
 import {
   formatTHB,
@@ -15,7 +15,7 @@ import { LogOut, Filter, ExternalLink, Loader2 } from "lucide-react";
 import type { SubmissionStatus } from "@/features/billing/types";
 
 export default function ApprovalsListPage() {
-  const { checking } = useAdminGuard();
+  const { checking, accessDenied } = useRoleGuard(["owner", "admin"]);
   const navigate = useNavigate();
 
   const [statusFilter, setStatusFilter] = useState<SubmissionStatus | "ALL">("ALL");
@@ -40,6 +40,10 @@ export default function ApprovalsListPage() {
         </div>
       </div>
     );
+  }
+
+  if (accessDenied) {
+    return <div className="min-h-screen bg-background flex items-center justify-center text-xl font-semibold">Access Denied</div>;
   }
 
   return (

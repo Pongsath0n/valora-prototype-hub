@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { supabase } from "@/lib/supabase";
 import { AlertCircle, Loader2 } from "lucide-react";
 import LogoBrand from "@/components/LogoBrand";
@@ -33,7 +33,7 @@ export default function LoginPage() {
 
       // Check if user has completed Onboarding
       const hasOnboarded = localStorage.getItem("valora:onboarded") === "1";
-      navigate(hasOnboarded ? "/app/dashboard" : "/onboarding", { replace: true });
+      navigate(hasOnboarded ? "/dashboard" : "/onboarding", { replace: true });
     } catch {
       setError("เกิดข้อผิดพลาด กรุณาลองใหม่");
     } finally {
@@ -105,12 +105,7 @@ export default function LoginPage() {
           </button>
         </form>
 
-        <p className="text-center text-xs text-muted-foreground mt-4">
-          ยังไม่มีบัญชี?{" "}
-          <Link to="/auth/signup" className="text-accent font-medium hover:underline">
-            สมัครใช้งาน
-          </Link>
-        </p>
+        
       </div>
     </div>
   );
