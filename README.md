@@ -105,3 +105,26 @@ If image upload fails because bucket is missing, create the bucket manually in S
 3. Public bucket: enabled (for public image URL)
 
 Then verify storage policies allow authenticated upload and public read as needed by your project security model.
+
+
+## Phase 1 Transaction API (FastAPI)
+
+Valora Phase 1 now includes a **FastAPI transaction layer** so LIFF / Admin clients do not write directly to Supabase transaction tables.
+
+### Backend setup
+
+```bash
+pip install -r backend_requirements.txt
+export SUPABASE_URL=...
+export SUPABASE_SERVICE_ROLE_KEY=...
+uvicorn backend_app:app --reload --port 8000
+```
+
+### Frontend setup
+
+```env
+VITE_TRANSACTION_API_URL=http://localhost:8000
+```
+
+- LIFF order submit now posts to `POST /v1/orders/line-oa` (order_type=`manual`, channel=`line_oa`, pickup_type=`pickup`).
+- Admin approval flow endpoint is `POST /v1/admin/payments/{payment_id}/approve`.

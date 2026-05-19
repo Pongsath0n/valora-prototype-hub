@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { customerOrderService } from "@/features/store/orderService";
+import { createLineOaOrder } from "@/features/store/transactionApi";
 import { getLiffProfile } from "@/features/store/liffService";
 
 export default function OrderConfirmPage() {
@@ -15,7 +15,8 @@ export default function OrderConfirmPage() {
   async function confirm(){
     try{
       if(!pickupTime) throw new Error('Please select pickup time');
-      const order=await customerOrderService.createPickupOrder('c2',cart,{lineUserId:profile.userId,lineDisplayName:profile.displayName,phone,pickupTime,orderNote});
+      const result=await createLineOaOrder({lineUserId:profile.userId,lineDisplayName:profile.displayName,phone,pickupTime,orderNote,items:cart});
+      const order=result.order;
       localStorage.removeItem('valora:liff:cart');
       localStorage.setItem('valora:liff:last_order', order.id);
       nav('/liff/success');
