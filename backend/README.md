@@ -43,3 +43,17 @@ curl -X POST http://localhost:8000/api/payments/upload-slip -H 'Content-Type: ap
 # 5) approve
 curl -X PATCH http://localhost:8000/api/payments/<payment_id>/approve -H 'Content-Type: application/json' -d '{"confirmed_by":"admin@valora"}'
 ```
+
+
+## Run full Phase 1 manual API flow test
+
+Use the dedicated test guide:
+
+```bash
+cat ../docs/phase1-api-test.md
+```
+
+Recommended run order:
+1. Start backend (`uvicorn app.main:app --reload --port 8000`)
+2. Execute each curl step from `docs/phase1-api-test.md`
+3. Validate order/payment status transitions and log tables
