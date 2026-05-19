@@ -12,71 +12,95 @@ type GuardProfile = {
   store_id?: string | null;
 };
 
-export function useRoleGuard(allowedRoles: AppRole[]) {
+export function useRoleGuard(allowedRoles: Exclude<AppRole, null>[]) {
   const { user, loading: authLoading } = useAuth();
   const navigate = useNavigate();
+
   const [checking, setChecking] = useState(true);
   const [role, setRole] = useState<AppRole>(null);
   const [accessDenied, setAccessDenied] = useState(false);
 
-  const normalizedAllowedRoles = useMemo(
-    () => allowedRoles.map((r) => (r ?? "").toLowerCase()),
+  const allowedRolesKey = useMemo(
+    () => allowedRoles.map((role) => role.toLowerCase()).join("|"),
     [allowedRoles]
   );
 
   useEffect(() => {
-    if (authLoading) return;
+    let isMounted = true;
 
-    if (!user) {
-      navigate("/client-access", { replace: true });
-      return;
-    }
+    async function checkAccess() {
+      if (authLoading) return;
 
-    supabase
-      .from("profiles")
-      .select("id, email, role, store_id")
-      .eq("id", user.id)
-      .maybeSingle()
-      .then(({ data, error }) => {
-        const profile = (data as GuardProfile | null) ?? null;
-        const profileRole = ((profile?.role ?? null) as AppRole);
-        const normalizedProfileRole = (profileRole ?? "").toLowerCase();
+      setChecking(true);
+      setAccessDenied(false);
+      setRole(null);
 
-        if (import.meta.env.DEV) {
-          console.log("[useRoleGuard]", {
-            authUserId: user.id,
-            authEmail: user.email ?? null,
-            profileId: profile?.id ?? null,
-            profileEmail: profile?.email ?? null,
-            profileRole: profileRole,
-            storeId: profile?.store_id ?? null,
-            allowedRoles,
-          });
-          if (error) console.log("[useRoleGuard:error]", error);
-        }
+      if (!user) {
+        navigate("/client-access", { replace: true });
+        return;
+      }
 
-        setRole(profileRole);
+      const normalizedAllowedRoles = allowedRolesKey
+        .split("|")
+        .filter(Boolean);
 
-        if (error || !profile || !normalizedAllowedRoles.includes(normalizedProfileRole)) {
-          setAccessDenied(true);
-        }
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("id, email, role, store_id")
+        .eq("id", user.id)
+        .maybeSingle();
 
-        setChecking(false);
-      })
-      .catch((err) => {
-        if (import.meta.env.DEV) {
-          console.log("[useRoleGuard:catch]", err);
-        }
+      if (!isMounted) return;
+
+      const profile = (data as GuardProfile | null) ?? null;
+      const profileRole = profile?.role ?? null;
+      const normalizedProfileRole = (profileRole ?? "").toLowerCase();
+
+      if (import.meta.env.DEV) {
+        console.log("[useRoleGuard]", {
+          authUserId: user.id,
+          authEmail: user.email ?? null,
+          profileId: profile?.id ?? null,
+          profileEmail: profile?.email ?? null,
+          profileRole,
+          storeId: profile?.store_id ?? null,
+          allowedRoles: normalizedAllowedRoles,
+          error,
+        });
+      }
+
+      setRole(profileRole);
+
+      if (error || !profile) {
         setAccessDenied(true);
         setChecking(false);
-      });
-  }, [authLoading, user, navigate, allowedRoles, normalizedAllowedRoles]);
+        return;
+      }
+
+      const isAllowed = normalizedAllowedRoles.includes(
+        normalizedProfileRole
+      );
+
+      setAccessDenied(!isAllowed);
+      setChecking(false);
+    }
+
+    checkAccess();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [authLoading, user?.id, user?.email, navigate, allowedRolesKey]);
 
   return { checking, role, accessDenied };
 }
 
 export function useAdminGuard() {
   return useRoleGuard(["owner", "admin"]);
+}
+
+export function useDashboardGuard() {
+  return useRoleGuard(["owner", "admin", "manager", "staff"]);
 }
 
 export async function adminLogout() {
