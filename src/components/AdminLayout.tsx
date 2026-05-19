@@ -16,6 +16,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     { title: "ตั้งค่าร้าน", path: "/admin/store", icon: Store },
     { title: "ตั้งค่าช่องทางขาย", path: "/admin/sales-channels", icon: Workflow },
     { title: "ตรวจสอบระบบ", path: "/admin/system", icon: Activity },
+    { title: "Order Queue", path: "/admin/orders", icon: ClipboardList },
+    { title: "Payment Queue", path: "/admin/approvals", icon: ClipboardList },
     { title: "บันทึกเหตุการณ์", path: "/admin/audit-logs", icon: ClipboardList },
   ];
   return <div className="min-h-screen flex w-full bg-background">
