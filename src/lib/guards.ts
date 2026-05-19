@@ -46,3 +46,25 @@ export function useRoleGuard(allowedRoles?: AppRole[]) {
 export async function adminLogout() {
   await supabase.auth.signOut();
 }
+
+/** Roles allowed to access store-admin routes (/admin/*). */
+export const STORE_ADMIN_ROLES: AppRole[] = ["owner", "admin", "staff"];
+
+/**
+ * Roles allowed to access the internal system console (/system/*).
+ *
+ * TODO: introduce a dedicated `internal_system` (or platform staff) role once
+ * the role model supports it. For now we restrict to `owner` so the console
+ * is not exposed to store-level admins or staff.
+ */
+export const SYSTEM_CONSOLE_ROLES: AppRole[] = ["owner"];
+
+/** Convenience guard for store-admin routes. */
+export function useAdminGuard() {
+  return useRoleGuard(STORE_ADMIN_ROLES);
+}
+
+/** Convenience guard for the internal system console. */
+export function useSystemGuard() {
+  return useRoleGuard(SYSTEM_CONSOLE_ROLES);
+}

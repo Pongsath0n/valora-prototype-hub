@@ -4,7 +4,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
-import { useRoleGuard } from "@/lib/guards";
+import { STORE_ADMIN_ROLES, SYSTEM_CONSOLE_ROLES, useRoleGuard } from "@/lib/guards";
 
 import Landing from "./pages/Landing";
 import Login from "./pages/Login";
@@ -33,6 +33,19 @@ import OrderConfirmPage from "./pages/liff/OrderConfirm";
 import OrderSuccessPage from "./pages/liff/OrderSuccess";
 
 import AdminDashboardPage from "./pages/admin/AdminDashboard";
+import AdminOrdersPage from "./pages/admin/AdminOrders";
+import AdminOrderDetailPage from "./pages/admin/AdminOrderDetail";
+import AdminPaymentsPage from "./pages/admin/AdminPayments";
+import AdminPaymentDetailPage from "./pages/admin/AdminPaymentDetail";
+import AdminProductsPage from "./pages/admin/AdminProducts";
+import AdminStoreSettingsPage from "./pages/admin/AdminStoreSettings";
+import AdminSalesChannelsPage from "./pages/admin/AdminSalesChannels";
+
+import SystemOverviewPage from "./pages/system/SystemOverview";
+import SystemUsersPage from "./pages/system/SystemUsers";
+import SystemRolesPage from "./pages/system/SystemRoles";
+import SystemAuditLogsPage from "./pages/system/SystemAuditLogs";
+import SystemHealthPage from "./pages/system/SystemHealth";
 
 const queryClient = new QueryClient();
 
@@ -44,7 +57,15 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 }
 
 function AdminRoute({ children }: { children: React.ReactNode }) {
-  const { checking, accessDenied } = useRoleGuard(["owner", "admin"]);
+  const { checking, accessDenied } = useRoleGuard(STORE_ADMIN_ROLES);
+  if (checking) return <div className="min-h-screen flex items-center justify-center">กำลังโหลด...</div>;
+  if (accessDenied) return <div className="min-h-screen flex items-center justify-center text-xl font-semibold">Access Denied</div>;
+  return <>{children}</>;
+}
+
+function SystemRoute({ children }: { children: React.ReactNode }) {
+  // TODO: introduce a dedicated `internal_system` role; until then, only `owner` can access.
+  const { checking, accessDenied } = useRoleGuard(SYSTEM_CONSOLE_ROLES);
   if (checking) return <div className="min-h-screen flex items-center justify-center">กำลังโหลด...</div>;
   if (accessDenied) return <div className="min-h-screen flex items-center justify-center text-xl font-semibold">Access Denied</div>;
   return <>{children}</>;
@@ -58,7 +79,22 @@ function AppRoutes() {
 
       <Route path="/onboarding" element={<ProtectedRoute><Onboarding /></ProtectedRoute>} />
       <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+      {/* Store Admin Dashboard */}
       <Route path="/admin" element={<AdminRoute><AdminDashboardPage /></AdminRoute>} />
+      <Route path="/admin/orders" element={<AdminRoute><AdminOrdersPage /></AdminRoute>} />
+      <Route path="/admin/orders/:id" element={<AdminRoute><AdminOrderDetailPage /></AdminRoute>} />
+      <Route path="/admin/payments" element={<AdminRoute><AdminPaymentsPage /></AdminRoute>} />
+      <Route path="/admin/payments/:requestId" element={<AdminRoute><AdminPaymentDetailPage /></AdminRoute>} />
+      <Route path="/admin/products" element={<AdminRoute><AdminProductsPage /></AdminRoute>} />
+      <Route path="/admin/store" element={<AdminRoute><AdminStoreSettingsPage /></AdminRoute>} />
+      <Route path="/admin/sales-channels" element={<AdminRoute><AdminSalesChannelsPage /></AdminRoute>} />
+
+      {/* Internal System Console */}
+      <Route path="/system" element={<SystemRoute><SystemOverviewPage /></SystemRoute>} />
+      <Route path="/system/users" element={<SystemRoute><SystemUsersPage /></SystemRoute>} />
+      <Route path="/system/roles" element={<SystemRoute><SystemRolesPage /></SystemRoute>} />
+      <Route path="/system/health" element={<SystemRoute><SystemHealthPage /></SystemRoute>} />
+      <Route path="/system/audit-logs" element={<SystemRoute><SystemAuditLogsPage /></SystemRoute>} />
 
       <Route path="/app/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
       <Route path="/app/scenario" element={<ProtectedRoute><Scenario /></ProtectedRoute>} />
