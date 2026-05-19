@@ -29,16 +29,26 @@ const items = [
   },
 ];
 
-export default function Phase1Transparency() {
+export default function PhaseOneSection() {
   return (
-    <section id="transparency" className="border-t py-20 md:py-24">
+    <section
+      id="transparency"
+      className="border-t py-20 md:py-24"
+      aria-labelledby="phaseone-heading"
+    >
       <div className="mx-auto max-w-4xl px-4">
         <div className="text-center">
-          <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-info/30 bg-info/5 px-3 py-1 text-xs font-medium" style={{ color: "hsl(var(--info))" }}>
-            <Info className="h-3.5 w-3.5" />
+          <p
+            className="mb-4 inline-flex items-center gap-2 rounded-full border border-info/30 bg-info/5 px-3 py-1 text-xs font-medium"
+            style={{ color: "hsl(var(--info))" }}
+          >
+            <Info className="h-3.5 w-3.5" aria-hidden />
             ความโปร่งใสของ Phase 1
-          </div>
-          <h2 className="text-3xl font-bold tracking-tight text-foreground md:text-4xl">
+          </p>
+          <h2
+            id="phaseone-heading"
+            className="text-3xl font-bold tracking-tight text-foreground md:text-4xl"
+          >
             พูดตรง ๆ ว่าตอนนี้ระบบทำอะไรได้ และอะไรกำลังจะมา
           </h2>
           <p className="mt-4 text-base text-muted-foreground md:text-lg">

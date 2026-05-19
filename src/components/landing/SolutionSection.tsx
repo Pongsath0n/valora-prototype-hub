@@ -1,4 +1,11 @@
-import { CheckCircle2, ClipboardCheck, MessageCircle, Receipt, Smartphone, Wallet } from "lucide-react";
+import {
+  CheckCircle2,
+  ClipboardCheck,
+  MessageCircle,
+  Receipt,
+  Smartphone,
+  Wallet,
+} from "lucide-react";
 
 const steps = [
   {
@@ -14,7 +21,7 @@ const steps = [
   {
     icon: Wallet,
     title: "โอนเงินและแนบสลิป",
-    desc: "ลูกค้าโอนเข้าบัญชีร้านและอัปโหลดสลิปในระบบ ออเดอร์เข้าสถานะ \"รอตรวจสลิป\" ทันที",
+    desc: 'ลูกค้าโอนเข้าบัญชีร้านและอัปโหลดสลิปในระบบ ออเดอร์เข้าสถานะ "รอตรวจสลิป" ทันที',
   },
   {
     icon: Receipt,
@@ -28,16 +35,19 @@ const steps = [
   },
 ];
 
-export default function Solution() {
+export default function SolutionSection() {
   return (
-    <section className="border-t py-20 md:py-24">
+    <section className="border-t py-20 md:py-24" aria-labelledby="solution-heading">
       <div className="mx-auto max-w-6xl px-4">
         <div className="mx-auto max-w-2xl text-center">
-          <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-accent/30 bg-accent/10 px-3 py-1 text-xs font-medium text-foreground">
-            <CheckCircle2 className="h-3.5 w-3.5 text-accent" />
+          <p className="mb-4 inline-flex items-center gap-2 rounded-full border border-accent/30 bg-accent/10 px-3 py-1 text-xs font-medium text-foreground">
+            <CheckCircle2 className="h-3.5 w-3.5 text-accent" aria-hidden />
             วิธีที่ Valora ช่วย
-          </div>
-          <h2 className="text-3xl font-bold tracking-tight text-foreground md:text-4xl">
+          </p>
+          <h2
+            id="solution-heading"
+            className="text-3xl font-bold tracking-tight text-foreground md:text-4xl"
+          >
             ตั้งแต่ลูกค้าทักจนปิดยอดวัน อยู่ในระบบเดียว
           </h2>
           <p className="mt-4 text-base text-muted-foreground md:text-lg">
@@ -45,18 +55,18 @@ export default function Solution() {
           </p>
         </div>
 
-        <div className="mt-14 grid gap-6 lg:grid-cols-2">
+        <ol className="mt-14 grid gap-6 lg:grid-cols-2">
           {steps.map((s, i) => (
-            <div
+            <li
               key={s.title}
               className="relative flex gap-5 rounded-2xl border bg-card p-6 shadow-sm transition-shadow hover:shadow-md md:p-7"
             >
-              <div className="flex flex-col items-center">
+              <div className="flex flex-col items-center" aria-hidden>
                 <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary text-primary-foreground">
                   <s.icon className="h-5 w-5" />
                 </div>
                 {i < steps.length - 1 && (
-                  <div className="mt-3 hidden h-full w-px flex-1 bg-border lg:block" aria-hidden />
+                  <div className="mt-3 hidden h-full w-px flex-1 bg-border lg:block" />
                 )}
               </div>
               <div className="flex-1">
@@ -68,9 +78,9 @@ export default function Solution() {
                   {s.desc}
                 </p>
               </div>
-            </div>
+            </li>
           ))}
-        </div>
+        </ol>
       </div>
     </section>
   );

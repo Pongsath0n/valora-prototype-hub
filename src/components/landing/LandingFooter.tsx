@@ -9,10 +9,13 @@ const productLinks = [
   { href: "#transparency", label: "ความโปร่งใส Phase 1" },
 ];
 
-export default function MarketingFooter() {
+export default function LandingFooter() {
   const year = new Date().getFullYear();
   return (
-    <footer className="border-t bg-muted/30">
+    <footer className="border-t bg-muted/30" aria-labelledby="landing-footer-heading">
+      <h2 id="landing-footer-heading" className="sr-only">
+        ส่วนท้ายของหน้า
+      </h2>
       <div className="mx-auto max-w-6xl px-4 py-12 md:py-16">
         <div className="grid gap-10 md:grid-cols-3">
           <div>
@@ -23,7 +26,7 @@ export default function MarketingFooter() {
             </p>
           </div>
 
-          <div>
+          <nav aria-label="ลิงก์ผลิตภัณฑ์">
             <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
               ผลิตภัณฑ์
             </p>
@@ -55,7 +58,7 @@ export default function MarketingFooter() {
                 </Link>
               </li>
             </ul>
-          </div>
+          </nav>
 
           <div>
             <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
@@ -63,7 +66,7 @@ export default function MarketingFooter() {
             </p>
             <ul className="mt-3 space-y-2 text-sm">
               <li className="flex items-center gap-2 text-foreground/80">
-                <Mail className="h-4 w-4 text-muted-foreground" />
+                <Mail className="h-4 w-4 text-muted-foreground" aria-hidden />
                 <a
                   href="mailto:pongsathon.po@kkumail.com"
                   className="transition-colors hover:text-foreground"

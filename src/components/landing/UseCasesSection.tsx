@@ -27,15 +27,22 @@ const useCases = [
   },
 ];
 
-export default function UseCases() {
+export default function UseCasesSection() {
   return (
-    <section id="use-cases" className="border-t bg-muted/30 py-20 md:py-24">
+    <section
+      id="use-cases"
+      className="border-t bg-muted/30 py-20 md:py-24"
+      aria-labelledby="usecases-heading"
+    >
       <div className="mx-auto max-w-6xl px-4">
         <div className="mx-auto max-w-2xl text-center">
-          <div className="mb-4 inline-flex items-center gap-2 rounded-full border bg-card px-3 py-1 text-xs font-medium text-muted-foreground">
+          <p className="mb-4 inline-flex items-center gap-2 rounded-full border bg-card px-3 py-1 text-xs font-medium text-muted-foreground">
             เหมาะกับใคร
-          </div>
-          <h2 className="text-3xl font-bold tracking-tight text-foreground md:text-4xl">
+          </p>
+          <h2
+            id="usecases-heading"
+            className="text-3xl font-bold tracking-tight text-foreground md:text-4xl"
+          >
             ออกแบบมาเพื่อร้านเล็กที่ขายผ่าน LINE OA โดยเฉพาะ
           </h2>
           <p className="mt-4 text-base text-muted-foreground md:text-lg">
@@ -43,31 +50,33 @@ export default function UseCases() {
           </p>
         </div>
 
-        <div className="mt-12 grid gap-5 md:grid-cols-2">
+        <ul className="mt-12 grid gap-5 md:grid-cols-2">
           {useCases.map((u) => (
-            <div
+            <li
               key={u.title}
               className="flex flex-col rounded-2xl border bg-card p-6 shadow-sm transition-shadow hover:shadow-md md:p-8"
             >
-              <div className="mb-5 inline-flex h-12 w-12 items-center justify-center rounded-xl bg-accent/10 text-accent">
+              <div
+                className="mb-5 inline-flex h-12 w-12 items-center justify-center rounded-xl bg-accent/10 text-accent"
+                aria-hidden
+              >
                 <u.icon className="h-5 w-5" />
               </div>
               <h3 className="text-lg font-semibold text-foreground md:text-xl">{u.title}</h3>
-              <p className="mt-2 text-sm leading-relaxed text-muted-foreground md:text-base">{u.desc}</p>
+              <p className="mt-2 text-sm leading-relaxed text-muted-foreground md:text-base">
+                {u.desc}
+              </p>
               <ul className="mt-4 space-y-2">
                 {u.points.map((p) => (
-                  <li
-                    key={p}
-                    className="flex items-center gap-2 text-sm text-foreground/80"
-                  >
+                  <li key={p} className="flex items-center gap-2 text-sm text-foreground/80">
                     <span className="h-1.5 w-1.5 rounded-full bg-accent" aria-hidden />
                     {p}
                   </li>
                 ))}
               </ul>
-            </div>
+            </li>
           ))}
-        </div>
+        </ul>
       </div>
     </section>
   );

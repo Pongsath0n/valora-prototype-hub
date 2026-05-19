@@ -11,7 +11,7 @@ const navLinks = [
   { href: "#transparency", label: "ความโปร่งใส" },
 ];
 
-export default function MarketingNav() {
+export default function LandingNavbar() {
   const [open, setOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
 
@@ -35,7 +35,7 @@ export default function MarketingNav() {
           <LogoBrand size="sm" />
         </Link>
 
-        <nav className="hidden items-center gap-7 md:flex" aria-label="หลัก">
+        <nav className="hidden items-center gap-7 md:flex" aria-label="เมนูหลัก">
           {navLinks.map((link) => (
             <a
               key={link.href}
@@ -49,10 +49,14 @@ export default function MarketingNav() {
 
         <div className="hidden items-center gap-2 md:flex">
           <Button asChild variant="ghost" size="sm">
-            <Link to="/client-access">เข้าสู่ระบบ</Link>
+            <Link to="/client-access" aria-label="เข้าสู่ระบบ Valora">
+              เข้าสู่ระบบ
+            </Link>
           </Button>
           <Button asChild size="sm">
-            <Link to="/client-access">ลองใช้งานระบบ</Link>
+            <Link to="/client-access" aria-label="ลองใช้งานระบบ Valora">
+              ลองใช้งานระบบ
+            </Link>
           </Button>
         </div>
 
@@ -62,13 +66,14 @@ export default function MarketingNav() {
           className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-border bg-background text-foreground md:hidden"
           aria-label={open ? "ปิดเมนู" : "เปิดเมนู"}
           aria-expanded={open}
+          aria-controls="landing-mobile-menu"
         >
-          {open ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+          {open ? <X className="h-5 w-5" aria-hidden /> : <Menu className="h-5 w-5" aria-hidden />}
         </button>
       </div>
 
       {open && (
-        <div className="border-t bg-background md:hidden">
+        <div id="landing-mobile-menu" className="border-t bg-background md:hidden">
           <nav className="mx-auto flex max-w-6xl flex-col gap-1 px-4 py-3" aria-label="เมนูมือถือ">
             {navLinks.map((link) => (
               <a
@@ -82,10 +87,14 @@ export default function MarketingNav() {
             ))}
             <div className="mt-2 grid grid-cols-2 gap-2">
               <Button asChild variant="outline" size="sm" onClick={() => setOpen(false)}>
-                <Link to="/client-access">เข้าสู่ระบบ</Link>
+                <Link to="/client-access" aria-label="เข้าสู่ระบบ Valora">
+                  เข้าสู่ระบบ
+                </Link>
               </Button>
               <Button asChild size="sm" onClick={() => setOpen(false)}>
-                <Link to="/client-access">ลองใช้งานระบบ</Link>
+                <Link to="/client-access" aria-label="ลองใช้งานระบบ Valora">
+                  ลองใช้งานระบบ
+                </Link>
               </Button>
             </div>
           </nav>

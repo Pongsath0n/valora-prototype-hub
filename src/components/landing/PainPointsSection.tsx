@@ -1,4 +1,11 @@
-import { AlertTriangle, Banknote, ClipboardX, MessageSquareWarning, Settings2, UserCog } from "lucide-react";
+import {
+  AlertTriangle,
+  Banknote,
+  ClipboardX,
+  MessageSquareWarning,
+  Settings2,
+  UserCog,
+} from "lucide-react";
 
 const painPoints = [
   {
@@ -28,16 +35,22 @@ const painPoints = [
   },
 ];
 
-export default function PainPoints() {
+export default function PainPointsSection() {
   return (
-    <section className="border-t bg-muted/30 py-20 md:py-24">
+    <section
+      className="border-t bg-muted/30 py-20 md:py-24"
+      aria-labelledby="painpoints-heading"
+    >
       <div className="mx-auto max-w-6xl px-4">
         <div className="mx-auto max-w-2xl text-center">
-          <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-destructive/20 bg-destructive/5 px-3 py-1 text-xs font-medium text-destructive">
-            <AlertTriangle className="h-3.5 w-3.5" />
+          <p className="mb-4 inline-flex items-center gap-2 rounded-full border border-destructive/20 bg-destructive/5 px-3 py-1 text-xs font-medium text-destructive">
+            <AlertTriangle className="h-3.5 w-3.5" aria-hidden />
             ปัญหาที่ร้านเล็กเจอทุกวัน
-          </div>
-          <h2 className="text-3xl font-bold tracking-tight text-foreground md:text-4xl">
+          </p>
+          <h2
+            id="painpoints-heading"
+            className="text-3xl font-bold tracking-tight text-foreground md:text-4xl"
+          >
             ขายดีก็เหนื่อย ขายไม่ดีก็เครียด
           </h2>
           <p className="mt-4 text-base text-muted-foreground md:text-lg">
@@ -45,20 +58,23 @@ export default function PainPoints() {
           </p>
         </div>
 
-        <div className="mt-12 grid gap-5 md:grid-cols-2 lg:grid-cols-3">
+        <ul className="mt-12 grid gap-5 md:grid-cols-2 lg:grid-cols-3">
           {painPoints.map((p) => (
-            <div
+            <li
               key={p.title}
               className="group rounded-2xl border bg-card p-6 transition-all hover:-translate-y-0.5 hover:shadow-md"
             >
-              <div className="mb-4 inline-flex h-11 w-11 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
+              <div
+                className="mb-4 inline-flex h-11 w-11 items-center justify-center rounded-xl bg-destructive/10 text-destructive"
+                aria-hidden
+              >
                 <p.icon className="h-5 w-5" />
               </div>
               <h3 className="text-lg font-semibold text-foreground">{p.title}</h3>
               <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{p.desc}</p>
-            </div>
+            </li>
           ))}
-        </div>
+        </ul>
       </div>
     </section>
   );
