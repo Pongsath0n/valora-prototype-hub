@@ -1,5 +1,6 @@
-from fastapi import APIRouter, Query, HTTPException
+from fastapi import APIRouter, Query
 from ..core.supabase import get_supabase
+from ..core.errors import internal_error
 from ..repositories.order_repo import OrderRepo
 from ..repositories.payment_repo import PaymentRepo
 from ..services.order_service import OrderService
@@ -25,7 +26,7 @@ def list_orders(
             end_date=end_date,
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise internal_error(e, 'admin.list_orders')
 
 
 @router.get('/payments/pending')
@@ -33,4 +34,4 @@ def pending_payments(store_id: str | None = Query(None)):
     try:
         return PaymentService(PaymentRepo(get_supabase())).pending_for_admin(store_id)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise internal_error(e, 'admin.pending_payments')

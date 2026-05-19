@@ -1,5 +1,6 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from ..core.supabase import get_supabase
+from ..core.errors import internal_error
 from ..repositories.customer_repo import CustomerRepo
 from ..schemas.customer import UpsertLineCustomerRequest
 from ..services.customer_service import CustomerService
@@ -14,4 +15,4 @@ def upsert_line_customer(body: UpsertLineCustomerRequest):
         customer_id = service.upsert_line_customer(body.store_id, body.line_user_id, body.display_name, body.phone)
         return {'customer_id': customer_id}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise internal_error(e, 'customers.upsert_line_customer')
