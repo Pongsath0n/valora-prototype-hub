@@ -63,7 +63,7 @@ export default function AdminPaymentDetailPage() {
       <AdminLayout title="รายละเอียดการชำระเงิน" subtitle="">
         <div className="text-center space-y-3 py-8">
           <p className="text-muted-foreground">ไม่พบข้อมูลการชำระเงิน</p>
-          <Link to="/admin/payments" className="text-sm text-accent hover:underline">
+          <Link to="/store-admin/payments" className="text-sm text-accent hover:underline">
             กลับรายการ
           </Link>
         </div>
@@ -109,7 +109,7 @@ export default function AdminPaymentDetailPage() {
     >
       <div className="flex items-center gap-2 text-sm">
         <Link
-          to="/admin/payments"
+          to="/store-admin/payments"
           className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground transition-colors"
         >
           <ArrowLeft className="w-4 h-4" /> กลับไปที่ Payment Queue

@@ -124,7 +124,7 @@ export default function AdminPaymentsPage() {
                   </td>
                   <td className="py-3 text-right">
                     <Link
-                      to={`/admin/payments/${submission.submission_id}`}
+                      to={`/store-admin/payments/${submission.submission_id}`}
                       className="flex items-center gap-1 text-xs text-accent hover:underline justify-end"
                     >
                       ดูรายละเอียด <ExternalLink className="w-3 h-3" />

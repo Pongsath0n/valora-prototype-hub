@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
+import { ArrowLeft } from "lucide-react";
 import AdminLayout from "@/components/admin/AdminLayout";
 import StatusBadge from "@/components/shared/StatusBadge";
 import DataTable from "@/components/shared/DataTable";
@@ -26,8 +27,11 @@ export default function AdminOrderDetailPage() {
       <AdminLayout title="รายละเอียดออเดอร์" subtitle="">
         <div className="stat-card">
           <p>ไม่พบออเดอร์</p>
-          <Link to="/admin/orders" className="text-sm text-accent hover:underline">
-            กลับไปที่ Order Queue
+          <Link
+            to="/store-admin/orders"
+            className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <ArrowLeft className="w-4 h-4" /> กลับไปที่ Order Queue
           </Link>
         </div>
       </AdminLayout>

@@ -1,27 +1,19 @@
 import { NavLink, useNavigate } from "react-router-dom";
-import {
-  ArrowLeft,
-  ClipboardList,
-  CreditCard,
-  LayoutDashboard,
-  LogOut,
-  Menu,
-  Settings,
-  Soup,
-  Store,
-  X,
-} from "lucide-react";
+import { ArrowLeft, CreditCard, LayoutDashboard, LogOut, Menu, Settings, Soup, Store, X } from "lucide-react";
 import { useState } from "react";
 import LogoBrand from "@/components/LogoBrand";
 import { useAuth } from "@/contexts/AuthContext";
 
 const storeAdminNav = [
-  { title: "ภาพรวมร้าน", path: "/admin", icon: LayoutDashboard, end: true },
-  { title: "Order Queue", path: "/admin/orders", icon: ClipboardList },
-  { title: "Payment Queue", path: "/admin/payments", icon: CreditCard },
-  { title: "เมนูสินค้า", path: "/admin/products", icon: Soup },
-  { title: "ตั้งค่าร้าน", path: "/admin/store", icon: Store },
-  { title: "ตั้งค่าช่องทางขาย", path: "/admin/sales-channels", icon: Settings },
+  { title: "แดชบอร์ด", path: "/store-admin", icon: LayoutDashboard, end: true },
+  { title: "เมนู", path: "/store-admin/menus", icon: Soup },
+  { title: "วัตถุดิบ", path: "/store-admin/ingredients", icon: Store },
+  { title: "สูตรและต้นทุน", path: "/store-admin/recipes", icon: Settings },
+  { title: "ช่องทางขาย", path: "/store-admin/channels", icon: Settings },
+  { title: "ราคาตามช่องทาง", path: "/store-admin/channel-pricing", icon: CreditCard },
+  { title: "POS", path: "/store-admin/pos", icon: CreditCard },
+  { title: "ออเดอร์", path: "/store-admin/orders", icon: CreditCard },
+  { title: "รายงาน", path: "/store-admin/reports", icon: LayoutDashboard },
 ];
 
 function StoreNavItem({

@@ -10,34 +10,34 @@ import {
 
 const storeCards = [
   {
-    title: "Order Queue",
-    desc: "ดูรายการออเดอร์ที่เข้ามา และอัปเดตสถานะการเตรียม/พร้อมรับ/ปิดออเดอร์",
+    title: "ออเดอร์",
+    desc: "คิวออเดอร์ ชำระเงิน เตรียม และพร้อมรับ",
     icon: ClipboardList,
-    to: "/admin/orders",
+    to: "/store-admin/orders",
   },
   {
-    title: "Payment Queue",
-    desc: "ตรวจสอบสลิป อนุมัติหรือปฏิเสธการชำระเงินจากลูกค้า",
+    title: "POS",
+    desc: "เปิดออเดอร์หน้าร้าน/รับที่ร้านแบบแมนนวล",
     icon: CreditCard,
-    to: "/admin/payments",
+    to: "/store-admin/pos",
   },
   {
-    title: "เมนูสินค้า",
-    desc: "เพิ่ม/แก้ไขเมนู หมวดหมู่ และสถานะการเปิด-ปิดของแต่ละสินค้า",
+    title: "เมนู",
+    desc: "เพิ่ม/แก้ไขเมนู หมวดหมู่ ราคา และสถานะ",
     icon: Soup,
-    to: "/admin/products",
+    to: "/store-admin/menus",
   },
   {
-    title: "ตั้งค่าร้าน",
-    desc: "ตั้งค่าข้อมูลร้าน เวลาเปิดปิด และค่าเริ่มต้นต่างๆ",
+    title: "ช่องทางขาย",
+    desc: "จัดการช่องทางขายและสถานะการเชื่อมต่อ",
     icon: Store,
-    to: "/admin/store",
+    to: "/store-admin/channels",
   },
   {
-    title: "ตั้งค่าช่องทางขาย",
-    desc: "จัดการช่องทางขาย เช่น หน้าร้าน LINE OA Grab และค่าธรรมเนียมต่อช่องทาง",
+    title: "ราคาตามช่องทาง",
+    desc: "ตั้งราคาและกำไรต่อช่องทางขาย",
     icon: Settings,
-    to: "/admin/sales-channels",
+    to: "/store-admin/channel-pricing",
   },
 ];
 

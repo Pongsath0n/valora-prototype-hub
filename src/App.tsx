@@ -40,6 +40,10 @@ import AdminPaymentDetailPage from "./pages/admin/AdminPaymentDetail";
 import AdminProductsPage from "./pages/admin/AdminProducts";
 import AdminStoreSettingsPage from "./pages/admin/AdminStoreSettings";
 import AdminSalesChannelsPage from "./pages/admin/AdminSalesChannels";
+import StoreAdminIngredientsPage from "./pages/store-admin/Ingredients";
+import StoreAdminRecipesPage from "./pages/store-admin/Recipes";
+import StoreAdminPOSPage from "./pages/store-admin/POS";
+import StoreAdminReportsPage from "./pages/store-admin/Reports";
 
 import SystemOverviewPage from "./pages/system/SystemOverview";
 import SystemUsersPage from "./pages/system/SystemUsers";
@@ -80,6 +84,19 @@ function AppRoutes() {
       <Route path="/onboarding" element={<ProtectedRoute><Onboarding /></ProtectedRoute>} />
       <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
       {/* Store Admin Dashboard */}
+      <Route path="/store-admin" element={<AdminRoute><AdminDashboardPage /></AdminRoute>} />
+      <Route path="/store-admin/menus" element={<AdminRoute><AdminProductsPage /></AdminRoute>} />
+      <Route path="/store-admin/ingredients" element={<AdminRoute><StoreAdminIngredientsPage /></AdminRoute>} />
+      <Route path="/store-admin/recipes" element={<AdminRoute><StoreAdminRecipesPage /></AdminRoute>} />
+      <Route path="/store-admin/channels" element={<AdminRoute><AdminSalesChannelsPage /></AdminRoute>} />
+      <Route path="/store-admin/channel-pricing" element={<AdminRoute><ChannelPricing /></AdminRoute>} />
+      <Route path="/store-admin/pos" element={<AdminRoute><StoreAdminPOSPage /></AdminRoute>} />
+      <Route path="/store-admin/orders" element={<AdminRoute><AdminOrdersPage /></AdminRoute>} />
+      <Route path="/store-admin/orders/:id" element={<AdminRoute><AdminOrderDetailPage /></AdminRoute>} />
+      <Route path="/store-admin/payments" element={<AdminRoute><AdminPaymentsPage /></AdminRoute>} />
+      <Route path="/store-admin/payments/:requestId" element={<AdminRoute><AdminPaymentDetailPage /></AdminRoute>} />
+      <Route path="/store-admin/reports" element={<AdminRoute><StoreAdminReportsPage /></AdminRoute>} />
+
       <Route path="/admin" element={<AdminRoute><AdminDashboardPage /></AdminRoute>} />
       <Route path="/admin/orders" element={<AdminRoute><AdminOrdersPage /></AdminRoute>} />
       <Route path="/admin/orders/:id" element={<AdminRoute><AdminOrderDetailPage /></AdminRoute>} />
