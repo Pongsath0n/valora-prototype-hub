@@ -70,10 +70,9 @@ uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 
 ### 4) Database assets
 
-- Schema/seed SQL ถูกย้ายไว้ที่ `database/`
-  - `database/supabase_setup.sql`
-  - `database/supabase_schema_v2.sql`
-- ไม่มีการปรับแก้เนื้อหา schema ใน PR นี้
+- Active schema reference: `database/supabase.sql`
+- Legacy schema references are archived in `database/archive/`
+- ใช้ `database/supabase.sql` เป็น source of truth เพียงไฟล์เดียว
 
 ### 5) Utility scripts
 

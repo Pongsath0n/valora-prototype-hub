@@ -1,6 +1,6 @@
 -- LEGACY / OUTDATED SETUP
 -- This file is retained for historical reference only.
--- Do NOT treat this as the current schema. See database/schema/current_supabase_schema.sql for the real schema reference.
+-- Do NOT treat this as the current schema. See database/supabase.sql for the real schema reference.
 -- ─── VALORA HUB: SUPABASE DATABASE SETUP ──────────────────────────────────────
 -- COPY AND PASTE THIS INTO SUPABASE SQL EDITOR TO INITIALIZE YOUR DATABASE
 
