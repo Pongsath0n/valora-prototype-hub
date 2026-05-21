@@ -35,8 +35,6 @@ import OrderSuccessPage from "./pages/liff/OrderSuccess";
 import AdminDashboardPage from "./pages/admin/AdminDashboard";
 import AdminOrdersPage from "./pages/admin/AdminOrders";
 import AdminOrderDetailPage from "./pages/admin/AdminOrderDetail";
-import AdminPaymentsPage from "./pages/admin/AdminPayments";
-import AdminPaymentDetailPage from "./pages/admin/AdminPaymentDetail";
 import AdminProductsPage from "./pages/admin/AdminProducts";
 import AdminStoreSettingsPage from "./pages/admin/AdminStoreSettings";
 import AdminSalesChannelsPage from "./pages/admin/AdminSalesChannels";
@@ -93,15 +91,11 @@ function AppRoutes() {
       <Route path="/store-admin/pos" element={<AdminRoute><StoreAdminPOSPage /></AdminRoute>} />
       <Route path="/store-admin/orders" element={<AdminRoute><AdminOrdersPage /></AdminRoute>} />
       <Route path="/store-admin/orders/:id" element={<AdminRoute><AdminOrderDetailPage /></AdminRoute>} />
-      <Route path="/store-admin/payments" element={<AdminRoute><AdminPaymentsPage /></AdminRoute>} />
-      <Route path="/store-admin/payments/:requestId" element={<AdminRoute><AdminPaymentDetailPage /></AdminRoute>} />
       <Route path="/store-admin/reports" element={<AdminRoute><StoreAdminReportsPage /></AdminRoute>} />
 
       <Route path="/admin" element={<AdminRoute><AdminDashboardPage /></AdminRoute>} />
       <Route path="/admin/orders" element={<AdminRoute><AdminOrdersPage /></AdminRoute>} />
       <Route path="/admin/orders/:id" element={<AdminRoute><AdminOrderDetailPage /></AdminRoute>} />
-      <Route path="/admin/payments" element={<AdminRoute><AdminPaymentsPage /></AdminRoute>} />
-      <Route path="/admin/payments/:requestId" element={<AdminRoute><AdminPaymentDetailPage /></AdminRoute>} />
       <Route path="/admin/products" element={<AdminRoute><AdminProductsPage /></AdminRoute>} />
       <Route path="/admin/store" element={<AdminRoute><AdminStoreSettingsPage /></AdminRoute>} />
       <Route path="/admin/sales-channels" element={<AdminRoute><AdminSalesChannelsPage /></AdminRoute>} />

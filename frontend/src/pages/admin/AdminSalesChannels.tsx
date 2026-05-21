@@ -4,24 +4,34 @@ import AdminLayout from "@/components/admin/AdminLayout";
 import FormField from "@/components/shared/FormField";
 import DataTable from "@/components/shared/DataTable";
 import StatusBadge from "@/components/shared/StatusBadge";
-import { orderService, type FeeType, type SalesChannel } from "@/features/store/orderService";
+import { storeAdminApi, type FeeType, type ChannelType, type ApiSalesChannel, type SalesChannelPayload } from "@/services/storeAdminApi";
 
-type FormState = { id?: string; name: string; feeType: FeeType; feeValue: string; isActive: boolean };
-const emptyForm: FormState = { name: "", feeType: "none", feeValue: "0", isActive: true };
+type FormState = { id?: string; name: string; type: ChannelType; feeType: FeeType; feeValue: string; isActive: boolean };
+const emptyForm: FormState = { name: "", type: "direct", feeType: "none", feeValue: "0", isActive: true };
 
 export default function AdminSalesChannelsPage() {
-  const [channels, setChannels] = useState<SalesChannel[]>([]);
+  const [channels, setChannels] = useState<ApiSalesChannel[]>([]);
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState<FormState>(emptyForm);
   const [showForm, setShowForm] = useState(false);
   const [error, setError] = useState<string>("");
   const [info, setInfo] = useState<string>("");
+  const [refreshing, setRefreshing] = useState(false);
 
-  const activeCount = useMemo(() => channels.filter((c) => c.isActive).length, [channels]);
+  const activeCount = useMemo(() => channels.filter((c) => c.is_active ?? true).length, [channels]);
 
-  const refresh = () => {
-    setChannels(orderService.listChannels(true));
-    setLoading(false);
+  const refresh = async () => {
+    setRefreshing(true);
+    setError("");
+    try {
+      const items = await storeAdminApi.listSalesChannels();
+      setChannels(items);
+    } catch (err: any) {
+      setError(err?.message || "โหลดข้อมูลไม่สำเร็จ");
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
   };
 
   useEffect(() => {
@@ -33,41 +43,86 @@ export default function AdminSalesChannelsPage() {
     setError("");
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     setError("");
+    const payload: SalesChannelPayload = {
+      name: form.name.trim(),
+      type: form.type,
+      fee_type: form.feeType,
+      fee_value: Number(form.feeValue || 0),
+      is_active: form.isActive,
+    };
+
+    if (!payload.name) return setError("ต้องกรอกชื่อช่องทาง");
+    if (payload.fee_type === "percent" && (payload.fee_value < 0 || payload.fee_value > 100)) {
+      return setError("เปอร์เซ็นต์ค่าธรรมเนียมต้องอยู่ระหว่าง 0-100");
+    }
+    if (payload.fee_type === "fixed" && payload.fee_value < 0) {
+      return setError("ค่าธรรมเนียมต้องไม่ติดลบ");
+    }
+    if (payload.fee_type === "none") payload.fee_value = 0;
+
     try {
-      orderService.upsertChannel({
-        id: form.id,
-        name: form.name,
-        feeType: form.feeType,
-        feeValue: Number(form.feeValue || 0),
-        isActive: form.isActive,
-      });
-      setInfo(form.id ? "อัปเดตช่องทางเรียบร้อย" : "เพิ่มช่องทางเรียบร้อย");
+      if (form.id) {
+        await storeAdminApi.updateSalesChannel(form.id, payload);
+        setInfo("อัปเดตช่องทางเรียบร้อย");
+      } else {
+        await storeAdminApi.createSalesChannel(payload);
+        setInfo("เพิ่มช่องทางเรียบร้อย");
+      }
       resetForm();
       setShowForm(false);
-      refresh();
+      void refresh();
     } catch (err: any) {
-      setError(err?.message || "บันทึกไม่สำเร็จ");
+      const reason = err?.message || "บันทึกไม่สำเร็จ";
+      if (reason === "channel_name_exists") {
+        setError("มีชื่อช่องทางนี้แล้ว");
+      } else if (reason === "unauthorized" || reason === "missing_token") {
+        setError("ต้องเข้าสู่ระบบก่อนใช้งาน");
+      } else {
+        setError(reason);
+      }
     }
   };
 
-  const handleDeleteOrDeactivate = (id: string) => {
-    const result = orderService.deleteOrDeactivateChannel(id);
-    setInfo(result === "deleted" ? "ลบช่องทางแล้ว" : "ปิดการใช้งานช่องทางที่มีประวัติออเดอร์แล้ว");
-    refresh();
+  const handleDeleteOrDeactivate = async (id: string) => {
+    setError("");
+    try {
+      const result = await storeAdminApi.deleteSalesChannel(id);
+      if (result.status === "deactivated") {
+        setInfo("ปิดการใช้งานช่องทางที่มีประวัติออเดอร์แล้ว");
+      } else {
+        setInfo("ลบช่องทางแล้ว");
+      }
+    } catch (err: any) {
+      const msg = err?.message || "ลบไม่สำเร็จ";
+      if (msg === "channel_has_history") setInfo("ไม่สามารถลบได้ มีประวัติออเดอร์");
+      else setError(msg);
+    }
+    void refresh();
   };
 
-  const handleToggleActive = (id: string, isActive: boolean) => {
-    orderService.setChannelActive(id, isActive);
-    setInfo(isActive ? "เปิดใช้งานช่องทางแล้ว" : "ปิดใช้งานช่องทางแล้ว");
-    refresh();
+  const handleToggleActive = async (id: string, isActive: boolean) => {
+    setError("");
+    try {
+      await storeAdminApi.updateSalesChannel(id, { is_active: isActive });
+      setInfo(isActive ? "เปิดใช้งานช่องทางแล้ว" : "ปิดใช้งานช่องทางแล้ว");
+    } catch (err: any) {
+      setError(err?.message || "อัปเดตไม่สำเร็จ");
+    }
+    void refresh();
   };
 
   const feeTypeOptions: { label: string; value: FeeType }[] = [
     { label: "ไม่มีค่าธรรมเนียม", value: "none" },
     { label: "ค่าตายตัว (฿)", value: "fixed" },
     { label: "เปอร์เซ็นต์ (%)", value: "percent" },
+  ];
+
+  const channelTypeOptions: { label: string; value: ChannelType }[] = [
+    { label: "หน้าร้าน", value: "direct" },
+    { label: "เดลิเวอรี", value: "delivery" },
+    { label: "ออฟไลน์/อื่นๆ", value: "manual" },
   ];
 
   return (
@@ -88,6 +143,7 @@ export default function AdminSalesChannelsPage() {
         </button>
         <span className="text-sm text-muted-foreground">ช่องทางที่เปิดใช้งาน: {activeCount}</span>
         {info ? <span className="text-xs text-foreground/80 bg-muted px-2 py-1 rounded">{info}</span> : null}
+        {refreshing ? <span className="text-xs text-muted-foreground">กำลังโหลด...</span> : null}
       </div>
 
       {showForm ? (
@@ -105,7 +161,7 @@ export default function AdminSalesChannelsPage() {
               ปิดฟอร์ม
             </button>
           </div>
-          <div className="grid md:grid-cols-3 gap-3">
+          <div className="grid md:grid-cols-4 gap-3">
             <FormField label="ชื่อช่องทาง">
               <input
                 className="form-input"
@@ -113,6 +169,17 @@ export default function AdminSalesChannelsPage() {
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
                 placeholder="เช่น หน้าร้าน, LINE OA, Grab"
               />
+            </FormField>
+            <FormField label="ประเภทช่องทาง">
+              <select
+                className="form-input"
+                value={form.type}
+                onChange={(e) => setForm({ ...form, type: e.target.value as ChannelType })}
+              >
+                {channelTypeOptions.map((opt) => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
             </FormField>
             <FormField label="ประเภทค่าธรรมเนียม">
               <select
@@ -175,9 +242,26 @@ export default function AdminSalesChannelsPage() {
         <DataTable
           columns={[
             { key: "name", header: "ช่องทาง" },
-            { key: "feeType", header: "ประเภทค่าธรรมเนียม", render: (r) => r.feeType },
-            { key: "feeValue", header: "ค่า", render: (r) => r.feeType === "percent" ? `${r.feeValue}%` : r.feeType === "none" ? "0" : `฿${r.feeValue}` },
-            { key: "isActive", header: "สถานะ", render: (r) => <StatusBadge label={r.isActive ? "active" : "inactive"} tone={r.isActive ? "success" : "warning"} /> },
+            {
+              key: "type",
+              header: "ประเภท",
+              render: (r) => {
+                if (r.type === "delivery") return "เดลิเวอรี";
+                if (r.type === "manual") return "ออฟไลน์/อื่นๆ";
+                return "หน้าร้าน";
+              },
+            },
+            {
+              key: "fee_type",
+              header: "ประเภทค่าธรรมเนียม",
+              render: (r) => {
+                if (r.fee_type === "percent") return "เปอร์เซ็นต์";
+                if (r.fee_type === "fixed") return "ค่าตายตัว";
+                return "ไม่มีค่าธรรมเนียม";
+              },
+            },
+            { key: "fee_value", header: "ค่า", render: (r) => r.fee_type === "percent" ? `${r.fee_value}%` : r.fee_type === "none" ? "0" : `฿${r.fee_value}` },
+            { key: "is_active", header: "สถานะ", render: (r) => <StatusBadge label={(r.is_active ?? true) ? "active" : "inactive"} tone={(r.is_active ?? true) ? "success" : "warning"} /> },
             {
               key: "actions",
               header: "จัดการ",
@@ -187,7 +271,7 @@ export default function AdminSalesChannelsPage() {
                     type="button"
                     className="inline-flex items-center gap-1 px-2 py-1 rounded border hover:bg-muted"
                     onClick={() => {
-                      setForm({ id: r.id, name: r.name, feeType: r.feeType, feeValue: String(r.feeValue), isActive: r.isActive });
+                      setForm({ id: r.id, name: r.name, type: (r.type as ChannelType) ?? "direct", feeType: r.fee_type, feeValue: String(r.fee_value), isActive: r.is_active ?? true });
                       setShowForm(true);
                     }}
                   >
@@ -196,9 +280,9 @@ export default function AdminSalesChannelsPage() {
                   <button
                     type="button"
                     className="inline-flex items-center gap-1 px-2 py-1 rounded border hover:bg-muted"
-                    onClick={() => handleToggleActive(r.id, !r.isActive)}
+                    onClick={() => handleToggleActive(r.id, !(r.is_active ?? true))}
                   >
-                    <Power className="w-4 h-4" /> {r.isActive ? "ปิด" : "เปิด"}
+                    <Power className="w-4 h-4" /> {(r.is_active ?? true) ? "ปิด" : "เปิด"}
                   </button>
                   <button
                     type="button"
@@ -216,6 +300,7 @@ export default function AdminSalesChannelsPage() {
         {channels.length === 0 && !loading ? (
           <p className="text-sm text-muted-foreground mt-3">ยังไม่มีช่องทาง โปรดกด “เพิ่มช่องทาง”</p>
         ) : null}
+        {error && !loading ? <p className="text-sm text-destructive mt-2">{error}</p> : null}
       </div>
     </AdminLayout>
   );

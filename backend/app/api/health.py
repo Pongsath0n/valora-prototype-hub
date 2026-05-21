@@ -7,6 +7,9 @@ from fastapi import APIRouter
 from app.core.config import settings
 from app.core.supabase import SupabaseConfigurationError, get_supabase_admin_client
 
+
+SAFE_HEALTH_TABLES = ("profiles", "stores")
+
 router = APIRouter()
 
 
@@ -31,6 +34,9 @@ def health_db() -> Dict[str, Any]:
     client_status = "not_checked"
     connection_status = "not_checked"
 
+    connection_reason = None
+    checked_table = None
+
     if configured:
         try:
             client = get_supabase_admin_client()
@@ -41,26 +47,23 @@ def health_db() -> Dict[str, Any]:
         except Exception:
             client_status = "unavailable"
 
-        if client_status == "available" and settings.supabase_url:
-            try:
-                connection_status = "ok" if _check_supabase_connection(settings.supabase_url) else "error"
-            except Exception:
-                connection_status = "error"
+        if client_status == "available" and client is not None:
+            connection_status, connection_reason, checked_table = _probe_supabase_connection(client)
 
     status: str
     if not configured:
         status = "partial"
         client_status = client_status if client_status != "available" else "not_checked"
         connection_status = "not_checked"
-    elif connection_status == "error":
-        status = "error"
+    elif connection_status == "ok":
+        status = "ok"
+    elif client_status == "available" and connection_status == "not_checked":
+        status = "partial"
     elif client_status == "unavailable":
         status = "partial"
         connection_status = "not_checked"
-    elif client_status == "available" and connection_status == "ok":
-        status = "ok"
     else:
-        status = "partial"
+        status = "error"
 
     return {
         "status": status,
@@ -68,21 +71,44 @@ def health_db() -> Dict[str, Any]:
             "configured": configured,
             "client": client_status,
             "connection": connection_status,
+            "checked_table": checked_table,
+            "reason": connection_reason,
             "variables": {key: _mask_status(value) for key, value in supabase_variables.items()},
         },
     }
 
 
-def _check_supabase_connection(base_url: str) -> bool:
-    health_url = base_url.rstrip("/") + "/auth/v1/health"
-    request = Request(health_url, method="GET")
-    try:
-        with urlopen(request, timeout=3) as response:  # nosec B310
-            return 200 <= getattr(response, "status", 0) < 300
-    except HTTPError as exc:
-        return 200 <= exc.code < 300
-    except URLError:
-        return False
+def _probe_supabase_connection(client: Any) -> tuple[str, str | None, str | None]:
+    """Check Supabase connectivity using a safe table probe.
+
+    Returns (connection_status, reason, checked_table)
+    connection_status: ok | not_checked | error
+    reason: sanitized short reason string
+    checked_table: table name if used
+    """
+
+    for table_name in SAFE_HEALTH_TABLES:
+        try:
+            response = client.table(table_name).select("id").limit(1).execute()
+            error = getattr(response, "error", None)
+
+            if error:
+                if _is_missing_table(error):
+                    continue
+                return "error", "query_failed", None
+
+            return "ok", None, table_name
+        except Exception:
+            # Treat unexpected errors as connection issues; keep message sanitized
+            return "error", "connection_failed", None
+
+    return "not_checked", "No safe database table configured for health check", None
+
+
+def _is_missing_table(error: Any) -> bool:
+    message = getattr(error, "message", "") or str(error)
+    lowered = message.lower()
+    return "does not exist" in lowered or "relation" in lowered
 
 
 @router.get("/health/env")

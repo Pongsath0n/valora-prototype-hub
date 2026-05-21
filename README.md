@@ -2,7 +2,15 @@
 
 **Valora Hub** เป็นเครื่องมือวิเคราะห์ต้นทุนและจำลองสถานการณ์การดำเนินงาน ออกแบบมาเพื่อเจ้าของร้านอาหารและคาเฟ่ในไทยโดยเฉพาะ เพื่อช่วยในการตัดสินใจทางธุรกิจด้วยข้อมูลที่แม่นยำ
 
-![Valora Hub Preview](public/favicon.svg) <!-- หรือใส่ภาพ Hero Screenshot ถ้ามี -->
+![Valora Hub Preview](frontend/public/favicon.svg)
+
+## 📦 Monorepo layout
+
+- `frontend/` — Vite + React + TypeScript UI (รวม `/system` และ `/store-admin` views)
+- `backend/` — FastAPI service และ health endpoints
+- `database/` — Supabase schema / seed SQL (ไม่มีการปรับ schema ใหม่ใน PR นี้)
+- `docs/` — เอกสารประกอบ
+- `scripts/` — สคริปต์ช่วยงาน (เช่น seed owner user)
 
 ## 🚀 คุณสมบัติเด่น (Core Features)
 
@@ -12,68 +20,73 @@
 - **Admin Management**: ระบบหลังบ้านสำหรับจัดการคำขอรับคำปรึกษาและตรวจสอบสถานะการชำระเงิน
 - **Thai Context**: ออกแบบการคำนวณและคำศัพท์ให้สอดคล้องกับการทำธุรกิจร้านอาหารในประเทศไทย
 
-## 🛠️ เทคโนโลยีที่ใช้ (Tech Stack)
+## 🛠️ Tech Stack
 
-- **Frontend**: [Vite](https://vitejs.dev/) + [React](https://reactjs.org/) + [TypeScript](https://www.typescriptlang.org/)
-- **Styling**: [Tailwind CSS](https://tailwindcss.com/) + [shadcn/ui](https://ui.shadcn.com/)
+- **Frontend**: [Vite](https://vitejs.dev/) + [React](https://reactjs.org/) + [TypeScript](https://www.typescriptlang.org/) + [Tailwind CSS](https://tailwindcss.com/) + [shadcn/ui](https://ui.shadcn.com/)
+- **Backend**: [FastAPI](https://fastapi.tiangolo.com/) + [Uvicorn](https://www.uvicorn.org/)
 - **Database / Auth**: [Supabase](https://supabase.com/)
 - **Icons**: [Lucide React](https://lucide.dev/)
-- **Payment Gateway**: [Omise](https://www.omise.co/) (Coming Soon)
 
-## 📦 วิธีการประติติดตั้ง (Local Development)
+## 🧑‍� Local Development
 
-### 1. Pre-requisites
+### 1) Prerequisites
 
-- Node.js (v18 หรือสูงกว่า)
-- npm หรือ Bun
+- Node.js v18+ และ npm (สำหรับ frontend)
+- Python 3.10+ (สำหรับ backend)
+- Supabase project credentials ถ้าต้องการทดสอบ auth/db health checks หรือ seed script
 
-### 2. การติดตั้ง
+### 2) Frontend (Vite + React)
 
 ```bash
-# Clone repository
-git clone https://github.com/Pongsath0n/valora-prototype-hub.git
-
-# เข้าไปที่โฟลเดอร์
-cd valora-prototype-hub
-
-# ติดตั้ง dependencies
+cd frontend
 npm install
+
+# ตั้งค่า environment
+# สร้างไฟล์ frontend/.env ด้วยค่าตัวอย่าง:
+# VITE_SUPABASE_URL=your_supabase_url
+# VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
+# VITE_LIFF_ENABLED=false
+# VITE_LIFF_ID=your_liff_id
+# VITE_LINE_CHANNEL_ACCESS_TOKEN=your_line_channel_access_token
+
+npm run dev  # http://localhost:8080
 ```
 
-### 3. การตั้งค่า Environment Variables
-
-สร้างไฟล์ `.env` ที่ Root directory และระบุค่าดังนี้:
-
-```env
-VITE_SUPABASE_URL=your_supabase_url
-VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
-VITE_LIFF_ENABLED=false
-VITE_LIFF_ID=your_liff_id
-VITE_LINE_CHANNEL_ACCESS_TOKEN=your_line_channel_access_token
-```
-
-_(ดูตัวอย่างได้จากไฟล์ `.env.example`)_
-
-### 4. รันโปรเจกต์
+### 3) Backend (FastAPI)
 
 ```bash
-npm run dev
+cd backend
+python -m venv .venv
+./.venv/Scripts/Activate.ps1  # หรือ source .venv/bin/activate บน macOS/Linux
+pip install -r requirements.txt
+
+# คัดลอก .env.example เป็น .env และตั้งค่า
+# SUPABASE_URL
+# SUPABASE_ANON_KEY
+# SUPABASE_SERVICE_ROLE_KEY
+
+uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-## 🌐 การ Deploy (Deployment)
+### 4) Database assets
 
-โปรเจกต์นี้รองรับการ Deploy บน **Vercel** อย่างเต็มรูปแบบ:
+- Schema/seed SQL ถูกย้ายไว้ที่ `database/`
+  - `database/supabase_setup.sql`
+  - `database/supabase_schema_v2.sql`
+- ไม่มีการปรับแก้เนื้อหา schema ใน PR นี้
 
-1. เชื่อมต่อ GitHub Repo เข้ากับ Vercel
-2. ตั้งค่า Environment Variables ใน Vercel Dashboard
-3. ระบบจะทำการ Deploy อัตโนมัติทุกครั้งที่มีการ Push ไปยัง `main` branch
+### 5) Utility scripts
 
----
+- `scripts/seed-owner-user.mjs` ใช้สำหรับ seed owner profile (ต้องตั้งค่า `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `OWNER_PASSWORD`, และ `OWNER_EMAIL` ถ้าต้องการ)
+
+## 🌐 Deployment
+
+- Frontend สามารถ deploy จากโฟลเดอร์ `frontend/` (เช่น Vercel หรือ static hosting)
+- Backend รันผ่าน `uvicorn app.main:app` จากโฟลเดอร์ `backend/` (เพิ่ม process manager / container orchestration ตามสภาพแวดล้อม)
 
 ## 📄 License
 
 Copyright © 2026 Valora Hub. All rights reserved.
-
 
 ## LINE LIFF Environment
 
@@ -81,4 +94,4 @@ Copyright © 2026 Valora Hub. All rights reserved.
 - `VITE_LIFF_ID`: LIFF app ID from LINE Developers.
 - `VITE_LINE_CHANNEL_ACCESS_TOKEN`: Messaging API token (for server-side confirmation messaging integration).
 
-When LIFF is disabled or not configured, Valora uses mock LINE profile data for development.
+เมื่อปิด LIFF หรือยังไม่ตั้งค่า Valora จะใช้ mock LINE profile data สำหรับ development

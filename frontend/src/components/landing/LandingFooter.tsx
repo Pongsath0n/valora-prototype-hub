@@ -68,10 +68,10 @@ export default function LandingFooter() {
               <li className="flex items-center gap-2 text-foreground/80">
                 <Mail className="h-4 w-4 text-muted-foreground" aria-hidden />
                 <a
-                  href="mailto:pongsathon.po@kkumail.com"
+                  href="mailto:pongsathon.officialwork@gmail.com"
                   className="transition-colors hover:text-foreground"
                 >
-                  pongsathon.po@kkumail.com
+                  pongsathon.officialwork@gmail.com
                 </a>
               </li>
               <li className="text-sm text-muted-foreground">

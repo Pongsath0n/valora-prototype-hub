@@ -9,14 +9,26 @@ lerna-debug.log*
 
 # Dependencies
 node_modules
+frontend/node_modules
 .pnp
 .pnp.js
+
+# Backend / Python
+backend/.venv
+backend/.env
+backend/.pytest_cache
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
 
 # Production / Build
 dist
 dist-ssr
 build
 out
+frontend/dist
+frontend/.vite
 
 # Environment files - NEVER commit real credentials
 .env
@@ -27,6 +39,7 @@ out
 .env.local
 .env.*.local
 *.env
+frontend/.env
 
 # Supabase
 supabase/.temp
