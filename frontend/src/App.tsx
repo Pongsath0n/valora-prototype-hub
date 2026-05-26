@@ -22,6 +22,7 @@ import IngredientsStock from "./pages/IngredientsStock";
 import RecipeCosting from "./pages/RecipeCosting";
 import SalesChannels from "./pages/SalesChannels";
 import ChannelPricing from "./pages/ChannelPricing";
+import StoreAdminChannelPricingPage from "./pages/store-admin/ChannelPricing";
 import POSManualOrder from "./pages/POSManualOrder";
 import OrdersPage from "./pages/Orders";
 import OrderDetailPage from "./pages/OrderDetail";
@@ -87,7 +88,7 @@ function AppRoutes() {
       <Route path="/store-admin/ingredients" element={<AdminRoute><StoreAdminIngredientsPage /></AdminRoute>} />
       <Route path="/store-admin/recipes" element={<AdminRoute><StoreAdminRecipesPage /></AdminRoute>} />
       <Route path="/store-admin/channels" element={<AdminRoute><AdminSalesChannelsPage /></AdminRoute>} />
-      <Route path="/store-admin/channel-pricing" element={<AdminRoute><ChannelPricing /></AdminRoute>} />
+      <Route path="/store-admin/channel-pricing" element={<AdminRoute><StoreAdminChannelPricingPage /></AdminRoute>} />
       <Route path="/store-admin/pos" element={<AdminRoute><StoreAdminPOSPage /></AdminRoute>} />
       <Route path="/store-admin/orders" element={<AdminRoute><AdminOrdersPage /></AdminRoute>} />
       <Route path="/store-admin/orders/:id" element={<AdminRoute><AdminOrderDetailPage /></AdminRoute>} />

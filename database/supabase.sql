@@ -52,7 +52,7 @@
 -- Columns: id (uuid, pk), store_id (uuid fk -> stores), product_id (uuid fk -> products), ingredient_id (uuid fk -> ingredients), quantity_used (numeric(12,4)), created_at (timestamptz), unique(product_id, ingredient_id)
 
 -- Table: sales_channels
--- Columns: id (uuid, pk), store_id (uuid fk -> stores), name (text, not null), is_default (bool default false), fee_type (channel_fee_type enum: none|percent|fixed), fee_value (numeric(12,4) default 0), created_at (timestamptz), unique(store_id, name)
+-- Columns: id (uuid, pk), store_id (uuid fk -> stores), name (text, not null), type (text), fee_type (channel_fee_type enum: none|percent|fixed), fee_value (numeric(12,4) default 0), is_active (bool), created_at (timestamptz), unique(store_id, name)
 
 -- Table: channel_prices
 -- Columns: id (uuid, pk), store_id (uuid fk -> stores), product_id (uuid fk -> products), channel_id (uuid fk -> sales_channels), selling_price (numeric(12,2) not null), created_at (timestamptz), unique(product_id, channel_id)
@@ -66,7 +66,7 @@
 --          status (order_status enum), payment_status (payment_status enum),
 --          subtotal (numeric), discount_amount (numeric), channel_fee (numeric), total_amount (numeric), total_cost (numeric), gross_profit (numeric),
 --          note (text), cancelled_reason (text, nullable), cancelled_at (timestamptz, nullable),
---          ordered_at (timestamptz), created_by (uuid fk -> profiles, nullable), created_at (timestamptz), updated_at (timestamptz)
+--          created_at (timestamptz), updated_at (timestamptz)
 
 -- Table: order_items
 -- Columns: id (uuid, pk), store_id (uuid fk -> stores), order_id (uuid fk -> orders), product_id (uuid fk -> products), quantity (int > 0), unit_price (numeric(12,2)), unit_cost (numeric(12,2)), line_total (numeric(12,2)), line_cost (numeric(12,2)), line_profit (numeric(12,2)), created_at (timestamptz)

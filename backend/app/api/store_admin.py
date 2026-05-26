@@ -1,11 +1,16 @@
+import logging
+import re
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple, Literal
+from typing import Any, Dict, List, Optional, Tuple, Literal, Set
+from uuid import uuid4
 
 from fastapi import APIRouter, Header, HTTPException, status
 from pydantic import BaseModel
 from supabase import Client
 
 from app.core.supabase import SupabaseConfigurationError, get_supabase_admin_client
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/store-admin", tags=["store-admin"])
 
@@ -32,7 +37,6 @@ class SalesChannelCreate(BaseModel):
     fee_type: FeeType = "none"
     fee_value: float = 0
     is_active: Optional[bool] = True
-    is_default: Optional[bool] = False
 
 
 class SalesChannelUpdate(BaseModel):
@@ -41,7 +45,6 @@ class SalesChannelUpdate(BaseModel):
     fee_type: Optional[FeeType] = None
     fee_value: Optional[float] = None
     is_active: Optional[bool] = None
-    is_default: Optional[bool] = None
 
 
 class ChannelPriceCreate(BaseModel):
@@ -57,6 +60,12 @@ class ChannelPriceUpdate(BaseModel):
 
 
 # ─── Menus (products + categories) ─────────────────────────────────────────────
+
+
+def _generate_order_number() -> str:
+    timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
+    suffix = uuid4().hex[:4].upper()
+    return f"ORD-{timestamp}-{suffix}"
 
 
 class ProductCreate(BaseModel):
@@ -144,7 +153,7 @@ class OrderCreate(BaseModel):
     total_cost: Optional[float] = None
     gross_profit: Optional[float] = None
     note: Optional[str] = None
-    ordered_at: Optional[str] = None
+    order_no: Optional[str] = None
     items: List[OrderItemPayload] = []
 
 
@@ -163,7 +172,7 @@ class OrderUpdate(BaseModel):
     total_cost: Optional[float] = None
     gross_profit: Optional[float] = None
     note: Optional[str] = None
-    ordered_at: Optional[str] = None
+    order_no: Optional[str] = None
     cancelled_reason: Optional[str] = None
     cancelled_at: Optional[str] = None
 
@@ -299,6 +308,164 @@ def _is_missing_column(error: Any, column: str) -> bool:
     return column.lower() in message and ("column" in message or "does not exist" in message)
 
 
+_ORDER_ITEMS_COLUMN_CACHE: Dict[str, Optional[bool]] = {}
+_PAYMENTS_COLUMN_CACHE: Dict[str, Optional[bool]] = {}
+
+
+def _order_items_has_column(client: Client, column: str) -> bool:
+    cached = _ORDER_ITEMS_COLUMN_CACHE.get(column)
+    if cached is not None:
+        return bool(cached)
+
+    try:
+        probe = client.table("order_items").select(column).limit(1).execute()
+        err = getattr(probe, "error", None)
+        if err and _is_missing_column(err, column):
+            _ORDER_ITEMS_COLUMN_CACHE[column] = False
+        else:
+            _ORDER_ITEMS_COLUMN_CACHE[column] = True
+    except Exception as exc:
+        if _is_missing_column(exc, column):
+            _ORDER_ITEMS_COLUMN_CACHE[column] = False
+        else:
+            _ORDER_ITEMS_COLUMN_CACHE[column] = True
+
+    return bool(_ORDER_ITEMS_COLUMN_CACHE.get(column))
+
+
+def _payments_has_column(client: Client, column: str) -> bool:
+    cached = _PAYMENTS_COLUMN_CACHE.get(column)
+    if cached is not None:
+        return bool(cached)
+
+    try:
+        probe = client.table("payments").select(column).limit(1).execute()
+        err = getattr(probe, "error", None)
+        if err and _is_missing_column(err, column):
+            _PAYMENTS_COLUMN_CACHE[column] = False
+        else:
+            _PAYMENTS_COLUMN_CACHE[column] = True
+    except Exception as exc:
+        if _is_missing_column(exc, column):
+            _PAYMENTS_COLUMN_CACHE[column] = False
+        else:
+            _PAYMENTS_COLUMN_CACHE[column] = True
+
+    return bool(_PAYMENTS_COLUMN_CACHE.get(column))
+
+
+def _prune_payment_columns(client: Client, data: Dict[str, Any]) -> Dict[str, Any]:
+    payload = dict(data)
+    optional_cols = [
+        "store_id",
+        "slip_url",
+        "slip_storage_path",
+        "slip_file_name",
+        "submitted_at",
+        "confirmed_by",
+        "confirmed_at",
+        "reject_reason",
+        "verified_by_api",
+        "verification_provider",
+        "verification_status",
+        "verification_score",
+        "api_response",
+    ]
+    for col in optional_cols:
+        if col == "store_id":
+            if not _payments_has_column(client, col):
+                payload.pop(col, None)
+        else:
+            if not _payments_has_column(client, col):
+                payload.pop(col, None)
+    return payload
+
+
+def _payments_supports_store_scope(client: Client) -> bool:
+    return _payments_has_column(client, "store_id")
+
+
+def _payment_lookup_columns(client: Client) -> str:
+    base = ["id", "order_id", "status"]
+    if _payments_supports_store_scope(client):
+        base.insert(1, "store_id")
+    return ", ".join(base)
+
+
+def _payment_select_clause(client: Client, include_relations: bool = False, include_slip_fields: bool = True) -> str:
+    cols: List[str] = []
+    if _payments_supports_store_scope(client):
+        cols.append("store_id")
+    cols.extend([
+        "id",
+        "order_id",
+        "amount",
+        "method",
+        "status",
+    ])
+    if include_slip_fields:
+        cols.extend([
+            "slip_url",
+            "slip_storage_path",
+            "slip_file_name",
+            "submitted_at",
+            "confirmed_by",
+            "confirmed_at",
+            "reject_reason",
+        ])
+    cols.append("created_at")
+    if include_relations:
+        cols.append("orders(id, status, payment_status, customers(display_name))")
+    return ", ".join(cols)
+
+
+def _order_items_supports_store_scope(client: Client) -> bool:
+    return _order_items_has_column(client, "store_id")
+
+
+def _order_item_select_clause(client: Client) -> str:
+    columns = [
+        "id",
+        "order_id",
+        "product_id",
+        "quantity",
+        "unit_price",
+        "unit_cost",
+        "created_at",
+        "products(name)",
+    ]
+    if _order_items_supports_store_scope(client):
+        columns.insert(1, "store_id")
+    if _order_items_has_column(client, "product_name_snapshot"):
+        columns.append("product_name_snapshot")
+    if _order_items_has_column(client, "line_total"):
+        columns.append("line_total")
+    if _order_items_has_column(client, "line_cost"):
+        columns.append("line_cost")
+    if _order_items_has_column(client, "line_profit"):
+        columns.append("line_profit")
+    return ", ".join(columns)
+
+
+def _prune_order_item_columns(client: Client, data: Dict[str, Any]) -> Dict[str, Any]:
+    payload = dict(data)
+    if not _order_items_supports_store_scope(client):
+        payload.pop("store_id", None)
+    optional_cols = ["product_name_snapshot", "line_total", "line_cost", "line_profit"]
+    for col in optional_cols:
+        if not _order_items_has_column(client, col):
+            payload.pop(col, None)
+    return payload
+
+
+def _extract_missing_column(error: Any) -> Optional[str]:
+    message = str(getattr(error, "message", "") or error or "")
+    if not message or "column" not in message.lower():
+        return None
+    matches = re.findall(r"'([^']+)'", message)
+    return matches[0] if matches else None
+
+
 def _omit_optional_fields(data: Dict[str, Any], optional_keys: List[str]) -> Dict[str, Any]:
     return {k: v for k, v in data.items() if k not in optional_keys}
 
@@ -353,8 +520,9 @@ def _sanitize_price_payload(payload: ChannelPriceCreate | ChannelPriceUpdate, pa
         price_value = float(data.get("price") or 0)
         if price_value < 0:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="price_non_negative")
-        data["selling_price"] = price_value
+        data["price"] = price_value
         data.pop("price", None)
+        data["price"] = price_value
 
     return data
 
@@ -367,7 +535,6 @@ def _map_channel(row: Dict[str, Any]) -> Dict[str, Any]:
         "type": row.get("type"),
         "fee_type": row.get("fee_type"),
         "fee_value": float(row.get("fee_value") or 0),
-        "is_default": bool(row.get("is_default") or False),
         "is_active": bool(row.get("is_active")) if row.get("is_active") is not None else True,
         "created_at": row.get("created_at"),
     }
@@ -402,10 +569,10 @@ def list_channels(authorization: Optional[str] = Header(None), store_id: Optiona
     ctx = _get_ctx(authorization)
     store_id_resolved, _role = _resolve_store_id(ctx["memberships"], store_id)
 
-    response = ctx["client"].table("sales_channels").select("id, store_id, name, type, fee_type, fee_value, is_default, is_active, created_at").eq("store_id", store_id_resolved).order("created_at", desc=False).execute()
+    response = ctx["client"].table("sales_channels").select("id, store_id, name, type, fee_type, fee_value, is_active, created_at").eq("store_id", store_id_resolved).order("created_at", desc=False).execute()
     error = getattr(response, "error", None)
     if error and _is_missing_column(error, "is_active"):
-        response = ctx["client"].table("sales_channels").select("id, store_id, name, type, fee_type, fee_value, is_default, created_at").eq("store_id", store_id_resolved).order("created_at", desc=False).execute()
+        response = ctx["client"].table("sales_channels").select("id, store_id, name, type, fee_type, fee_value, created_at").eq("store_id", store_id_resolved).order("created_at", desc=False).execute()
         error = getattr(response, "error", None)
     if error:
         raise HTTPException(status_code=500, detail="channel_query_failed")
@@ -516,8 +683,8 @@ def delete_channel(channel_id: str, authorization: Optional[str] = Header(None),
     return {"status": "deleted"}
 
 
-def _ensure_product_in_store(client: Client, product_id: str, store_id: str) -> None:
-    resp = client.table("products").select("id, store_id").eq("id", product_id).limit(1).execute()
+def _ensure_product_in_store(client: Client, product_id: str, store_id: str) -> Dict[str, Any]:
+    resp = client.table("products").select("id, store_id, name").eq("id", product_id).limit(1).execute()
     error = getattr(resp, "error", None)
     if error:
         raise HTTPException(status_code=500, detail="product_lookup_failed")
@@ -525,8 +692,11 @@ def _ensure_product_in_store(client: Client, product_id: str, store_id: str) -> 
     if not data:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="product_not_found")
     row = data[0]
-    if str(row.get("store_id")) != str(store_id):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="store_mismatch")
+    if _order_items_supports_store_scope(client):
+        store_value = row.get("store_id")
+        if store_value is not None and str(store_value) != str(store_id):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="store_mismatch")
+    return row
 
 
 def _ensure_category_in_store(client: Client, category_id: str, store_id: str) -> None:
@@ -693,8 +863,12 @@ def _sanitize_recipe_payload(payload: RecipeCreate | RecipeUpdate, partial: bool
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="quantity_non_negative")
         data["quantity_used"] = qty
 
-    # unit is optional for now (schema does not store it)
-    data.pop("unit", None)
+    if "unit" in data:
+        unit = (data.get("unit") or "").strip()
+        if unit:
+            data["unit"] = unit
+        else:
+            data.pop("unit", None)
     return data
 
 
@@ -736,8 +910,19 @@ def list_channel_prices(authorization: Optional[str] = Header(None), store_id: O
     ctx = _get_ctx(authorization)
     store_id_resolved, _role = _resolve_store_id(ctx["memberships"], store_id)
 
-    price_resp = ctx["client"].table("channel_prices").select("id, store_id, product_id, channel_id, selling_price, created_at, products(name), sales_channels(name)").eq("store_id", store_id_resolved).execute()
-    error = getattr(price_resp, "error", None)
+    try:
+        price_resp = ctx["client"].table("channel_prices").select("id, store_id, product_id, channel_id, price, created_at, products(name), sales_channels(name)").eq("store_id", store_id_resolved).execute()
+        error = getattr(price_resp, "error", None)
+    except Exception as exc:
+        price_resp = None
+        error = exc
+    if error and _is_missing_column(error, "price"):
+        try:
+            price_resp = ctx["client"].table("channel_prices").select("id, store_id, product_id, channel_id, selling_price, created_at, products(name), sales_channels(name)").eq("store_id", store_id_resolved).execute()
+            error = getattr(price_resp, "error", None)
+        except Exception as exc:
+            price_resp = None
+            error = exc
     if error:
         raise HTTPException(status_code=500, detail="channel_price_query_failed")
     prices = getattr(price_resp, "data", None) or []
@@ -747,10 +932,10 @@ def list_channel_prices(authorization: Optional[str] = Header(None), store_id: O
         raise HTTPException(status_code=500, detail="product_query_failed")
     products = getattr(products_resp, "data", None) or []
 
-    channels_resp = ctx["client"].table("sales_channels").select("id, name, type, fee_type, fee_value, is_default, is_active").eq("store_id", store_id_resolved).order("name", desc=False).execute()
+    channels_resp = ctx["client"].table("sales_channels").select("id, name, type, fee_type, fee_value, is_active").eq("store_id", store_id_resolved).order("name", desc=False).execute()
     ch_error = getattr(channels_resp, "error", None)
     if ch_error and _is_missing_column(ch_error, "is_active"):
-        channels_resp = ctx["client"].table("sales_channels").select("id, name, type, fee_type, fee_value, is_default").eq("store_id", store_id_resolved).order("name", desc=False).execute()
+        channels_resp = ctx["client"].table("sales_channels").select("id, name, type, fee_type, fee_value").eq("store_id", store_id_resolved).order("name", desc=False).execute()
         ch_error = getattr(channels_resp, "error", None)
     if ch_error:
         raise HTTPException(status_code=500, detail="channel_query_failed")
@@ -776,10 +961,25 @@ def create_channel_price(payload: ChannelPriceCreate, authorization: Optional[st
 
     data["store_id"] = store_id_resolved
 
-    response = ctx["client"].table("channel_prices").insert(data).execute()
-    error = getattr(response, "error", None)
+    try:
+        response = ctx["client"].table("channel_prices").insert(data).execute()
+        error = getattr(response, "error", None)
+    except Exception as exc:
+        response = None
+        error = exc
+    if error and _is_missing_column(error, "price"):
+        fallback = dict(data)
+        if "price" in fallback:
+            fallback["selling_price"] = fallback.pop("price")
+        try:
+            response = ctx["client"].table("channel_prices").insert(fallback).execute()
+            error = getattr(response, "error", None)
+            data = fallback
+        except Exception as exc:
+            response = None
+            error = exc
     if error:
-        message = str(getattr(error, "message", ""))
+        message = str(getattr(error, "message", error))
         if "duplicate" in message or "unique" in message:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="channel_price_exists")
         raise HTTPException(status_code=500, detail="channel_price_create_failed")
@@ -814,10 +1014,25 @@ def update_channel_price(price_id: str, payload: ChannelPriceUpdate, authorizati
     _ensure_product_in_store(ctx["client"], target_product, store_id_resolved)
     _ensure_channel_in_store(ctx["client"], target_channel, store_id_resolved)
 
-    response = ctx["client"].table("channel_prices").update(data).eq("id", price_id).eq("store_id", store_id_resolved).execute()
-    error = getattr(response, "error", None)
+    try:
+        response = ctx["client"].table("channel_prices").update(data).eq("id", price_id).eq("store_id", store_id_resolved).execute()
+        error = getattr(response, "error", None)
+    except Exception as exc:
+        response = None
+        error = exc
+    if error and _is_missing_column(error, "price"):
+        fallback = dict(data)
+        if "price" in fallback:
+            fallback["selling_price"] = fallback.pop("price")
+        try:
+            response = ctx["client"].table("channel_prices").update(fallback).eq("id", price_id).eq("store_id", store_id_resolved).execute()
+            error = getattr(response, "error", None)
+            data = fallback
+        except Exception as exc:
+            response = None
+            error = exc
     if error:
-        message = str(getattr(error, "message", ""))
+        message = str(getattr(error, "message", error))
         if "duplicate" in message or "unique" in message:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="channel_price_exists")
         raise HTTPException(status_code=500, detail="channel_price_update_failed")
@@ -1059,15 +1274,25 @@ def list_ingredients(authorization: Optional[str] = Header(None), store_id: Opti
     ctx = _get_ctx(authorization)
     store_id_resolved, _role = _resolve_store_id(ctx["memberships"], store_id)
 
+    def _query_ingredients(cols: str) -> tuple[Optional[Any], Optional[Any]]:
+        try:
+            resp_local = ctx["client"].table("ingredients").select(cols).eq("store_id", store_id_resolved).order("created_at", desc=False).execute()
+            return resp_local, getattr(resp_local, "error", None)
+        except Exception as exc:
+            return None, exc
+
     select_cols = "id, store_id, name, unit, cost_per_unit, stock_on_hand, low_stock_threshold, supplier_name, is_active, created_at"
-    resp = ctx["client"].table("ingredients").select(select_cols).eq("store_id", store_id_resolved).order("created_at", desc=False).execute()
-    err = getattr(resp, "error", None)
+    resp, err = _query_ingredients(select_cols)
+    if err and _is_missing_column(err, "stock_on_hand"):
+        resp, err = _query_ingredients("id, store_id, name, unit, cost_per_unit, current_stock, low_stock_threshold, supplier_name, is_active, created_at")
     if err and _is_missing_column(err, "is_active"):
-        resp = ctx["client"].table("ingredients").select("id, store_id, name, unit, cost_per_unit, stock_on_hand, low_stock_threshold, supplier_name, created_at").eq("store_id", store_id_resolved).order("created_at", desc=False).execute()
-        err = getattr(resp, "error", None)
+        resp, err = _query_ingredients("id, store_id, name, unit, cost_per_unit, stock_on_hand, current_stock, low_stock_threshold, supplier_name, created_at")
+        if err and _is_missing_column(err, "stock_on_hand"):
+            resp, err = _query_ingredients("id, store_id, name, unit, cost_per_unit, current_stock, low_stock_threshold, supplier_name, created_at")
     if err and _is_missing_column(err, "supplier_name"):
-        resp = ctx["client"].table("ingredients").select("id, store_id, name, unit, cost_per_unit, stock_on_hand, low_stock_threshold, created_at").eq("store_id", store_id_resolved).order("created_at", desc=False).execute()
-        err = getattr(resp, "error", None)
+        resp, err = _query_ingredients("id, store_id, name, unit, cost_per_unit, stock_on_hand, current_stock, low_stock_threshold, created_at")
+        if err and _is_missing_column(err, "stock_on_hand"):
+            resp, err = _query_ingredients("id, store_id, name, unit, cost_per_unit, current_stock, low_stock_threshold, created_at")
     if err:
         raise HTTPException(status_code=500, detail="ingredient_query_failed")
 
@@ -1086,12 +1311,30 @@ def create_ingredient(payload: IngredientCreate, authorization: Optional[str] = 
 
     optional_fields = ["supplier_name", "is_active"]
     try:
-        resp = ctx["client"].table("ingredients").insert(data).execute()
-        err = getattr(resp, "error", None)
+        try:
+            resp = ctx["client"].table("ingredients").insert(data).execute()
+            err = getattr(resp, "error", None)
+        except Exception as exc:
+            resp = None
+            err = exc
+        if err and _is_missing_column(err, "stock_on_hand"):
+            stock_value = data.pop("stock_on_hand", None)
+            if stock_value is not None:
+                data["current_stock"] = stock_value
+            try:
+                resp = ctx["client"].table("ingredients").insert(data).execute()
+                err = getattr(resp, "error", None)
+            except Exception as exc:
+                resp = None
+                err = exc
         if err and any(_is_missing_column(err, f) for f in optional_fields):
             trimmed = _omit_optional_fields(data, optional_fields)
-            resp = ctx["client"].table("ingredients").insert(trimmed).execute()
-            err = getattr(resp, "error", None)
+            try:
+                resp = ctx["client"].table("ingredients").insert(trimmed).execute()
+                err = getattr(resp, "error", None)
+            except Exception as exc:
+                resp = None
+                err = exc
         if err:
             raise HTTPException(status_code=500, detail="ingredient_create_failed")
         rows = getattr(resp, "data", None) or []
@@ -1119,12 +1362,30 @@ def update_ingredient(ingredient_id: str, payload: IngredientUpdate, authorizati
 
     optional_fields = ["supplier_name", "is_active"]
     try:
-        resp = ctx["client"].table("ingredients").update(data).eq("id", ingredient_id).eq("store_id", store_id_resolved).execute()
-        err = getattr(resp, "error", None)
+        try:
+            resp = ctx["client"].table("ingredients").update(data).eq("id", ingredient_id).eq("store_id", store_id_resolved).execute()
+            err = getattr(resp, "error", None)
+        except Exception as exc:
+            resp = None
+            err = exc
+        if err and _is_missing_column(err, "stock_on_hand"):
+            stock_value = data.pop("stock_on_hand", None)
+            if stock_value is not None:
+                data["current_stock"] = stock_value
+            try:
+                resp = ctx["client"].table("ingredients").update(data).eq("id", ingredient_id).eq("store_id", store_id_resolved).execute()
+                err = getattr(resp, "error", None)
+            except Exception as exc:
+                resp = None
+                err = exc
         if err and any(_is_missing_column(err, f) for f in optional_fields):
             trimmed = _omit_optional_fields(data, optional_fields)
-            resp = ctx["client"].table("ingredients").update(trimmed).eq("id", ingredient_id).eq("store_id", store_id_resolved).execute()
-            err = getattr(resp, "error", None)
+            try:
+                resp = ctx["client"].table("ingredients").update(trimmed).eq("id", ingredient_id).eq("store_id", store_id_resolved).execute()
+                err = getattr(resp, "error", None)
+            except Exception as exc:
+                resp = None
+                err = exc
         if err:
             raise HTTPException(status_code=500, detail="ingredient_update_failed")
         rows = getattr(resp, "data", None) or []
@@ -1205,11 +1466,35 @@ def create_recipe(payload: RecipeCreate, authorization: Optional[str] = Header(N
     _ensure_product_in_store(ctx["client"], data["product_id"], store_id_resolved)
     _ensure_ingredient_in_store(ctx["client"], data["ingredient_id"], store_id_resolved)
 
-    data["store_id"] = store_id_resolved
+    if not data.get("unit"):
+        ing_resp = ctx["client"].table("ingredients").select("unit").eq("id", data["ingredient_id"]).limit(1).execute()
+        ing_rows = getattr(ing_resp, "data", None) or []
+        if ing_rows and ing_rows[0].get("unit"):
+            data["unit"] = str(ing_rows[0].get("unit"))
 
-    resp = ctx["client"].table("recipes").insert(data).execute()
-    if getattr(resp, "error", None):
-        message = str(getattr(resp.error, "message", getattr(resp, "error", "")))
+    data["store_id"] = store_id_resolved
+    data["created_at"] = datetime.utcnow().isoformat()
+    data["updated_at"] = datetime.utcnow().isoformat()
+
+    try:
+        resp = ctx["client"].table("recipes").insert(data).execute()
+        err = getattr(resp, "error", None)
+    except Exception as exc:
+        resp = None
+        err = exc
+
+    if err and _is_missing_column(err, "updated_at"):
+        fallback = dict(data)
+        fallback.pop("updated_at", None)
+        try:
+            resp = ctx["client"].table("recipes").insert(fallback).execute()
+            err = getattr(resp, "error", None)
+        except Exception as exc:
+            resp = None
+            err = exc
+
+    if err:
+        message = str(getattr(err, "message", err))
         if "duplicate" in message or "unique" in message:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="recipe_exists")
         raise HTTPException(status_code=500, detail="recipe_create_failed")
@@ -1341,7 +1626,7 @@ def _valid_order_transition(from_status: str, to_status: str) -> bool:
 def _sanitize_order_payload(payload: OrderCreate | OrderUpdate, partial: bool = False) -> Dict[str, Any]:
     data = payload.model_dump(exclude_unset=True)
 
-    text_fields = ["order_type", "pickup_type", "pickup_time", "note", "ordered_at", "cancelled_reason", "cancelled_at"]
+    text_fields = ["order_type", "pickup_type", "pickup_time", "note", "cancelled_reason", "cancelled_at"]
     for field in text_fields:
         if field in data and data[field] is not None:
             data[field] = str(data[field]).strip()
@@ -1372,6 +1657,7 @@ def _sanitize_order_payload(payload: OrderCreate | OrderUpdate, partial: bool = 
         data.setdefault("payment_status", "unpaid")
         data.setdefault("order_type", "pickup")
         data.setdefault("pickup_type", "pickup")
+        data.setdefault("order_no", _generate_order_number())
 
     return data
 
@@ -1394,16 +1680,128 @@ def _map_order_item(row: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _map_order(row: Dict[str, Any]) -> Dict[str, Any]:
-    customer_rel = row.get("customers") if isinstance(row, dict) else None
-    channel_rel = row.get("sales_channels") if isinstance(row, dict) else None
+def _make_fallback_label(prefix: str, identifier: Optional[str]) -> str:
+    ident = str(identifier or "")
+    short = ident[:8] if ident else "unknown"
+    return f"{prefix} {short}".strip()
+
+
+def _load_relation_names(
+    client: Client,
+    table: str,
+    store_id: str,
+    ids: Set[str],
+    candidate_columns: List[str],
+    fallback_prefix: str,
+) -> Dict[str, str]:
+    if not ids:
+        return {}
+
+    id_list = list(ids)
+    for column in candidate_columns:
+        try:
+            resp = (
+                client.table(table)
+                .select(f"id, {column}")
+                .eq("store_id", store_id)
+                .in_("id", id_list)
+                .execute()
+            )
+        except Exception as exc:
+            if _is_missing_column(exc, column):
+                continue
+            raise
+
+        err = getattr(resp, "error", None)
+        if err:
+            if _is_missing_column(err, column):
+                continue
+            raise HTTPException(status_code=500, detail=f"{table}_lookup_failed")
+
+        result: Dict[str, str] = {}
+        for row in getattr(resp, "data", None) or []:
+            ident = str(row.get("id")) if row.get("id") else None
+            value = row.get(column)
+            if value:
+                result[str(row["id"])] = str(value)
+            elif ident:
+                result[str(row["id"])] = _make_fallback_label(fallback_prefix, ident)
+        for ident in id_list:
+            result.setdefault(str(ident), _make_fallback_label(fallback_prefix, ident))
+        return result
+
+    # Final fallback: fetch ids only and return generated labels
+    try:
+        resp = (
+            client.table(table)
+            .select("id")
+            .eq("store_id", store_id)
+            .in_("id", id_list)
+            .execute()
+        )
+    except Exception:
+        resp = None
+
+    data = getattr(resp, "data", None) if resp else None
+    base_map: Dict[str, str] = {}
+    for row in (data or []):
+        ident = str(row.get("id")) if row.get("id") else None
+        if ident:
+            base_map[ident] = _make_fallback_label(fallback_prefix, ident)
+    for ident in id_list:
+        base_map.setdefault(str(ident), _make_fallback_label(fallback_prefix, ident))
+    return base_map
+
+
+def _load_order_relation_maps(client: Client, store_id: str, rows: List[Dict[str, Any]]) -> Tuple[Dict[str, str], Dict[str, str]]:
+    customer_ids: Set[str] = set()
+    channel_ids: Set[str] = set()
+    for row in rows:
+        cid = row.get("customer_id")
+        if cid:
+            customer_ids.add(str(cid))
+        ch_id = row.get("channel_id")
+        if ch_id:
+            channel_ids.add(str(ch_id))
+
+    customer_map = _load_relation_names(
+        client,
+        "customers",
+        store_id,
+        customer_ids,
+        ["full_name", "customer_name", "name"],
+        "Customer",
+    )
+    channel_map = _load_relation_names(
+        client,
+        "sales_channels",
+        store_id,
+        channel_ids,
+        ["name", "channel_name"],
+        "Channel",
+    )
+
+    return customer_map, channel_map
+
+
+def _map_order(
+    row: Dict[str, Any],
+    customer_names: Optional[Dict[str, str]] = None,
+    channel_names: Optional[Dict[str, str]] = None,
+) -> Dict[str, Any]:
+    customer_name = None
+    channel_name = None
+    if customer_names and row.get("customer_id"):
+        customer_name = customer_names.get(str(row.get("customer_id")))
+    if channel_names and row.get("channel_id"):
+        channel_name = channel_names.get(str(row.get("channel_id")))
     return {
         "id": str(row.get("id")),
         "store_id": row.get("store_id"),
         "customer_id": row.get("customer_id"),
-        "customer_name": customer_rel.get("name") if isinstance(customer_rel, dict) else None,
+        "customer_name": customer_name,
         "channel_id": row.get("channel_id"),
-        "channel_name": channel_rel.get("name") if isinstance(channel_rel, dict) else None,
+        "channel_name": channel_name,
         "order_type": row.get("order_type"),
         "pickup_type": row.get("pickup_type"),
         "pickup_time": row.get("pickup_time"),
@@ -1418,21 +1816,44 @@ def _map_order(row: Dict[str, Any]) -> Dict[str, Any]:
         "note": row.get("note"),
         "cancelled_reason": row.get("cancelled_reason"),
         "cancelled_at": row.get("cancelled_at"),
-        "ordered_at": row.get("ordered_at"),
-        "created_by": row.get("created_by"),
         "created_at": row.get("created_at"),
         "updated_at": row.get("updated_at"),
     }
 
 
+def _order_select_columns(use_channel_fee: bool = True) -> str:
+    columns = [
+        "id",
+        "store_id",
+        "customer_id",
+        "channel_id",
+        "order_type",
+        "pickup_type",
+        "pickup_time",
+        "status",
+        "payment_status",
+        "subtotal",
+        "discount_amount",
+        "channel_fee" if use_channel_fee else "channel_fee_total",
+        "total_amount",
+        "total_cost",
+        "gross_profit",
+        "note",
+        "cancelled_reason",
+        "cancelled_at",
+    ]
+    columns.extend([
+        "created_at",
+        "updated_at",
+    ])
+    return ", ".join(columns)
+
+
 def _recalculate_order_totals(client: Client, store_id: str, order_id: str) -> None:
-    items_resp = (
-        client.table("order_items")
-        .select("quantity, unit_price, unit_cost")
-        .eq("store_id", store_id)
-        .eq("order_id", order_id)
-        .execute()
-    )
+    items_query = client.table("order_items").select("quantity, unit_price, unit_cost").eq("order_id", order_id)
+    if _order_items_supports_store_scope(client):
+        items_query = items_query.eq("store_id", store_id)
+    items_resp = items_query.execute()
     if getattr(items_resp, "error", None):
         raise HTTPException(status_code=500, detail="order_totals_recalc_failed")
     items = getattr(items_resp, "data", None) or []
@@ -1513,9 +1934,26 @@ def _write_order_status_log(
         "changed_by_type": "admin",
         "note": note,
     }
-    resp = client.table("order_status_logs").insert(payload).execute()
-    if getattr(resp, "error", None):
-        raise HTTPException(status_code=500, detail="order_status_log_failed")
+    def _insert(data: Dict[str, Any]) -> None:
+        resp = client.table("order_status_logs").insert(data).execute()
+        err = getattr(resp, "error", None)
+        if err:
+            raise err
+
+    try:
+        _insert(payload)
+    except Exception as exc:
+        missing_optional = any(_is_missing_column(exc, k) for k in ["changed_by", "changed_by_type", "note"])
+        if missing_optional:
+            trimmed = _omit_optional_fields(payload, ["changed_by", "changed_by_type", "note"])
+            try:
+                _insert(trimmed)
+                return
+            except Exception as exc2:
+                logger.warning("order_status_log_failed_trimmed: %s", getattr(exc2, "message", str(exc2)))
+                return
+        logger.warning("order_status_log_failed: %s", getattr(exc, "message", str(exc)))
+        return
 
 
 def _get_order_row(client: Client, order_id: str, store_id: str) -> Dict[str, Any]:
@@ -1562,19 +2000,68 @@ def _write_mock_line_notification(
     message_type: str,
     message_payload: Dict[str, Any],
 ) -> None:
+    line_user_id_effective = line_user_id or "mock-line-user"
     payload = {
         "order_id": order_id,
         "customer_id": customer_id,
-        "line_user_id": line_user_id,
+        "line_user_id": line_user_id_effective,
         "message_type": message_type,
         "message_payload": message_payload,
         "send_status": "success",
         "error_message": None,
         "sent_at": datetime.utcnow().isoformat(),
     }
-    resp = client.table("line_notification_logs").insert(payload).execute()
-    if getattr(resp, "error", None):
-        raise HTTPException(status_code=500, detail="mock_notification_log_failed")
+    def _insert(data: Dict[str, Any]) -> None:
+        resp = client.table("line_notification_logs").insert(data).execute()
+        err = getattr(resp, "error", None)
+        if err:
+            raise err
+
+    try:
+        _insert(payload)
+    except Exception as exc:
+        missing_optional = any(
+            _is_missing_column(exc, k)
+            for k in [
+                "customer_id",
+                "line_user_id",
+                "message_payload",
+                "error_message",
+                "sent_at",
+            ]
+        )
+        send_status_missing = _is_missing_column(exc, "send_status")
+
+        if missing_optional or send_status_missing:
+            trimmed = _omit_optional_fields(
+                payload,
+                [
+                    "customer_id",
+                    "line_user_id",
+                    "message_payload",
+                    "error_message",
+                    "sent_at",
+                ]
+                + (["send_status"] if send_status_missing else []),
+            )
+            try:
+                _insert(trimmed)
+                return
+            except Exception as exc2:
+                logger.warning(
+                    "mock_notification_log_failed_trimmed order=%s type=%s: %s",
+                    order_id,
+                    message_type,
+                    getattr(exc2, "message", str(exc2)),
+                )
+                return
+        logger.warning(
+            "mock_notification_log_failed order=%s type=%s: %s",
+            order_id,
+            message_type,
+            getattr(exc, "message", str(exc)),
+        )
+        return
 
 
 @router.get("/orders")
@@ -1582,38 +2069,37 @@ def list_orders(authorization: Optional[str] = Header(None), store_id: Optional[
     ctx = _get_ctx(authorization)
     store_id_resolved, _role = _resolve_store_id(ctx["memberships"], store_id)
 
-    select_cols = (
-        "id, store_id, customer_id, channel_id, order_type, pickup_type, pickup_time, status, payment_status, "
-        "subtotal, discount_amount, channel_fee, total_amount, total_cost, gross_profit, note, cancelled_reason, "
-        "cancelled_at, ordered_at, created_by, created_at, updated_at, customers(name), sales_channels(name)"
-    )
-    resp = ctx["client"].table("orders").select(select_cols).eq("store_id", store_id_resolved).order("created_at", desc=True).execute()
-    err = getattr(resp, "error", None)
-    if err and _is_missing_column(err, "channel_fee"):
-        fallback_cols = (
-            "id, store_id, customer_id, channel_id, order_type, pickup_type, pickup_time, status, payment_status, "
-            "subtotal, discount_amount, channel_fee_total, total_amount, total_cost, gross_profit, note, cancelled_reason, "
-            "cancelled_at, ordered_at, created_by, created_at, updated_at, customers(name), sales_channels(name)"
+    use_channel_fee = True
+    while True:
+        select_cols = _order_select_columns(use_channel_fee)
+        resp = (
+            ctx["client"].table("orders").select(select_cols).eq("store_id", store_id_resolved).order("created_at", desc=True).execute()
         )
-        resp = ctx["client"].table("orders").select(fallback_cols).eq("store_id", store_id_resolved).order("created_at", desc=True).execute()
         err = getattr(resp, "error", None)
-    if err:
+        if not err:
+            break
+        missing_col = _extract_missing_column(err)
+        if use_channel_fee and missing_col == "channel_fee":
+            use_channel_fee = False
+            continue
         raise HTTPException(status_code=500, detail="order_query_failed")
 
     rows = getattr(resp, "data", None) or []
+    customer_map, channel_map = _load_order_relation_maps(ctx["client"], store_id_resolved, rows)
     order_ids = [str(r.get("id")) for r in rows if r.get("id")]
 
     item_map: Dict[str, List[Dict[str, Any]]] = {}
     if order_ids:
-        item_resp = (
+        item_query = (
             ctx["client"]
             .table("order_items")
-            .select("id, store_id, order_id, product_id, quantity, unit_price, unit_cost, line_total, line_cost, line_profit, created_at, products(name)")
-            .eq("store_id", store_id_resolved)
+            .select(_order_item_select_clause(ctx["client"]))
             .in_("order_id", order_ids)
             .order("created_at", desc=False)
-            .execute()
         )
+        if _order_items_supports_store_scope(ctx["client"]):
+            item_query = item_query.eq("store_id", store_id_resolved)
+        item_resp = item_query.execute()
         if getattr(item_resp, "error", None):
             raise HTTPException(status_code=500, detail="order_items_query_failed")
         for item in (getattr(item_resp, "data", None) or []):
@@ -1622,7 +2108,7 @@ def list_orders(authorization: Optional[str] = Header(None), store_id: Optional[
 
     mapped = []
     for row in rows:
-        itemized = _map_order(row)
+        itemized = _map_order(row, customer_map, channel_map)
         itemized["items"] = item_map.get(str(row.get("id")), [])
         mapped.append(itemized)
 
@@ -1643,25 +2129,55 @@ def create_order(payload: OrderCreate, authorization: Optional[str] = Header(Non
         _ensure_channel_in_store(ctx["client"], data["channel_id"], store_id_resolved)
 
     data["store_id"] = store_id_resolved
-    data["created_by"] = ctx.get("user_id")
     data.pop("items", None)
+    logger.warning("creating order with payload: %s", data)
 
-    order_resp = ctx["client"].table("orders").insert(data).execute()
-    if getattr(order_resp, "error", None):
-        raise HTTPException(status_code=500, detail="order_create_failed")
+    attempt_data = dict(data)
+    order_resp = None
+    max_attempts = len(attempt_data) + 1
+    for _ in range(max_attempts):
+        try:
+            order_resp = ctx["client"].table("orders").insert(attempt_data).execute()
+            error = getattr(order_resp, "error", None)
+        except Exception as exc:
+            error = exc
+        if not error:
+            break
+        missing_col = _extract_missing_column(error)
+        if missing_col and missing_col in attempt_data:
+            logger.warning("orders insert missing column %s; retrying without it", missing_col)
+            attempt_data.pop(missing_col, None)
+            continue
+        message = getattr(error, "message", str(error))
+        logger.error("order_create_failed: %s", message)
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "message": "order_create_failed",
+                "error": message,
+                "payload_keys": list(attempt_data.keys()),
+            },
+        )
+    else:
+        raise HTTPException(status_code=500, detail="order_create_failed:max_attempts_exceeded")
+
     order_rows = getattr(order_resp, "data", None) or []
-    created = order_rows[0] if order_rows else data
+    created = order_rows[0] if order_rows else attempt_data
     order_id = str(created.get("id"))
 
     item_rows: List[Dict[str, Any]] = []
     for raw_item in items:
         item_data = _sanitize_order_item_payload(raw_item)
-        _ensure_product_in_store(ctx["client"], item_data["product_id"], store_id_resolved)
-        item_rows.append({
-            **item_data,
-            "store_id": store_id_resolved,
-            "order_id": order_id,
-        })
+        product_row = _ensure_product_in_store(ctx["client"], item_data["product_id"], store_id_resolved)
+        base_payload = {**item_data, "order_id": order_id}
+        if _order_items_has_column(ctx["client"], "product_name_snapshot"):
+            product_name = product_row.get("name") if isinstance(product_row, dict) else None
+            if not product_name:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="product_name_missing")
+            base_payload["product_name_snapshot"] = product_name
+        if _order_items_supports_store_scope(ctx["client"]):
+            base_payload["store_id"] = store_id_resolved
+        item_rows.append(_prune_order_item_columns(ctx["client"], base_payload))
 
     if item_rows:
         item_resp = ctx["client"].table("order_items").insert(item_rows).execute()
@@ -1679,22 +2195,19 @@ def get_order(order_id: str, authorization: Optional[str] = Header(None), store_
     ctx = _get_ctx(authorization)
     store_id_resolved, _role = _resolve_store_id(ctx["memberships"], store_id)
 
-    select_cols = (
-        "id, store_id, customer_id, channel_id, order_type, pickup_type, pickup_time, status, payment_status, "
-        "subtotal, discount_amount, channel_fee, total_amount, total_cost, gross_profit, note, cancelled_reason, "
-        "cancelled_at, ordered_at, created_by, created_at, updated_at, customers(name), sales_channels(name)"
-    )
-    resp = ctx["client"].table("orders").select(select_cols).eq("id", order_id).eq("store_id", store_id_resolved).limit(1).execute()
-    err = getattr(resp, "error", None)
-    if err and _is_missing_column(err, "channel_fee"):
-        fallback_cols = (
-            "id, store_id, customer_id, channel_id, order_type, pickup_type, pickup_time, status, payment_status, "
-            "subtotal, discount_amount, channel_fee_total, total_amount, total_cost, gross_profit, note, cancelled_reason, "
-            "cancelled_at, ordered_at, created_by, created_at, updated_at, customers(name), sales_channels(name)"
+    use_channel_fee = True
+    while True:
+        select_cols = _order_select_columns(use_channel_fee)
+        resp = (
+            ctx["client"].table("orders").select(select_cols).eq("id", order_id).eq("store_id", store_id_resolved).limit(1).execute()
         )
-        resp = ctx["client"].table("orders").select(fallback_cols).eq("id", order_id).eq("store_id", store_id_resolved).limit(1).execute()
         err = getattr(resp, "error", None)
-    if err:
+        if not err:
+            break
+        missing_col = _extract_missing_column(err)
+        if use_channel_fee and missing_col == "channel_fee":
+            use_channel_fee = False
+            continue
         raise HTTPException(status_code=500, detail="order_query_failed")
 
     rows = getattr(resp, "data", None) or []
@@ -1702,19 +2215,22 @@ def get_order(order_id: str, authorization: Optional[str] = Header(None), store_
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="order_not_found")
     row = rows[0]
 
-    item_resp = (
+    customer_map, channel_map = _load_order_relation_maps(ctx["client"], store_id_resolved, [row])
+
+    item_query = (
         ctx["client"]
         .table("order_items")
-        .select("id, store_id, order_id, product_id, quantity, unit_price, unit_cost, line_total, line_cost, line_profit, created_at, products(name)")
-        .eq("store_id", store_id_resolved)
+        .select(_order_item_select_clause(ctx["client"]))
         .eq("order_id", order_id)
         .order("created_at", desc=False)
-        .execute()
     )
+    if _order_items_supports_store_scope(ctx["client"]):
+        item_query = item_query.eq("store_id", store_id_resolved)
+    item_resp = item_query.execute()
     if getattr(item_resp, "error", None):
         raise HTTPException(status_code=500, detail="order_items_query_failed")
 
-    mapped = _map_order(row)
+    mapped = _map_order(row, customer_map, channel_map)
     mapped["items"] = [_map_order_item(i) for i in (getattr(item_resp, "data", None) or [])]
     return mapped
 
@@ -1786,7 +2302,10 @@ def delete_order(order_id: str, authorization: Optional[str] = Header(None), sto
     if getattr(pay_resp, "data", None):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="order_has_payments")
 
-    ctx["client"].table("order_items").delete().eq("store_id", store_id_resolved).eq("order_id", order_id).execute()
+    delete_query = ctx["client"].table("order_items").delete().eq("order_id", order_id)
+    if _order_items_supports_store_scope(ctx["client"]):
+        delete_query = delete_query.eq("store_id", store_id_resolved)
+    delete_query.execute()
     ctx["client"].table("order_status_logs").delete().eq("order_id", order_id).execute()
     ctx["client"].table("payment_status_logs").delete().eq("order_id", order_id).execute()
     ctx["client"].table("orders").delete().eq("id", order_id).eq("store_id", store_id_resolved).execute()
@@ -1873,15 +2392,16 @@ def list_order_items(order_id: str, authorization: Optional[str] = Header(None),
     store_id_resolved, _role = _resolve_store_id(ctx["memberships"], store_id)
     _get_order_row(ctx["client"], order_id, store_id_resolved)
 
-    resp = (
+    list_query = (
         ctx["client"]
         .table("order_items")
-        .select("id, store_id, order_id, product_id, quantity, unit_price, unit_cost, line_total, line_cost, line_profit, created_at, products(name)")
-        .eq("store_id", store_id_resolved)
+        .select(_order_item_select_clause(ctx["client"]))
         .eq("order_id", order_id)
         .order("created_at", desc=False)
-        .execute()
     )
+    if _order_items_supports_store_scope(ctx["client"]):
+        list_query = list_query.eq("store_id", store_id_resolved)
+    resp = list_query.execute()
     if getattr(resp, "error", None):
         raise HTTPException(status_code=500, detail="order_items_query_failed")
     rows = getattr(resp, "data", None) or []
@@ -1896,7 +2416,7 @@ def create_order_item(order_id: str, payload: OrderItemPayload, authorization: O
 
     _get_order_row(ctx["client"], order_id, store_id_resolved)
     data = _sanitize_order_item_payload(payload)
-    _ensure_product_in_store(ctx["client"], data["product_id"], store_id_resolved)
+    product_row = _ensure_product_in_store(ctx["client"], data["product_id"], store_id_resolved)
 
     qty = float(data.get("quantity") or 0)
     unit_price = float(data.get("unit_price") or 0)
@@ -1906,15 +2426,22 @@ def create_order_item(order_id: str, payload: OrderItemPayload, authorization: O
         "line_total": qty * unit_price,
         "line_cost": qty * unit_cost,
         "line_profit": (qty * unit_price) - (qty * unit_cost),
-        "store_id": store_id_resolved,
         "order_id": order_id,
     }
-    resp = ctx["client"].table("order_items").insert(insert_data).execute()
+    if _order_items_has_column(ctx["client"], "product_name_snapshot"):
+        product_name = product_row.get("name") if isinstance(product_row, dict) else None
+        if not product_name:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="product_name_missing")
+        insert_data["product_name_snapshot"] = product_name
+    if _order_items_supports_store_scope(ctx["client"]):
+        insert_data["store_id"] = store_id_resolved
+    pruned_insert = _prune_order_item_columns(ctx["client"], insert_data)
+    resp = ctx["client"].table("order_items").insert(pruned_insert).execute()
     if getattr(resp, "error", None):
         raise HTTPException(status_code=500, detail="order_item_create_failed")
     rows = getattr(resp, "data", None) or []
     _recalculate_order_totals(ctx["client"], store_id_resolved, order_id)
-    return _map_order_item(rows[0] if rows else insert_data)
+    return _map_order_item(rows[0] if rows else pruned_insert)
 
 
 @router.patch("/order-items/{item_id}")
@@ -1927,7 +2454,10 @@ def update_order_item(item_id: str, payload: OrderItemUpdate, authorization: Opt
     if not data:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="no_fields_to_update")
 
-    exists_resp = ctx["client"].table("order_items").select("id, store_id, order_id, product_id").eq("id", item_id).limit(1).execute()
+    exists_query = ctx["client"].table("order_items").select("id, store_id, order_id, product_id").eq("id", item_id).limit(1)
+    if _order_items_supports_store_scope(ctx["client"]):
+        exists_query = exists_query.eq("store_id", store_id_resolved)
+    exists_resp = exists_query.execute()
     exists = getattr(exists_resp, "data", None) or []
     if not exists:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="order_item_not_found")
@@ -1945,11 +2475,16 @@ def update_order_item(item_id: str, payload: OrderItemUpdate, authorization: Opt
     data["line_cost"] = target_qty * target_unit_cost
     data["line_profit"] = data["line_total"] - data["line_cost"]
 
-    resp = ctx["client"].table("order_items").update(data).eq("id", item_id).eq("store_id", store_id_resolved).execute()
+    pruned_update = _prune_order_item_columns(ctx["client"], data)
+
+    update_query = ctx["client"].table("order_items").update(pruned_update).eq("id", item_id)
+    if _order_items_supports_store_scope(ctx["client"]):
+        update_query = update_query.eq("store_id", store_id_resolved)
+    resp = update_query.execute()
     if getattr(resp, "error", None):
         raise HTTPException(status_code=500, detail="order_item_update_failed")
     rows = getattr(resp, "data", None) or []
-    updated = rows[0] if rows else (row | data)
+    updated = rows[0] if rows else (row | pruned_update)
     _recalculate_order_totals(ctx["client"], store_id_resolved, str(row.get("order_id")))
     return _map_order_item(updated)
 
@@ -1960,7 +2495,10 @@ def delete_order_item(item_id: str, authorization: Optional[str] = Header(None),
     store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
     _require_manager(role)
 
-    exists_resp = ctx["client"].table("order_items").select("id, store_id").eq("id", item_id).limit(1).execute()
+    exists_query = ctx["client"].table("order_items").select("id, store_id, order_id").eq("id", item_id).limit(1)
+    if _order_items_supports_store_scope(ctx["client"]):
+        exists_query = exists_query.eq("store_id", store_id_resolved)
+    exists_resp = exists_query.execute()
     exists = getattr(exists_resp, "data", None) or []
     if not exists:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="order_item_not_found")
@@ -1968,7 +2506,10 @@ def delete_order_item(item_id: str, authorization: Optional[str] = Header(None),
     if str(row.get("store_id")) != str(store_id_resolved):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="store_mismatch")
 
-    ctx["client"].table("order_items").delete().eq("id", item_id).eq("store_id", store_id_resolved).execute()
+    delete_item_query = ctx["client"].table("order_items").delete().eq("id", item_id)
+    if _order_items_supports_store_scope(ctx["client"]):
+        delete_item_query = delete_item_query.eq("store_id", store_id_resolved)
+    delete_item_query.execute()
     _recalculate_order_totals(ctx["client"], store_id_resolved, str(row.get("order_id")))
     return {"status": "deleted"}
 
@@ -2010,13 +2551,20 @@ def _sanitize_payment_payload(payload: PaymentCreate | PaymentUpdate, partial: b
 def _map_payment(row: Dict[str, Any]) -> Dict[str, Any]:
     order_rel = row.get("orders") if isinstance(row, dict) else None
     customer_rel = order_rel.get("customers") if isinstance(order_rel, dict) else None
+    customer_name = None
+    if isinstance(customer_rel, dict):
+        customer_name = (
+            customer_rel.get("display_name")
+            or customer_rel.get("name")
+            or customer_rel.get("customer_name")
+        )
     return {
         "id": str(row.get("id")),
         "store_id": row.get("store_id"),
         "order_id": row.get("order_id"),
         "order_status": order_rel.get("status") if isinstance(order_rel, dict) else None,
         "order_payment_status": order_rel.get("payment_status") if isinstance(order_rel, dict) else None,
-        "customer_name": customer_rel.get("name") if isinstance(customer_rel, dict) else None,
+        "customer_name": customer_name,
         "amount": float(row.get("amount") or 0),
         "method": row.get("method"),
         "status": row.get("status"),
@@ -2049,21 +2597,44 @@ def _write_payment_status_log(
         "changed_by_type": "admin",
         "note": note,
     }
-    resp = client.table("payment_status_logs").insert(payload).execute()
-    if getattr(resp, "error", None):
-        raise HTTPException(status_code=500, detail="payment_status_log_failed")
+    def _insert(data: Dict[str, Any]) -> None:
+        resp = client.table("payment_status_logs").insert(data).execute()
+        err = getattr(resp, "error", None)
+        if err:
+            raise err
+
+    try:
+        _insert(payload)
+    except Exception as exc:
+        missing_optional = any(_is_missing_column(exc, k) for k in ["changed_by", "changed_by_type", "note"])
+        if missing_optional:
+            trimmed = _omit_optional_fields(payload, ["changed_by", "changed_by_type", "note"])
+            try:
+                _insert(trimmed)
+                return
+            except Exception as exc2:
+                logger.warning("payment_status_log_failed_trimmed: %s", getattr(exc2, "message", str(exc2)))
+                return
+        logger.warning("payment_status_log_failed: %s", getattr(exc, "message", str(exc)))
+        return
 
 
 def _get_payment_row(client: Client, payment_id: str, store_id: str) -> Dict[str, Any]:
-    resp = client.table("payments").select("id, store_id, order_id, status").eq("id", payment_id).limit(1).execute()
+    select_cols = _payment_lookup_columns(client)
+    query = client.table("payments").select(select_cols).eq("id", payment_id).limit(1)
+    if _payments_supports_store_scope(client):
+        query = query.eq("store_id", store_id)
+    resp = query.execute()
     if getattr(resp, "error", None):
         raise HTTPException(status_code=500, detail="payment_lookup_failed")
     rows = getattr(resp, "data", None) or []
     if not rows:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="payment_not_found")
     row = rows[0]
-    if str(row.get("store_id")) != str(store_id):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="store_mismatch")
+    if _payments_supports_store_scope(client):
+        store_value = row.get("store_id")
+        if store_value is not None and str(store_value) != str(store_id):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="store_mismatch")
     return row
 
 
@@ -2101,16 +2672,25 @@ def list_payments(authorization: Optional[str] = Header(None), store_id: Optiona
     ctx = _get_ctx(authorization)
     store_id_resolved, _role = _resolve_store_id(ctx["memberships"], store_id)
 
-    select_cols = (
-        "id, store_id, order_id, amount, method, status, slip_url, slip_storage_path, slip_file_name, "
-        "submitted_at, confirmed_by, confirmed_at, reject_reason, created_at, "
-        "orders(id, status, payment_status, customers(name))"
-    )
-    resp = ctx["client"].table("payments").select(select_cols).eq("store_id", store_id_resolved).order("created_at", desc=True).execute()
+    select_cols = _payment_select_clause(ctx["client"], include_relations=True, include_slip_fields=True)
+    query = ctx["client"].table("payments").select(select_cols).order("created_at", desc=True)
+    if _payments_supports_store_scope(ctx["client"]):
+        query = query.eq("store_id", store_id_resolved)
+    resp = query.execute()
     err = getattr(resp, "error", None)
     if err and _is_missing_column(err, "slip_url"):
-        fallback_cols = "id, store_id, order_id, amount, method, status, created_at, orders(id, status, payment_status, customers(name))"
-        resp = ctx["client"].table("payments").select(fallback_cols).eq("store_id", store_id_resolved).order("created_at", desc=True).execute()
+        fallback_cols = _payment_select_clause(ctx["client"], include_relations=True, include_slip_fields=False)
+        fallback_query = ctx["client"].table("payments").select(fallback_cols).order("created_at", desc=True)
+        if _payments_supports_store_scope(ctx["client"]):
+            fallback_query = fallback_query.eq("store_id", store_id_resolved)
+        resp = fallback_query.execute()
+        err = getattr(resp, "error", None)
+    if err and (_is_missing_column(err, "customers") or _is_missing_column(err, "customers.name") or _is_missing_column(err, "customers.display_name")):
+        fallback_cols = _payment_select_clause(ctx["client"], include_relations=False, include_slip_fields=not _is_missing_column(err, "slip_url"))
+        fallback_query = ctx["client"].table("payments").select(fallback_cols).order("created_at", desc=True)
+        if _payments_supports_store_scope(ctx["client"]):
+            fallback_query = fallback_query.eq("store_id", store_id_resolved)
+        resp = fallback_query.execute()
         err = getattr(resp, "error", None)
     if err:
         raise HTTPException(status_code=500, detail="payment_query_failed")
@@ -2127,28 +2707,18 @@ def list_order_payments(order_id: str, authorization: Optional[str] = Header(Non
     store_id_resolved, _role = _resolve_store_id(ctx["memberships"], store_id)
     _get_order_row(ctx["client"], order_id, store_id_resolved)
 
-    select_cols = "id, store_id, order_id, amount, method, status, slip_url, slip_storage_path, slip_file_name, submitted_at, confirmed_by, confirmed_at, reject_reason, created_at"
-    resp = (
-        ctx["client"]
-        .table("payments")
-        .select(select_cols)
-        .eq("store_id", store_id_resolved)
-        .eq("order_id", order_id)
-        .order("created_at", desc=True)
-        .execute()
-    )
+    select_cols = _payment_select_clause(ctx["client"], include_relations=False, include_slip_fields=True)
+    query = ctx["client"].table("payments").select(select_cols).eq("order_id", order_id).order("created_at", desc=True)
+    if _payments_supports_store_scope(ctx["client"]):
+        query = query.eq("store_id", store_id_resolved)
+    resp = query.execute()
     err = getattr(resp, "error", None)
     if err and _is_missing_column(err, "slip_url"):
-        fallback_cols = "id, store_id, order_id, amount, method, status, created_at"
-        resp = (
-            ctx["client"]
-            .table("payments")
-            .select(fallback_cols)
-            .eq("store_id", store_id_resolved)
-            .eq("order_id", order_id)
-            .order("created_at", desc=True)
-            .execute()
-        )
+        fallback_cols = _payment_select_clause(ctx["client"], include_relations=False, include_slip_fields=False)
+        fallback_query = ctx["client"].table("payments").select(fallback_cols).eq("order_id", order_id).order("created_at", desc=True)
+        if _payments_supports_store_scope(ctx["client"]):
+            fallback_query = fallback_query.eq("store_id", store_id_resolved)
+        resp = fallback_query.execute()
         err = getattr(resp, "error", None)
     if err:
         raise HTTPException(status_code=500, detail="payment_query_failed")
@@ -2197,16 +2767,19 @@ def create_order_payment(order_id: str, payload: PaymentCreate, authorization: O
         "submitted_at": datetime.utcnow().isoformat() if has_slip else None,
     }
 
-    resp = ctx["client"].table("payments").insert(create_payload).execute()
+    pruned_payload = _prune_payment_columns(ctx["client"], create_payload)
+
+    resp = ctx["client"].table("payments").insert(pruned_payload).execute()
     err = getattr(resp, "error", None)
     if err and _is_missing_column(err, "slip_url"):
         fallback = {
-            "store_id": store_id_resolved,
             "order_id": order_id,
-            "amount": create_payload["amount"],
-            "method": create_payload["method"],
+            "amount": pruned_payload.get("amount"),
+            "method": pruned_payload.get("method"),
             "status": status_value,
         }
+        if _payments_has_column(ctx["client"], "store_id"):
+            fallback["store_id"] = store_id_resolved
         resp = ctx["client"].table("payments").insert(fallback).execute()
         err = getattr(resp, "error", None)
     if err:
@@ -2255,11 +2828,17 @@ def update_payment(payment_id: str, payload: PaymentUpdate, authorization: Optio
         data["confirmed_by"] = None
         data["confirmed_at"] = None
 
-    resp = ctx["client"].table("payments").update(data).eq("id", payment_id).eq("store_id", store_id_resolved).execute()
+    update_query = ctx["client"].table("payments").update(data).eq("id", payment_id)
+    if _payments_supports_store_scope(ctx["client"]):
+        update_query = update_query.eq("store_id", store_id_resolved)
+    resp = update_query.execute()
     err = getattr(resp, "error", None)
     if err and any(_is_missing_column(err, k) for k in ["confirmed_by", "confirmed_at", "reject_reason"]):
         trimmed = _omit_optional_fields(data, ["confirmed_by", "confirmed_at", "reject_reason"])
-        resp = ctx["client"].table("payments").update(trimmed).eq("id", payment_id).eq("store_id", store_id_resolved).execute()
+        trimmed_query = ctx["client"].table("payments").update(trimmed).eq("id", payment_id)
+        if _payments_supports_store_scope(ctx["client"]):
+            trimmed_query = trimmed_query.eq("store_id", store_id_resolved)
+        resp = trimmed_query.execute()
         err = getattr(resp, "error", None)
     if err:
         raise HTTPException(status_code=500, detail="payment_update_failed")
@@ -2326,11 +2905,17 @@ def submit_payment_slip(payment_id: str, payload: PaymentSubmitSlip, authorizati
         "slip_file_name": payload.slip_file_name,
         "submitted_at": datetime.utcnow().isoformat(),
     }
-    resp = ctx["client"].table("payments").update(update_payload).eq("id", payment_id).eq("store_id", store_id_resolved).execute()
+    update_query = ctx["client"].table("payments").update(update_payload).eq("id", payment_id)
+    if _payments_supports_store_scope(ctx["client"]):
+        update_query = update_query.eq("store_id", store_id_resolved)
+    resp = update_query.execute()
     err = getattr(resp, "error", None)
     if err and any(_is_missing_column(err, k) for k in ["slip_url", "slip_storage_path", "slip_file_name", "submitted_at"]):
         trimmed = _omit_optional_fields(update_payload, ["slip_url", "slip_storage_path", "slip_file_name", "submitted_at"])
-        resp = ctx["client"].table("payments").update(trimmed).eq("id", payment_id).eq("store_id", store_id_resolved).execute()
+        trimmed_query = ctx["client"].table("payments").update(trimmed).eq("id", payment_id)
+        if _payments_supports_store_scope(ctx["client"]):
+            trimmed_query = trimmed_query.eq("store_id", store_id_resolved)
+        resp = trimmed_query.execute()
         err = getattr(resp, "error", None)
     if err:
         raise HTTPException(status_code=500, detail="payment_submit_slip_failed")
@@ -2374,11 +2959,17 @@ def approve_payment(payment_id: str, payload: Optional[PaymentApprovePayload] = 
         "confirmed_at": datetime.utcnow().isoformat(),
         "reject_reason": None,
     }
-    resp = ctx["client"].table("payments").update(update_payload).eq("id", payment_id).eq("store_id", store_id_resolved).execute()
+    update_query = ctx["client"].table("payments").update(update_payload).eq("id", payment_id)
+    if _payments_supports_store_scope(ctx["client"]):
+        update_query = update_query.eq("store_id", store_id_resolved)
+    resp = update_query.execute()
     err = getattr(resp, "error", None)
     if err and any(_is_missing_column(err, k) for k in ["confirmed_by", "confirmed_at", "reject_reason"]):
         trimmed = _omit_optional_fields(update_payload, ["confirmed_by", "confirmed_at", "reject_reason"])
-        resp = ctx["client"].table("payments").update(trimmed).eq("id", payment_id).eq("store_id", store_id_resolved).execute()
+        trimmed_query = ctx["client"].table("payments").update(trimmed).eq("id", payment_id)
+        if _payments_supports_store_scope(ctx["client"]):
+            trimmed_query = trimmed_query.eq("store_id", store_id_resolved)
+        resp = trimmed_query.execute()
         err = getattr(resp, "error", None)
     if err:
         raise HTTPException(status_code=500, detail="payment_approve_failed")

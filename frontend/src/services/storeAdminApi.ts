@@ -12,7 +12,6 @@ export type ApiSalesChannel = {
   type: ChannelType;
   fee_type: FeeType;
   fee_value: number;
-  is_default?: boolean;
   is_active?: boolean;
   created_at?: string;
 };
@@ -94,7 +93,6 @@ export type SalesChannelPayload = {
   fee_type: FeeType;
   fee_value: number;
   is_active?: boolean;
-  is_default?: boolean;
 };
 
 export type ProductPayload = {
@@ -160,8 +158,6 @@ export type ApiOrder = {
   note?: string | null;
   cancelled_reason?: string | null;
   cancelled_at?: string | null;
-  ordered_at?: string | null;
-  created_by?: string | null;
   created_at?: string;
   updated_at?: string;
   items?: ApiOrderItem[];
@@ -183,7 +179,6 @@ export type OrderPayload = {
   total_cost?: number;
   gross_profit?: number;
   note?: string;
-  ordered_at?: string;
   items?: OrderItemPayload[];
 };
 
