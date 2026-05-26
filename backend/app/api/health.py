@@ -154,21 +154,73 @@ def health_auth() -> Dict[str, Any]:
 
 @router.get("/health/line-ready")
 def health_line_ready() -> Dict[str, Any]:
-    line_envs = {
+    # Grouped readiness (all masked)
+    messaging_required = {
         "LINE_CHANNEL_ACCESS_TOKEN": settings.line_channel_access_token,
         "LINE_CHANNEL_SECRET": settings.line_channel_secret,
+    }
+    liff_required = {
         "LINE_LOGIN_CHANNEL_ID": settings.line_login_channel_id,
         "LINE_LOGIN_CHANNEL_SECRET": settings.line_login_channel_secret,
         "LIFF_ID": settings.liff_id,
+        "LIFF_URL": settings.liff_url,
+    }
+    webhook_required = {
+        "LINE_CHANNEL_SECRET": settings.line_channel_secret,
+        "LINE_WEBHOOK_URL": settings.line_webhook_url,
+    }
+    optional_ids = {
+        "LINE_OA_BASIC_ID": settings.line_oa_basic_id,
+        "LINE_OA_CHANNEL_ID": settings.line_oa_channel_id,
     }
 
-    line_status = {key: _mask_status(value) for key, value in line_envs.items()}
-    configured_count = list(line_status.values()).count("configured")
-    ready = configured_count == len(line_status)
-    overall_status = "ok" if ready else ("partial" if configured_count else "not_configured")
+    def mask_group(group: Dict[str, Any]) -> Dict[str, str]:
+        return {key: _mask_status(val) for key, val in group.items()}
+
+    def group_status(masked: Dict[str, str]) -> str:
+        vals = list(masked.values())
+        configured = vals.count("configured")
+        if configured == 0:
+            return "not_configured"
+        if configured == len(masked):
+            return "ready_candidate"
+        return "partial"
+
+    messaging_masked = mask_group(messaging_required)
+    liff_masked = mask_group(liff_required)
+    webhook_masked = mask_group(webhook_required)
+    optional_masked = mask_group(optional_ids)
+
+    groups = {
+        "messaging_api": {
+            "status": group_status(messaging_masked),
+            "variables": messaging_masked,
+        },
+        "liff": {
+            "status": group_status(liff_masked),
+            "variables": liff_masked,
+        },
+        "webhook": {
+            "status": group_status(webhook_masked),
+            "variables": webhook_masked,
+        },
+        "optional_ids": {
+            "status": group_status(optional_masked),
+            "variables": optional_masked,
+        },
+    }
+
+    overall_vals = [g["status"] for g in groups.values()]
+    if all(v == "not_configured" for v in overall_vals):
+        overall_status = "not_configured"
+    elif any(v == "partial" for v in overall_vals):
+        overall_status = "partial"
+    else:
+        overall_status = "ready_candidate"
 
     return {
         "status": overall_status,
-        "line": line_status,
-        "ready": ready,
+        "mode": settings.line_send_mode or "mock",
+        "real_send_enabled": False,
+        "groups": groups,
     }

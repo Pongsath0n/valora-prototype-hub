@@ -18,6 +18,11 @@ class Settings(BaseSettings):
     line_login_channel_id: str = Field(default="", alias="LINE_LOGIN_CHANNEL_ID")
     line_login_channel_secret: str = Field(default="", alias="LINE_LOGIN_CHANNEL_SECRET")
     liff_id: str = Field(default="", alias="LIFF_ID")
+    liff_url: str = Field(default="", alias="LIFF_URL")
+    line_webhook_url: str = Field(default="", alias="LINE_WEBHOOK_URL")
+    line_oa_basic_id: str = Field(default="", alias="LINE_OA_BASIC_ID")
+    line_oa_channel_id: str = Field(default="", alias="LINE_OA_CHANNEL_ID")
+    line_send_mode: str = Field(default="mock", alias="LINE_SEND_MODE")
 
 
 settings = Settings()
