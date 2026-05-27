@@ -220,6 +220,10 @@ class PaymentRejectPayload(BaseModel):
     note: Optional[str] = None
 
 
+class LineBindPayload(BaseModel):
+    line_user_id: str
+
+
 def _get_client() -> Client:
     try:
         return get_supabase_admin_client()
@@ -538,6 +542,19 @@ def _map_channel(row: Dict[str, Any]) -> Dict[str, Any]:
         "is_active": bool(row.get("is_active")) if row.get("is_active") is not None else True,
         "created_at": row.get("created_at"),
     }
+
+
+def _mask_line_user_id(line_user_id: Optional[str]) -> Optional[str]:
+    if not line_user_id:
+        return None
+    s = str(line_user_id).strip()
+    if not s:
+        return None
+    if len(s) <= 4:
+        return "***" if len(s) >= 3 else "**"
+    if len(s) <= 8:
+        return f"{s[:2]}...{s[-2:]}"
+    return f"{s[:4]}...{s[-4:]}"
 
 
 def _map_price(row: Dict[str, Any]) -> Dict[str, Any]:
@@ -1564,6 +1581,125 @@ def delete_recipe(recipe_id: str, authorization: Optional[str] = Header(None), s
 
     ctx["client"].table("recipes").delete().eq("id", recipe_id).eq("store_id", store_id_resolved).execute()
     return {"status": "deleted"}
+
+
+# ─── Customer LINE Binding (manual, mock/key-ready) ────────────────────────────
+
+
+def _get_customer_row(client: Client, customer_id: str) -> Dict[str, Any]:
+    resp = client.table("customers").select("id, store_id, line_user_id").eq("id", customer_id).limit(1).execute()
+    err = getattr(resp, "error", None)
+    if err:
+        raise HTTPException(status_code=500, detail="customer_lookup_failed")
+    data = getattr(resp, "data", None) or []
+    if not data:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="customer_not_found")
+    return data[0]
+
+
+def _find_customer_by_line_user_id(client: Client, store_id: str, line_user_id: str) -> Optional[str]:
+    resp = (
+        client.table("customers")
+        .select("id")
+        .eq("store_id", store_id)
+        .eq("line_user_id", line_user_id)
+        .limit(1)
+        .execute()
+    )
+    err = getattr(resp, "error", None)
+    if err:
+        raise HTTPException(status_code=500, detail="line_user_lookup_failed")
+    rows = getattr(resp, "data", None) or []
+    if not rows:
+        return None
+    row = rows[0]
+    return str(row.get("id")) if row and row.get("id") else None
+
+
+@router.post("/customers/{customer_id}/bind-line")
+def bind_line_user(customer_id: str, payload: LineBindPayload, authorization: Optional[str] = Header(None), store_id: Optional[str] = None) -> Dict[str, Any]:
+    ctx = _get_ctx(authorization)
+    store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
+    _require_manager(role)
+
+    line_user_id_raw = (payload.line_user_id or "").strip()
+    if not line_user_id_raw:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="line_user_id_required")
+
+    _ensure_customer_in_store(ctx["client"], customer_id, store_id_resolved)
+    customer_row = _get_customer_row(ctx["client"], customer_id)
+    existing_line = (customer_row.get("line_user_id") or "").strip()
+
+    duplicate_customer_id = _find_customer_by_line_user_id(ctx["client"], store_id_resolved, line_user_id_raw)
+    if duplicate_customer_id and str(duplicate_customer_id) != str(customer_id):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="duplicate_line_user_id")
+
+    if existing_line:
+        if existing_line == line_user_id_raw:
+            masked = _mask_line_user_id(existing_line)
+            logger.info(
+                "line_bind_idempotent",
+                extra={"customer_id": customer_id, "store_id": store_id_resolved, "line_user_id_masked": masked},
+            )
+            return {
+                "customer_id": customer_id,
+                "line_binding_status": "linked",
+                "line_user_id_masked": masked,
+            }
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="line_user_id_already_set")
+
+    update_resp = (
+        ctx["client"]
+        .table("customers")
+        .update({"line_user_id": line_user_id_raw})
+        .eq("id", customer_id)
+        .eq("store_id", store_id_resolved)
+        .execute()
+    )
+    err = getattr(update_resp, "error", None)
+    if err:
+        raise HTTPException(status_code=500, detail="line_user_bind_failed")
+
+    masked = _mask_line_user_id(line_user_id_raw)
+    logger.info(
+        "line_bind_linked",
+        extra={"customer_id": customer_id, "store_id": store_id_resolved, "line_user_id_masked": masked},
+    )
+    return {
+        "customer_id": customer_id,
+        "line_binding_status": "linked",
+        "line_user_id_masked": masked,
+    }
+
+
+@router.delete("/customers/{customer_id}/unbind-line")
+def unbind_line_user(customer_id: str, authorization: Optional[str] = Header(None), store_id: Optional[str] = None) -> Dict[str, Any]:
+    ctx = _get_ctx(authorization)
+    store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
+    _require_manager(role)
+
+    _ensure_customer_in_store(ctx["client"], customer_id, store_id_resolved)
+    update_resp = (
+        ctx["client"]
+        .table("customers")
+        .update({"line_user_id": None})
+        .eq("id", customer_id)
+        .eq("store_id", store_id_resolved)
+        .execute()
+    )
+    err = getattr(update_resp, "error", None)
+    if err:
+        raise HTTPException(status_code=500, detail="line_user_unbind_failed")
+
+    logger.info(
+        "line_bind_unlinked",
+        extra={"customer_id": customer_id, "store_id": store_id_resolved, "line_user_id_masked": None},
+    )
+    return {
+        "customer_id": customer_id,
+        "line_binding_status": "unlinked",
+        "line_user_id_masked": None,
+    }
 
 
 # ─── Orders + Order Items ─────────────────────────────────────────────────────
