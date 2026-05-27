@@ -1,5 +1,5 @@
 import { NavLink, useNavigate } from "react-router-dom";
-import { ArrowLeft, CreditCard, LayoutDashboard, LogOut, Menu, Settings, Soup, Store, X } from "lucide-react";
+import { ArrowLeft, CreditCard, LayoutDashboard, LogOut, Menu, Settings, Soup, Store, Users, X } from "lucide-react";
 import { useState } from "react";
 import LogoBrand from "@/components/LogoBrand";
 import { useAuth } from "@/contexts/AuthContext";
@@ -13,6 +13,7 @@ const storeAdminNav = [
   { title: "ราคาตามช่องทาง", path: "/store-admin/channel-pricing", icon: CreditCard },
   { title: "POS", path: "/store-admin/pos", icon: CreditCard },
   { title: "ออเดอร์", path: "/store-admin/orders", icon: CreditCard },
+  { title: "ลูกค้า", path: "/store-admin/customers", icon: Users },
   { title: "รายงาน", path: "/store-admin/reports", icon: LayoutDashboard },
 ];
 

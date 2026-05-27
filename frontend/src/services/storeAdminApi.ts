@@ -251,6 +251,21 @@ export type PaymentRejectPayload = {
   note?: string;
 };
 
+export type ApiCustomer = {
+  id: string;
+  name: string | null;
+  phone: string | null;
+  line_binding_status: "linked" | "unlinked";
+  line_user_id_masked: string | null;
+  created_at?: string;
+};
+
+export type LineBindingResponse = {
+  customer_id: string;
+  line_binding_status: "linked" | "unlinked";
+  line_user_id_masked: string | null;
+};
+
 async function getAccessToken(): Promise<string> {
   const { data } = await supabase.auth.getSession();
   const token = data.session?.access_token;
@@ -454,5 +469,23 @@ export const storeAdminApi = {
 
   async rejectPayment(paymentId: string, payload: PaymentRejectPayload): Promise<{ id: string; status: string; message?: string }> {
     return request<{ id: string; status: string; message?: string }>(`/api/store-admin/payments/${paymentId}/reject`, { method: "POST", body: JSON.stringify(payload) });
+  },
+
+  // Customers + LINE binding
+  async listCustomers(): Promise<{ items: ApiCustomer[]; store_id: string }> {
+    return request("/api/store-admin/customers");
+  },
+
+  async bindLineUser(customerId: string, lineUserId: string): Promise<LineBindingResponse> {
+    return request<LineBindingResponse>(`/api/store-admin/customers/${customerId}/bind-line`, {
+      method: "POST",
+      body: JSON.stringify({ line_user_id: lineUserId }),
+    });
+  },
+
+  async unbindLineUser(customerId: string): Promise<LineBindingResponse> {
+    return request<LineBindingResponse>(`/api/store-admin/customers/${customerId}/unbind-line`, {
+      method: "DELETE",
+    });
   },
 };

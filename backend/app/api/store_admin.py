@@ -1702,6 +1702,36 @@ def unbind_line_user(customer_id: str, authorization: Optional[str] = Header(Non
     }
 
 
+@router.get("/customers")
+def list_customers(authorization: Optional[str] = Header(None), store_id: Optional[str] = None) -> Dict[str, Any]:
+    ctx = _get_ctx(authorization)
+    store_id_resolved, _role = _resolve_store_id(ctx["memberships"], store_id)
+
+    # Schema-drift: actual DB may use display_name instead of name
+    try:
+        response = ctx["client"].table("customers").select("id, display_name, phone, line_user_id, created_at").eq("store_id", store_id_resolved).order("created_at", desc=True).execute()
+    except Exception:
+        response = ctx["client"].table("customers").select("id, name, phone, line_user_id, created_at").eq("store_id", store_id_resolved).order("created_at", desc=True).execute()
+    error = getattr(response, "error", None)
+    if error:
+        raise HTTPException(status_code=500, detail="customer_query_failed")
+
+    data = getattr(response, "data", None) or []
+    items = []
+    for row in data:
+        line_uid = row.get("line_user_id")
+        display_name = row.get("display_name") or row.get("name")
+        items.append({
+            "id": str(row.get("id")),
+            "name": display_name,
+            "phone": row.get("phone"),
+            "line_binding_status": "linked" if line_uid else "unlinked",
+            "line_user_id_masked": _mask_line_user_id(line_uid),
+            "created_at": row.get("created_at"),
+        })
+    return {"items": items, "store_id": store_id_resolved}
+
+
 # ─── Orders + Order Items ─────────────────────────────────────────────────────
 
 

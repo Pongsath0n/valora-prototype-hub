@@ -38,6 +38,7 @@ import AdminOrdersPage from "./pages/admin/AdminOrders";
 import AdminOrderDetailPage from "./pages/admin/AdminOrderDetail";
 import AdminProductsPage from "./pages/admin/AdminProducts";
 import AdminStoreSettingsPage from "./pages/admin/AdminStoreSettings";
+import CustomersPage from "./pages/store-admin/CustomersPage";
 import AdminSalesChannelsPage from "./pages/admin/AdminSalesChannels";
 import StoreAdminIngredientsPage from "./pages/store-admin/Ingredients";
 import StoreAdminRecipesPage from "./pages/store-admin/Recipes";
@@ -92,6 +93,7 @@ function AppRoutes() {
       <Route path="/store-admin/pos" element={<AdminRoute><StoreAdminPOSPage /></AdminRoute>} />
       <Route path="/store-admin/orders" element={<AdminRoute><AdminOrdersPage /></AdminRoute>} />
       <Route path="/store-admin/orders/:id" element={<AdminRoute><AdminOrderDetailPage /></AdminRoute>} />
+      <Route path="/store-admin/customers" element={<AdminRoute><CustomersPage /></AdminRoute>} />
       <Route path="/store-admin/reports" element={<AdminRoute><StoreAdminReportsPage /></AdminRoute>} />
 
       <Route path="/admin" element={<AdminRoute><AdminDashboardPage /></AdminRoute>} />
