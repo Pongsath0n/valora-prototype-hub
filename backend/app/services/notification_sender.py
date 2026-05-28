@@ -38,6 +38,13 @@ def _safe_error_message(error: Any) -> str:
     return text[:200]
 
 
+def normalize_line_send_mode(value: Optional[str]) -> str:
+    mode = (value or "").strip().lower()
+    if mode == "real_line":
+        return "real_line"
+    return "mock"
+
+
 def write_notification_log(
     client: Client,
     order_id: str,
@@ -151,7 +158,34 @@ def send_line_notification(
     message_type: str,
     message_payload: Dict[str, Any],
 ) -> Dict[str, Any]:
-    configured_mode = (settings.line_send_mode or "mock").strip().lower()
+    configured_mode = normalize_line_send_mode(settings.line_send_mode)
+
+    if configured_mode == "real_line":
+        # Phase 5.4B skeleton guard:
+        # - recognize real_line mode
+        # - do not call external LINE API yet
+        # - keep DB compatibility by preserving send_status="success"
+        line_user_id_effective = line_user_id or _FALLBACK_LINE_USER_ID
+        write_notification_log(
+            client=client,
+            order_id=order_id,
+            customer_id=customer_id,
+            line_user_id=line_user_id_effective,
+            message_type=message_type,
+            message_payload=message_payload,
+            send_status="success",
+            error_message=None,
+        )
+        return {
+            "mode": "real_line",
+            "configured_mode": "real_line",
+            "effective_mode": "disabled_skeleton",
+            "real_send_enabled": False,
+            "send_status": "success",
+            "message_type": message_type,
+            "line_user_id_masked": mask_line_user_id(line_user_id_effective),
+            "notification_message": message_payload.get("message") if isinstance(message_payload, dict) else None,
+        }
 
     # Phase 5.4A guard: never call external LINE API in this phase.
     # Even when configured_mode is real_line, effective behavior remains mock.
