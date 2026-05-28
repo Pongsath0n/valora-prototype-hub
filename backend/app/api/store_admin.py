@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from supabase import Client
 
 from app.core.supabase import SupabaseConfigurationError, get_supabase_admin_client
+from app.services.notification_sender import send_line_notification
 
 logger = logging.getLogger(__name__)
 
@@ -2158,78 +2159,6 @@ def _get_order_customer_context(client: Client, store_id: str, order_id: str) ->
     }
 
 
-def _write_mock_line_notification(
-    client: Client,
-    order_id: str,
-    customer_id: Optional[str],
-    line_user_id: Optional[str],
-    message_type: str,
-    message_payload: Dict[str, Any],
-) -> None:
-    line_user_id_effective = line_user_id or "mock-line-user"
-    payload = {
-        "order_id": order_id,
-        "customer_id": customer_id,
-        "line_user_id": line_user_id_effective,
-        "message_type": message_type,
-        "message_payload": message_payload,
-        "send_status": "success",
-        "error_message": None,
-        "sent_at": datetime.utcnow().isoformat(),
-    }
-    def _insert(data: Dict[str, Any]) -> None:
-        resp = client.table("line_notification_logs").insert(data).execute()
-        err = getattr(resp, "error", None)
-        if err:
-            raise err
-
-    try:
-        _insert(payload)
-    except Exception as exc:
-        missing_optional = any(
-            _is_missing_column(exc, k)
-            for k in [
-                "customer_id",
-                "line_user_id",
-                "message_payload",
-                "error_message",
-                "sent_at",
-            ]
-        )
-        send_status_missing = _is_missing_column(exc, "send_status")
-
-        if missing_optional or send_status_missing:
-            trimmed = _omit_optional_fields(
-                payload,
-                [
-                    "customer_id",
-                    "line_user_id",
-                    "message_payload",
-                    "error_message",
-                    "sent_at",
-                ]
-                + (["send_status"] if send_status_missing else []),
-            )
-            try:
-                _insert(trimmed)
-                return
-            except Exception as exc2:
-                logger.warning(
-                    "mock_notification_log_failed_trimmed order=%s type=%s: %s",
-                    order_id,
-                    message_type,
-                    getattr(exc2, "message", str(exc2)),
-                )
-                return
-        logger.warning(
-            "mock_notification_log_failed order=%s type=%s: %s",
-            order_id,
-            message_type,
-            getattr(exc, "message", str(exc)),
-        )
-        return
-
-
 @router.get("/orders")
 def list_orders(authorization: Optional[str] = Header(None), store_id: Optional[str] = None) -> Dict[str, Any]:
     ctx = _get_ctx(authorization)
@@ -2441,7 +2370,7 @@ def update_order(order_id: str, payload: OrderUpdate, authorization: Optional[st
         if str(new_status) == "ready":
             mock_message = "เครื่องดื่มของคุณพร้อมแล้ว สามารถมารับได้เลยครับ"
             customer_ctx = _get_order_customer_context(ctx["client"], store_id_resolved, order_id)
-            _write_mock_line_notification(
+            send_line_notification(
                 ctx["client"],
                 order_id,
                 customer_ctx.get("customer_id"),
@@ -2509,7 +2438,7 @@ def update_order_status(order_id: str, payload: OrderStatusUpdate, authorization
     if str(next_status) == "ready":
         mock_message = "เครื่องดื่มของคุณพร้อมแล้ว สามารถมารับได้เลยครับ"
         customer_ctx = _get_order_customer_context(ctx["client"], store_id_resolved, order_id)
-        _write_mock_line_notification(
+        send_line_notification(
             ctx["client"],
             order_id,
             customer_ctx.get("customer_id"),
@@ -3163,7 +3092,7 @@ def approve_payment(payment_id: str, payload: Optional[PaymentApprovePayload] = 
 
     mock_message = "ตรวจสอบการชำระเงินสำเร็จแล้ว กำลังเตรียมเครื่องดื่มให้คุณ"
     customer_ctx = _get_order_customer_context(ctx["client"], store_id_resolved, order_id)
-    _write_mock_line_notification(
+    send_line_notification(
         ctx["client"],
         order_id,
         customer_ctx.get("customer_id"),
