@@ -5,6 +5,7 @@ from typing import Any, Dict, Optional
 from supabase import Client
 
 from app.core.config import settings
+from app.services.line_adapter import push_line_message
 
 logger = logging.getLogger(__name__)
 
@@ -166,6 +167,12 @@ def send_line_notification(
         # - do not call external LINE API yet
         # - keep DB compatibility by preserving send_status="success"
         line_user_id_effective = line_user_id or _FALLBACK_LINE_USER_ID
+        adapter_result = push_line_message(
+            to=line_user_id_effective,
+            text=message_payload.get("message") if isinstance(message_payload, dict) else "",
+            mode="real_line",
+            settings=settings,
+        )
         write_notification_log(
             client=client,
             order_id=order_id,
@@ -183,8 +190,12 @@ def send_line_notification(
             "real_send_enabled": False,
             "send_status": "success",
             "message_type": message_type,
-            "line_user_id_masked": mask_line_user_id(line_user_id_effective),
+            "line_user_id_masked": adapter_result.get("line_user_id_masked") or mask_line_user_id(line_user_id_effective),
+            "provider": adapter_result.get("provider"),
+            "attempted": bool(adapter_result.get("attempted", False)),
+            "reason": adapter_result.get("reason", "disabled_skeleton"),
             "notification_message": message_payload.get("message") if isinstance(message_payload, dict) else None,
+            "error_message": adapter_result.get("error_message"),
         }
 
     # Phase 5.4A guard: never call external LINE API in this phase.
