@@ -4,6 +4,7 @@ export type LiffProfile = {
   pictureUrl?: string;
 };
 
+// Mock/dev-only profile for non-LIFF environments.
 const MOCK: LiffProfile = {
   userId: "U_mock_001",
   displayName: "Mock Customer",

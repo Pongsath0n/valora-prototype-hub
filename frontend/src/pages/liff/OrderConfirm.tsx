@@ -1,7 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
-import { getLiffProfile, type LiffProfile } from "@/features/store/liffService";
+import {
+  getCustomerIdentity,
+  getManualIdentityFromForm,
+  shouldSubmitLineUserId,
+  type CustomerIdentity,
+} from "@/features/store/customerIdentity";
 import { customerApi } from "@/services/customerApi";
 import {
   type CartItem,
@@ -41,8 +46,8 @@ function buildCartSummary(items: CartItem[]): { total: number } {
 
 export default function OrderConfirmPage() {
   const navigate = useNavigate();
-  const [profile, setProfile] = useState<LiffProfile | null>(null);
-  const [profileError, setProfileError] = useState<string | null>(null);
+  const [identity, setIdentity] = useState<CustomerIdentity | null>(null);
+  const [identityError, setIdentityError] = useState<string | null>(null);
   const [phone, setPhone] = useState("");
   const [pickupTime, setPickupTime] = useState(defaultPickupTime);
   const [orderNote, setOrderNote] = useState("");
@@ -51,9 +56,9 @@ export default function OrderConfirmPage() {
   const [cartItems] = useState<CartItem[]>(() => readCart());
 
   useEffect(() => {
-    getLiffProfile()
-      .then(setProfile)
-      .catch(() => setProfileError("ไม่สามารถโหลดข้อมูลโปรไฟล์ได้"));
+    getCustomerIdentity()
+      .then(setIdentity)
+      .catch(() => setIdentityError("ไม่สามารถโหลดข้อมูลโปรไฟล์ได้"));
   }, []);
 
   const summary = useMemo(() => buildCartSummary(cartItems), [cartItems]);
@@ -91,11 +96,20 @@ export default function OrderConfirmPage() {
         quantity: Math.max(1, Number(item.quantity) || 1),
       }));
 
+      const resolvedIdentity = identity ?? (await getCustomerIdentity());
+      const manualIdentity = getManualIdentityFromForm({
+        name: resolvedIdentity?.displayName || "ลูกค้า LIFF",
+        phone: phone.trim(),
+      });
+      const lineUserId = shouldSubmitLineUserId(resolvedIdentity)
+        ? resolvedIdentity?.lineUserId
+        : undefined;
+
       const order = await customerApi.createOrder({
         customer: {
-          name: (profile?.displayName || "ลูกค้า LIFF").trim(),
-          phone: phone.trim(),
-          line_user_id: profile?.userId || undefined,
+          name: manualIdentity.displayName || resolvedIdentity?.displayName || "ลูกค้า LIFF",
+          phone: manualIdentity.phone || phone.trim(),
+          ...(lineUserId ? { line_user_id: lineUserId } : {}),
         },
         items,
         pickup_time: pickupDate.toISOString(),
@@ -148,15 +162,15 @@ export default function OrderConfirmPage() {
           <div>
             <p className="text-sm text-muted-foreground">ลูกค้า</p>
             <p className="text-base font-semibold">
-              {profile?.displayName || "ลูกค้า LIFF"}
+              {identity?.displayName || "ลูกค้า LIFF"}
             </p>
           </div>
           <Link to="/liff/cart" className="text-sm font-medium text-primary">
             กลับไปแก้ไขตะกร้า
           </Link>
         </div>
-        {profileError ? (
-          <p className="mt-2 text-xs text-destructive">{profileError}</p>
+        {identityError ? (
+          <p className="mt-2 text-xs text-destructive">{identityError}</p>
         ) : null}
         <div className="mt-4 space-y-3">
           {cartItems.map((item) => (
