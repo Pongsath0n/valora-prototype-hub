@@ -42,27 +42,50 @@ type CustomerOrderCreatePayload = {
 };
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${BACKEND_BASE}${path}`, {
-    ...(init || {}),
-    headers: {
-      "Content-Type": "application/json",
-      ...(init?.headers || {}),
-    },
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10_000);
 
-  let body: any = null;
   try {
-    body = await res.json();
-  } catch {
-    body = null;
-  }
+    const res = await fetch(`${BACKEND_BASE}${path}`, {
+      ...(init || {}),
+      headers: {
+        "Content-Type": "application/json",
+        ...(init?.headers || {}),
+      },
+      signal: controller.signal,
+    });
 
-  if (!res.ok) {
-    const reason = (body as any)?.detail || (body as any)?.error || "request_failed";
-    throw new Error(typeof reason === "string" ? reason : "request_failed");
-  }
+    let body: any = null;
+    try {
+      body = await res.json();
+    } catch {
+      body = null;
+    }
 
-  return body as T;
+    if (!res.ok) {
+      const reason = (body as any)?.detail || (body as any)?.error || res.statusText;
+      throw new Error(
+        typeof reason === "string" && reason.trim().length > 0
+          ? reason
+          : "ไม่สามารถเชื่อมต่อระบบได้",
+      );
+    }
+
+    if (body == null) {
+      throw new Error("ไม่พบข้อมูลจากระบบ");
+    }
+
+    return body as T;
+  } catch (error: any) {
+    if (error?.name === "AbortError") {
+      throw new Error("เซิร์ฟเวอร์ตอบสนองช้า โปรดลองใหม่อีกครั้ง");
+    }
+    throw error instanceof Error
+      ? error
+      : new Error("เกิดข้อผิดพลาดที่ไม่ทราบสาเหตุ");
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 export const customerApi = {

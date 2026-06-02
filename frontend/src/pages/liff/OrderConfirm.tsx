@@ -1,40 +1,248 @@
-import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { getLiffProfile } from "@/features/store/liffService";
+import { useEffect, useMemo, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
+
+import { getLiffProfile, type LiffProfile } from "@/features/store/liffService";
 import { customerApi } from "@/services/customerApi";
+import {
+  type CartItem,
+  clearCart,
+  readCart,
+  setLastOrderId,
+} from "@/services/cartStorage";
+
+function toLocalDateInputValue(date: Date): string {
+  const year = date.getFullYear();
+  const month = `${date.getMonth() + 1}`.padStart(2, "0");
+  const day = `${date.getDate()}`.padStart(2, "0");
+  const hours = `${date.getHours()}`.padStart(2, "0");
+  const minutes = `${date.getMinutes()}`.padStart(2, "0");
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
+}
+
+function defaultPickupTime(): string {
+  const next = new Date();
+  next.setMinutes(next.getMinutes() + 30);
+  next.setSeconds(0, 0);
+  return toLocalDateInputValue(next);
+}
+
+function formatCurrency(value: number): string {
+  return new Intl.NumberFormat("th-TH", {
+    style: "currency",
+    currency: "THB",
+    minimumFractionDigits: 2,
+  }).format(value);
+}
+
+function buildCartSummary(items: CartItem[]): { total: number } {
+  const total = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
+  return { total };
+}
 
 export default function OrderConfirmPage() {
-  const nav=useNavigate();
-  const [phone,setPhone]=useState("");
-  const [pickupTime,setPickupTime]=useState("");
-  const [orderNote,setOrderNote]=useState("");
+  const navigate = useNavigate();
+  const [profile, setProfile] = useState<LiffProfile | null>(null);
+  const [profileError, setProfileError] = useState<string | null>(null);
+  const [phone, setPhone] = useState("");
+  const [pickupTime, setPickupTime] = useState(defaultPickupTime);
+  const [orderNote, setOrderNote] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [profile,setProfile]=useState<any>(null);
-  const [error,setError]=useState("");
-  useEffect(()=>{getLiffProfile().then(setProfile)},[]);
-  const cart = JSON.parse(localStorage.getItem('valora:liff:cart')||'[]');
-  async function confirm(){
-    try{
+  const [formError, setFormError] = useState<string | null>(null);
+  const [cartItems] = useState<CartItem[]>(() => readCart());
+
+  useEffect(() => {
+    getLiffProfile()
+      .then(setProfile)
+      .catch(() => setProfileError("ไม่สามารถโหลดข้อมูลโปรไฟล์ได้"));
+  }, []);
+
+  const summary = useMemo(() => buildCartSummary(cartItems), [cartItems]);
+  const disableSubmit =
+    submitting || !phone.trim() || !pickupTime || cartItems.length === 0;
+
+  async function confirm() {
+    if (cartItems.length === 0) {
+      setFormError("ไม่มีสินค้าในตะกร้า โปรดเลือกเมนูก่อนยืนยัน");
+      return;
+    }
+
+    try {
       setSubmitting(true);
-      if(!pickupTime) throw new Error('Please select pickup time');
-      if(!phone.trim()) throw new Error('Please provide phone number');
-      const items = cart.map((c:any) => ({ product_id: c.productId || c.menuId, quantity: Number(c.quantity || 0) }));
-      if (!items.length) throw new Error("Cart is empty");
+      setFormError(null);
+
+      if (!phone.trim()) {
+        throw new Error("กรุณากรอกเบอร์โทรศัพท์สำหรับติดต่อ");
+      }
+
+      if (!pickupTime) {
+        throw new Error("กรุณาเลือกเวลารับสินค้า");
+      }
+
+      const pickupDate = new Date(pickupTime);
+      if (Number.isNaN(pickupDate.getTime())) {
+        throw new Error("รูปแบบเวลารับสินค้าไม่ถูกต้อง");
+      }
+      if (pickupDate.getTime() < Date.now()) {
+        throw new Error("กรุณาเลือกเวลารับสินค้าในอนาคต");
+      }
+
+      const items = cartItems.map((item) => ({
+        product_id: item.productId,
+        quantity: Math.max(1, Number(item.quantity) || 1),
+      }));
+
       const order = await customerApi.createOrder({
         customer: {
-          name: (profile?.displayName || "Guest Customer").trim(),
+          name: (profile?.displayName || "ลูกค้า LIFF").trim(),
           phone: phone.trim(),
           line_user_id: profile?.userId || undefined,
         },
         items,
-        pickup_time: new Date(pickupTime).toISOString(),
-        note: orderNote?.trim() || undefined,
+        pickup_time: pickupDate.toISOString(),
+        note: orderNote.trim() || undefined,
       });
-      localStorage.removeItem('valora:liff:cart');
-      localStorage.setItem('valora:liff:last_order', order.order_id);
-      nav('/liff/success');
-    }catch(e:any){setError(e.message||'Failed');}
-    finally { setSubmitting(false); }
+
+      clearCart();
+      setLastOrderId(order.order_id);
+      navigate("/liff/success");
+    } catch (error: any) {
+      setFormError(error?.message || "ไม่สามารถส่งคำสั่งซื้อได้");
+    } finally {
+      setSubmitting(false);
+    }
   }
-  return <div className="max-w-md mx-auto p-4 space-y-3"><h1 className="text-xl font-bold">Confirm Order</h1><input className="form-input" placeholder="phone" value={phone} onChange={(e)=>setPhone(e.target.value)} /><input type="datetime-local" className="form-input" value={pickupTime} onChange={(e)=>setPickupTime(e.target.value)} /><textarea className="form-input" placeholder="order note" value={orderNote} onChange={(e)=>setOrderNote(e.target.value)} />{error?<p className="text-sm text-red-600">{error}</p>:null}<button onClick={confirm} disabled={submitting} className="bg-primary text-primary-foreground px-4 py-2 rounded disabled:opacity-60">{submitting ? "Placing..." : "Place order"}</button></div>;
+
+  if (!cartItems.length) {
+    return (
+      <div className="mx-auto max-w-md space-y-4 px-4 py-6">
+        <h1 className="text-2xl font-semibold">ยืนยันคำสั่งซื้อ</h1>
+        <div className="rounded-2xl border border-dashed bg-white/80 p-6 text-center shadow-sm">
+          <p className="text-base font-medium text-muted-foreground">
+            ไม่มีรายการให้ยืนยัน
+          </p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            โปรดกลับไปเลือกเมนูและเพิ่มลงตะกร้าก่อน
+          </p>
+          <Link
+            to="/liff/menu"
+            className="mt-4 inline-flex w-full items-center justify-center rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground"
+          >
+            ไปหน้าเมนู
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mx-auto max-w-md space-y-5 px-4 py-6">
+      <div className="space-y-1">
+        <h1 className="text-2xl font-semibold">ยืนยันคำสั่งซื้อ</h1>
+        <p className="text-sm text-muted-foreground">
+          โปรดตรวจสอบข้อมูลก่อนส่งให้ร้านค้า
+        </p>
+      </div>
+
+      <section className="rounded-2xl border bg-white p-4 shadow-sm">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm text-muted-foreground">ลูกค้า</p>
+            <p className="text-base font-semibold">
+              {profile?.displayName || "ลูกค้า LIFF"}
+            </p>
+          </div>
+          <Link to="/liff/cart" className="text-sm font-medium text-primary">
+            กลับไปแก้ไขตะกร้า
+          </Link>
+        </div>
+        {profileError ? (
+          <p className="mt-2 text-xs text-destructive">{profileError}</p>
+        ) : null}
+        <div className="mt-4 space-y-3">
+          {cartItems.map((item) => (
+            <div key={item.productId} className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-semibold">{item.name}</p>
+                <p className="text-xs text-muted-foreground">
+                  x{item.quantity} · {formatCurrency(item.price)}
+                </p>
+                {item.note ? (
+                  <p className="text-xs text-muted-foreground">หมายเหตุ: {item.note}</p>
+                ) : null}
+              </div>
+              <p className="text-sm font-semibold">
+                {formatCurrency(item.price * item.quantity)}
+              </p>
+            </div>
+          ))}
+        </div>
+        <div className="mt-4 flex items-center justify-between border-t pt-3">
+          <p className="text-sm text-muted-foreground">ยอดรวมโดยประมาณ</p>
+          <p className="text-lg font-semibold">{formatCurrency(summary.total)}</p>
+        </div>
+      </section>
+
+      <section className="space-y-4 rounded-2xl border bg-white p-4 shadow-sm">
+        <div className="space-y-1">
+          <label className="text-sm font-medium" htmlFor="phone">
+            เบอร์โทรศัพท์ติดต่อ
+          </label>
+          <input
+            id="phone"
+            type="tel"
+            inputMode="tel"
+            className="w-full rounded-xl border px-3 py-2 text-base focus:border-primary focus:outline-none"
+            placeholder="08xxxxxxxx"
+            value={phone}
+            onChange={(event) => setPhone(event.target.value)}
+          />
+        </div>
+
+        <div className="space-y-1">
+          <label className="text-sm font-medium" htmlFor="pickup-time">
+            เวลารับสินค้าโดยประมาณ
+          </label>
+          <input
+            id="pickup-time"
+            type="datetime-local"
+            className="w-full rounded-xl border px-3 py-2 text-base focus:border-primary focus:outline-none"
+            value={pickupTime}
+            onChange={(event) => setPickupTime(event.target.value)}
+          />
+          <p className="text-xs text-muted-foreground">
+            แนะนำให้เลือกเวลาอย่างน้อย 30 นาทีจากตอนนี้
+          </p>
+        </div>
+
+        <div className="space-y-1">
+          <label className="text-sm font-medium" htmlFor="order-note">
+            หมายเหตุเพิ่มเติม (ถ้ามี)
+          </label>
+          <textarea
+            id="order-note"
+            rows={3}
+            className="w-full rounded-xl border px-3 py-2 text-base focus:border-primary focus:outline-none"
+            placeholder="ตัวอย่าง: ไม่ใส่ผักชี"
+            value={orderNote}
+            onChange={(event) => setOrderNote(event.target.value)}
+          />
+        </div>
+      </section>
+
+      {formError ? (
+        <div className="rounded-2xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+          {formError}
+        </div>
+      ) : null}
+
+      <button
+        type="button"
+        onClick={confirm}
+        disabled={disableSubmit}
+        className="inline-flex w-full items-center justify-center rounded-full bg-primary px-4 py-3 text-base font-semibold text-primary-foreground disabled:opacity-60"
+      >
+        {submitting ? "กำลังส่งคำสั่งซื้อ..." : "ยืนยันคำสั่งซื้อ"}
+      </button>
+    </div>
+  );
 }
