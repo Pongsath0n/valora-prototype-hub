@@ -1,0 +1,37 @@
+{
+  "status": "not_configured",
+  "mode": "mock",
+  "real_send_enabled": false,
+  "groups": {
+    "messaging_api": {
+      "status": "not_configured",
+      "variables": {
+        "LINE_CHANNEL_ACCESS_TOKEN": "missing",
+        "LINE_CHANNEL_SECRET": "missing"
+      }
+    },
+    "liff": {
+      "status": "not_configured",
+      "variables": {
+        "LINE_LOGIN_CHANNEL_ID": "missing",
+        "LINE_LOGIN_CHANNEL_SECRET": "missing",
+        "LIFF_ID": "missing",
+        "LIFF_URL": "missing"
+      }
+    },
+    "webhook": {
+      "status": "not_configured",
+      "variables": {
+        "LINE_CHANNEL_SECRET": "missing",
+        "LINE_WEBHOOK_URL": "missing"
+      }
+    },
+    "optional_ids": {
+      "status": "not_configured",
+      "variables": {
+        "LINE_OA_BASIC_ID": "missing",
+        "LINE_OA_CHANNEL_ID": "missing"
+      }
+    }
+  }
+}
