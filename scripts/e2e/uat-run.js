@@ -5,8 +5,8 @@
 const fs = require("fs/promises");
 const path = require("path");
 
-const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:8080";
-const BACKEND_URL = process.env.BACKEND_URL || "http://127.0.0.1:8000";
+const FRONTEND_URL = (process.env.FRONTEND_URL || "http://localhost:8080").trim().replace(/\/$/, "");
+const BACKEND_URL = (process.env.BACKEND_URL || "http://127.0.0.1:8000").trim().replace(/\/$/, "");
 
 const { chromium } = require(path.resolve(__dirname, "../../frontend/node_modules/playwright"));
 
