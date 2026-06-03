@@ -74,22 +74,22 @@ export default function LandingHero() {
           <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
             <Button asChild size="lg" className="w-full sm:w-auto">
               <Link
-                to="/client-access"
+                to="/liff/menu"
                 className="inline-flex items-center gap-2"
-                aria-label="ลองใช้งานระบบ Valora — ไปยังหน้าเข้าสู่ระบบ"
+                aria-label="เปิดเมนูร้าน — ไปยังหน้าลูกค้า"
               >
-                ลองใช้งานระบบ
+                เปิดเมนูร้าน
                 <ArrowRight className="h-4 w-4" aria-hidden />
               </Link>
             </Button>
             <Button asChild size="lg" variant="outline" className="w-full sm:w-auto">
               <Link
-                to="/admin"
+                to="/client-access"
                 className="inline-flex items-center gap-2"
-                aria-label="ดูตัวอย่าง Admin Dashboard"
+                aria-label="เข้าสู่ระบบผู้ดูแลระบบ"
               >
                 <LayoutDashboard className="h-4 w-4" aria-hidden />
-                ดูตัวอย่าง Dashboard
+                เข้าสู่ระบบผู้ดูแลระบบ
               </Link>
             </Button>
           </div>

@@ -1,6 +1,9 @@
 import { NavLink } from "react-router-dom";
 import {
   LayoutDashboard,
+  Workflow,
+  Megaphone,
+  Truck,
   Soup,
   Package,
   BookOpenCheck,
@@ -19,6 +22,9 @@ import LogoBrand from "@/components/LogoBrand";
 
 const mainNav = [
   { title: "แดชบอร์ด", path: "/app/dashboard", icon: LayoutDashboard },
+  { title: "แผนการขาย", path: "/app/scenario", icon: Workflow },
+  { title: "โปรโมชัน", path: "/app/promo", icon: Megaphone },
+  { title: "เดลิเวอรี", path: "/app/delivery", icon: Truck },
   { title: "เมนู", path: "/app/menu", icon: Soup },
   { title: "วัตถุดิบ", path: "/app/ingredients", icon: Package },
   { title: "สูตรและต้นทุน", path: "/app/recipes", icon: BookOpenCheck },
