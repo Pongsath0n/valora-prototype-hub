@@ -125,6 +125,7 @@ function AppRoutes() {
       <Route path="/app/orders/:id" element={<ProtectedRoute><OrderDetailPage /></ProtectedRoute>} />
       <Route path="/app/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
 
+      <Route path="/order" element={<CustomerMenuPage />} />
       <Route path="/liff/menu" element={<CustomerMenuPage />} />
       <Route path="/liff/menu/:id" element={<MenuDetailPage />} />
       <Route path="/liff/cart" element={<CartPage />} />

@@ -182,17 +182,23 @@ async function checkNavigationLinks() {
   const res = await page.goto(fullUrl(FRONTEND_URL, "/"), { waitUntil: "domcontentloaded" });
   const body = (await page.textContent("body")) || "";
   const findLink = async (href) => {
-    const el = await page.$(`a[href='${href}']`);
-    return Boolean(el);
+    try {
+      await page.waitForSelector(`a[href='${href}']`, { timeout: 2000 });
+      return true;
+    } catch {
+      return false;
+    }
   };
-  const hasMenu = await findLink("/liff/menu");
+  const hasOrderLink = await findLink("/order");
+  const hasLegacyLiffLink = await findLink("/liff/menu");
   const hasClientAccess = await findLink("/client-access");
   await browser.close();
   return {
     pageStatus: res ? res.status() : null,
     bodyPreview: body.trim().slice(0, 180),
     links: {
-      liffMenu: hasMenu,
+      order: hasOrderLink,
+      liffMenu: hasLegacyLiffLink,
       clientAccess: hasClientAccess,
     },
   };
@@ -226,7 +232,8 @@ async function generateReports(data) {
   lines.push("\n## Navigation Links (Landing)");
   lines.push("| Link | Found? | Notes |");
   lines.push("| --- | --- | --- |");
-  lines.push(`| /liff/menu | ${data.navigation.links.liffMenu ? "yes" : "no"} | primary customer CTA |`);
+  lines.push(`| /order | ${data.navigation.links.order ? "yes" : "no"} | primary customer CTA |`);
+  lines.push(`| /liff/menu | ${data.navigation.links.liffMenu ? "yes" : "no"} | legacy alias link |`);
   lines.push(`| /client-access | ${data.navigation.links.clientAccess ? "yes" : "no"} | admin/login CTA |`);
 
   lines.push("\n## Backend Endpoints");
@@ -277,7 +284,8 @@ async function main() {
   const routes = [
     { name: "01-landing", path: "/", category: "public" },
     { name: "02-client-access", path: "/client-access", category: "public" },
-    { name: "10-liff-menu", path: "/liff/menu", category: "customer" },
+    { name: "10-order-menu", path: "/order", category: "customer" },
+    { name: "11-legacy-liff-menu", path: "/liff/menu", category: "customer" },
     { name: "12-liff-cart", path: "/liff/cart", category: "customer" },
     { name: "13-liff-confirm", path: "/liff/confirm", category: "customer" },
     { name: "14-liff-success", path: "/liff/success", category: "customer" },
@@ -305,7 +313,7 @@ async function main() {
   ];
 
   if (productId) {
-    routes.splice(3, 0, { name: "11-liff-product-detail", path: `/liff/menu/${productId}`, category: "customer" });
+    routes.splice(4, 0, { name: "15-liff-product-detail", path: `/liff/menu/${productId}`, category: "customer" });
   }
 
   const browser = await chromium.launch({ headless: true });

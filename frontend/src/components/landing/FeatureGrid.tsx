@@ -12,8 +12,8 @@ import {
 const features = [
   {
     icon: MessageCircle,
-    title: "LINE OA Order Flow",
-    desc: "เปิดเมนูผ่าน LIFF ในไลน์ของร้าน รับออเดอร์ตรง ไม่ต้องคุยข้อความทีละคน",
+    title: "เปิดเมนูออนไลน์",
+    desc: "ลูกค้าสั่งผ่านหน้า /order หรือเชื่อม LINE OA เป็นช่องทางเสริม",
     tag: "Customer",
   },
   {

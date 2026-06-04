@@ -74,7 +74,7 @@ export default function LandingHero() {
           <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
             <Button asChild size="lg" className="w-full sm:w-auto">
               <Link
-                to="/liff/menu"
+                to="/order"
                 className="inline-flex items-center gap-2"
                 aria-label="เปิดเมนูร้าน — ไปยังหน้าลูกค้า"
               >

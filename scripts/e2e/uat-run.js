@@ -67,7 +67,7 @@ async function runCustomerFlow() {
   page.on("console", (msg) => consoleLogs.push({ type: msg.type(), text: msg.text() }));
 
   // CU-01 Menu
-  await page.goto(`${FRONTEND_URL}/liff/menu`, { waitUntil: "networkidle" });
+  await page.goto(`${FRONTEND_URL}/order`, { waitUntil: "networkidle" });
   summary.push({ id: "CU-01", result: "pass", note: await screenshot(page, "01-customer-menu.png") });
 
   // CU-02 Product detail
@@ -106,7 +106,7 @@ async function runCustomerFlow() {
   // Submit order
   try {
     await Promise.all([
-      page.waitForNavigation({ waitUntil: "networkidle" }),
+      page.waitForURL("**/liff/success", { waitUntil: "networkidle" }),
       page.getByRole("button", { name: /ยืนยัน/ }).click({ timeout: 5000 }),
     ]);
     // order success page
@@ -120,6 +120,10 @@ async function runCustomerFlow() {
   await context.addInitScript(() => window.localStorage.removeItem("valora:liff:last_order"));
   await page.goto(`${FRONTEND_URL}/liff/success`, { waitUntil: "networkidle" });
   summary.push({ id: "CU-07", result: "pass", note: await screenshot(page, "07-success-without-order-id.png") });
+
+  // CU-08 Legacy alias check (/liff/menu)
+  await page.goto(`${FRONTEND_URL}/liff/menu`, { waitUntil: "networkidle" });
+  summary.push({ id: "CU-08-legacy", result: "pass", note: await screenshot(page, "08-legacy-liff-menu.png") });
 
   await browser.close();
 

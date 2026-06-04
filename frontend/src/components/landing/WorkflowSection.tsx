@@ -10,8 +10,8 @@ import {
 } from "lucide-react";
 
 const flow = [
-  { icon: MessageCircle, label: "LINE OA", note: "ลูกค้าทักร้าน" },
-  { icon: Smartphone, label: "LIFF Menu", note: "เปิดเมนูในไลน์" },
+  { icon: MessageCircle, label: "LINE OA", note: "ลูกค้าทักร้าน (เสริม)" },
+  { icon: Smartphone, label: "/order", note: "เปิดเมนูออนไลน์และสั่งได้ทันที" },
   { icon: ShoppingBag, label: "Create Order", note: "เลือกของ + สรุปยอด" },
   { icon: Receipt, label: "Upload Slip", note: "โอนเงิน + แนบสลิป" },
   { icon: ClipboardCheck, label: "Admin Approve", note: "ตรวจสลิปด้วยมือ" },
