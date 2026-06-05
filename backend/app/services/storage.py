@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from io import BytesIO
 from typing import Any, Dict
 
 from supabase import Client
@@ -63,14 +62,12 @@ def upload_payment_slip(bucket: str, path: str, data: bytes, content_type: str) 
         content_type or "unknown",
     )
     try:
-        buffer = BytesIO(data)
-        buffer.seek(0)
         storage_client.upload(
             path,
-            buffer,
+            data,
             {
-                "contentType": content_type or "application/octet-stream",
-                "upsert": True,
+                "content-type": content_type or "application/octet-stream",
+                "upsert": "true",
             },
         )
         logger.info(
