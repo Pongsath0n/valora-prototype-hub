@@ -24,5 +24,15 @@ class Settings(BaseSettings):
     line_oa_channel_id: str = Field(default="", alias="LINE_OA_CHANNEL_ID")
     line_send_mode: str = Field(default="mock", alias="LINE_SEND_MODE")
 
+    payment_instructions_enabled: bool = Field(default=True, alias="PAYMENT_INSTRUCTIONS_ENABLED")
+    payment_method_label: str = Field(default="โอนผ่านบัญชีธนาคาร", alias="PAYMENT_METHOD_LABEL")
+    payment_bank_name: str = Field(default="", alias="PAYMENT_BANK_NAME")
+    payment_account_name: str = Field(default="", alias="PAYMENT_ACCOUNT_NAME")
+    payment_account_number: str = Field(default="", alias="PAYMENT_ACCOUNT_NUMBER")
+    payment_promptpay_id: str = Field(default="", alias="PAYMENT_PROMPTPAY_ID")
+    payment_note_lines: str = Field(default="", alias="PAYMENT_NOTE_LINES")
+    payment_slip_max_mb: float = Field(default=5.0, alias="PAYMENT_SLIP_MAX_MB")
+    payment_slip_bucket: str = Field(default="payment-slips", alias="PAYMENT_SLIP_BUCKET")
+
 
 settings = Settings()

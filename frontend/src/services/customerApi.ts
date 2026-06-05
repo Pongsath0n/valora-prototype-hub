@@ -44,6 +44,7 @@ export type OrderStatusPaymentSummary = {
   amount: number;
   slip_submitted: boolean;
   last_submitted_at?: string | null;
+  reject_reason?: string | null;
 };
 
 export type OrderStatusSummary = {
@@ -57,6 +58,18 @@ export type OrderStatusSummary = {
   items: OrderStatusItem[];
   payment: OrderStatusPaymentSummary;
   public_token?: string | null;
+};
+
+export type PaymentInstructionsResponse = {
+  enabled: boolean;
+  method_label: string;
+  bank_name?: string | null;
+  account_name?: string | null;
+  account_number?: string | null;
+  promptpay_id?: string | null;
+  note_lines: string[];
+  allowed_file_types: string[];
+  max_file_mb: number;
 };
 
 type CustomerOrderCreatePayload = {
@@ -148,6 +161,44 @@ export const customerApi = {
       method: "POST",
       body: JSON.stringify(payload),
     });
+  },
+
+  async getPaymentInstructions(): Promise<PaymentInstructionsResponse> {
+    return request<PaymentInstructionsResponse>("/api/customer/payment-instructions");
+  },
+
+  async uploadPaymentSlip(publicToken: string, file: File): Promise<OrderStatusSummary> {
+    const formData = new FormData();
+    formData.append("public_token", publicToken);
+    formData.append("file", file);
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10_000);
+
+    try {
+      const res = await fetch(`${BACKEND_BASE}/api/customer/orders/status/slip`, {
+        method: "POST",
+        body: formData,
+        signal: controller.signal,
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok || body == null) {
+        const reason = (body as any)?.detail || (body as any)?.error || res.statusText;
+        throw new Error(
+          typeof reason === "string" && reason.trim().length > 0
+            ? reason
+            : "อัปโหลดหลักฐานไม่สำเร็จ",
+        );
+      }
+      return body as OrderStatusSummary;
+    } catch (error: any) {
+      if (error?.name === "AbortError") {
+        throw new Error("ระบบตอบสนองช้า โปรดลองใหม่อีกครั้ง");
+      }
+      throw error instanceof Error ? error : new Error("เกิดข้อผิดพลาดขณะอัปโหลดสลิป");
+    } finally {
+      clearTimeout(timeout);
+    }
   },
 };
 

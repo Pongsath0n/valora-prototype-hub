@@ -1,15 +1,19 @@
 import logging
+import mimetypes
+import os
 import re
 import secrets
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile, status
 from pydantic import BaseModel
 from supabase import Client
 
+from app.core.config import settings
 from app.core.supabase import SupabaseConfigurationError, get_supabase_admin_client
+from app.services.storage import StorageUploadError, upload_payment_slip as storage_upload_payment_slip
 
 logger = logging.getLogger(__name__)
 
@@ -476,6 +480,7 @@ def _load_latest_payment(client: Client, order_id: str) -> Optional[Dict[str, An
         "slip_file_name",
         "submitted_at",
         "customer_id",
+        "reject_reason",
     ]
     while True:
         query = (
@@ -540,6 +545,7 @@ def _build_payment_summary(payment_row: Optional[Dict[str, Any]]) -> Dict[str, A
             "amount": 0.0,
             "slip_submitted": False,
             "last_submitted_at": None,
+            "reject_reason": None,
         }
     slip_present = bool(
         payment_row.get("slip_url")
@@ -552,6 +558,7 @@ def _build_payment_summary(payment_row: Optional[Dict[str, Any]]) -> Dict[str, A
         "amount": float(payment_row.get("amount") or 0.0),
         "slip_submitted": slip_present,
         "last_submitted_at": payment_row.get("submitted_at"),
+        "reject_reason": payment_row.get("reject_reason"),
     }
 
 
@@ -596,6 +603,179 @@ def _build_customer_order_status_response(
         "payment": payment_summary,
         "public_token": order_row.get("public_token"),
     }
+
+
+def _resolve_payment_instruction_payload() -> Dict[str, Any]:
+    note_lines = [
+        line.strip()
+        for line in (settings.payment_note_lines or "").splitlines()
+        if line.strip()
+    ]
+    allowed_types = ["image/jpeg", "image/png", "image/webp"]
+    return {
+        "enabled": bool(settings.payment_instructions_enabled),
+        "method_label": settings.payment_method_label or "โอนผ่านบัญชีธนาคาร",
+        "bank_name": settings.payment_bank_name or None,
+        "account_name": settings.payment_account_name or None,
+        "account_number": settings.payment_account_number or None,
+        "promptpay_id": settings.payment_promptpay_id or None,
+        "note_lines": note_lines,
+        "allowed_file_types": allowed_types,
+        "max_file_mb": settings.payment_slip_max_mb or 5.0,
+    }
+
+
+def _is_payment_upload_allowed(payment_row: Dict[str, Any], order_row: Dict[str, Any]) -> str:
+    payment_status = str((payment_row or {}).get("status") or "pending").lower()
+    order_payment_status = str(order_row.get("payment_status") or "unpaid").lower()
+
+    allowed_states = {"pending", "unpaid", "rejected"}
+    blocked_states = {"pending_review", "paid"}
+
+    if payment_status in blocked_states or order_payment_status in {"pending_review", "paid"}:
+        if payment_status == "pending_review" or order_payment_status == "pending_review":
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="payment_under_review")
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="payment_already_processed")
+
+    if payment_status not in allowed_states and order_payment_status not in allowed_states:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="payment_upload_not_allowed")
+
+    return payment_status
+
+
+def _validate_upload_file(file: UploadFile, max_mb: float, allowed_types: List[str]) -> bytes:
+    if not file:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="file_required")
+    content = file.file.read()
+    if not content:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="empty_file")
+    limit_bytes = int(max_mb * 1024 * 1024)
+    if len(content) > limit_bytes:
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="file_too_large")
+
+    mime_type = file.content_type or mimetypes.guess_type(file.filename or "")[0]
+    if mime_type not in allowed_types:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="file_type_not_allowed")
+    return content
+
+
+def _generate_slip_storage_key(order_id: str, filename: str) -> str:
+    _, ext = os.path.splitext(filename or "")
+    ext = ext.lower() or ".jpg"
+    random_suffix = uuid4().hex[:8]
+    timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
+    return f"{order_id}/{timestamp}-{random_suffix}{ext}"
+
+
+def _ensure_payment_row(
+    client: Client,
+    order_id: str,
+    customer_id: Optional[str],
+    amount: float,
+) -> Dict[str, Any]:
+    payment_row = _load_latest_payment(client, order_id)
+    if payment_row:
+        return payment_row
+    _create_initial_payment(client, order_id, customer_id, amount)
+    payment_row = _load_latest_payment(client, order_id)
+    if not payment_row:
+        raise HTTPException(status_code=500, detail="payment_initialization_failed")
+    return payment_row
+
+
+def _write_payment_status_log_customer(
+    client: Client,
+    payment_id: str,
+    order_id: str,
+    from_status: Optional[str],
+    to_status: str,
+) -> None:
+    payload = {
+        "payment_id": payment_id,
+        "order_id": order_id,
+        "from_status": from_status,
+        "to_status": to_status,
+        "changed_by": None,
+        "changed_by_type": "customer",
+        "note": None,
+    }
+    try:
+        client.table("payment_status_logs").insert(payload).execute()
+    except Exception:
+        trimmed = {k: v for k, v in payload.items() if k not in {"changed_by", "changed_by_type", "note"}}
+        try:
+            client.table("payment_status_logs").insert(trimmed).execute()
+        except Exception as exc:
+            logger.warning("customer_payment_status_log_failed: %s", getattr(exc, "message", exc))
+
+
+def _write_order_status_log_customer(
+    client: Client,
+    order_id: str,
+    from_status: Optional[str],
+    to_status: str,
+) -> None:
+    payload = {
+        "order_id": order_id,
+        "from_status": from_status,
+        "to_status": to_status,
+        "changed_by": None,
+        "changed_by_type": "customer",
+        "note": None,
+    }
+    try:
+        client.table("order_status_logs").insert(payload).execute()
+    except Exception:
+        trimmed = {k: v for k, v in payload.items() if k not in {"changed_by", "changed_by_type", "note"}}
+        try:
+            client.table("order_status_logs").insert(trimmed).execute()
+        except Exception as exc:
+            logger.warning("customer_order_status_log_failed: %s", getattr(exc, "message", exc))
+
+
+def _update_payment_after_upload(
+    client: Client,
+    order_id: str,
+    payment_row: Dict[str, Any],
+    file_meta: Dict[str, Any],
+    order_previous_status: str,
+) -> None:
+    update_payload = {
+        "status": "pending_review",
+        "slip_url": file_meta.get("public_url"),
+        "slip_storage_path": file_meta.get("path"),
+        "slip_file_name": file_meta.get("file_name"),
+        "submitted_at": datetime.utcnow().isoformat(),
+        "reject_reason": None,
+    }
+    payment_id = str(payment_row.get("id"))
+    resp = client.table("payments").update(update_payload).eq("id", payment_id).eq("order_id", order_id).execute()
+    if getattr(resp, "error", None):
+        raise HTTPException(status_code=500, detail="payment_update_failed")
+
+    order_update = (
+        client.table("orders")
+        .update({"payment_status": "pending_review", "status": "waiting_payment_review"})
+        .eq("id", order_id)
+        .execute()
+    )
+    order_error = getattr(order_update, "error", None)
+    if order_error:
+        raise HTTPException(status_code=500, detail="order_payment_status_sync_failed")
+
+    _write_payment_status_log_customer(
+        client,
+        payment_id,
+        order_id,
+        str(payment_row.get("status") or "pending"),
+        "pending_review",
+    )
+    _write_order_status_log_customer(
+        client,
+        order_id,
+        order_previous_status,
+        "waiting_payment_review",
+    )
 
 
 def _order_response(client: Client, store_id: str, order_id: str) -> Dict[str, Any]:
@@ -935,4 +1115,62 @@ def get_customer_order(order_id: str, store_id: Optional[str] = Query(default=No
         raise HTTPException(status_code=500, detail="store_resolution_failed")
 
     return _order_response(client, store_id_resolved, order_id)
+
+
+@router.get("/payment-instructions")
+def get_payment_instructions() -> Dict[str, Any]:
+    return _resolve_payment_instruction_payload()
+
+
+@router.post("/orders/status/slip")
+async def upload_payment_slip_endpoint(
+    public_token: str = Form(...),
+    file: UploadFile = File(...),
+) -> Dict[str, Any]:
+    token_value = str(public_token or "").strip()
+    if not token_value:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="token_required")
+
+    client = _get_client()
+    order_row = _fetch_single_order_row(client, {"public_token": token_value}, not_found_detail="order_not_found")
+    order_id = str(order_row.get("id"))
+    order_previous_status = str(order_row.get("status") or order_row.get("order_status") or "pending_payment")
+    payment_row = _ensure_payment_row(
+        client,
+        order_id,
+        order_row.get("customer_id"),
+        float(order_row.get("total_amount") or 0.0),
+    )
+
+    _is_payment_upload_allowed(payment_row, order_row)
+
+    instructions = _resolve_payment_instruction_payload()
+    if not instructions.get("enabled"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="payment_instruction_disabled")
+
+    allowed_types = instructions.get("allowed_file_types") or ["image/jpeg", "image/png", "image/webp"]
+    max_mb = float(instructions.get("max_file_mb") or settings.payment_slip_max_mb or 5.0)
+
+    file_bytes = _validate_upload_file(file, max_mb, allowed_types)
+    storage_key = _generate_slip_storage_key(order_id, file.filename or "slip.jpg")
+
+    try:
+        upload_result = storage_upload_payment_slip(
+            bucket=settings.payment_slip_bucket,
+            path=storage_key,
+            data=file_bytes,
+            content_type=file.content_type or "application/octet-stream",
+        )
+    except StorageUploadError as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
+
+    _update_payment_after_upload(client, order_id, payment_row, upload_result, order_previous_status)
+
+    refreshed_order_row = _fetch_single_order_row(
+        client,
+        {"public_token": token_value},
+        not_found_detail="order_not_found",
+    )
+    status_payload = _build_customer_order_status_response(client, refreshed_order_row)
+    return status_payload
 

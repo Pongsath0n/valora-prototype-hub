@@ -31,6 +31,20 @@ function normalizeStatus(value: string | undefined | null): string {
   return (value || "").toLowerCase();
 }
 
+type PaymentInstructions = {
+  enabled: boolean;
+  method_label: string;
+  bank_name?: string | null;
+  account_name?: string | null;
+  account_number?: string | null;
+  promptpay_id?: string | null;
+  note_lines: string[];
+  allowed_file_types: string[];
+  max_file_mb: number;
+};
+
+type UploadState = "idle" | "uploading" | "success" | "error";
+
 export default function OrderStatusPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const storedToken = getLastOrderToken();
@@ -44,10 +58,28 @@ export default function OrderStatusPage() {
   const [error, setError] = useState<string | null>(null);
   const [animated, setAnimated] = useState(false);
   const lastFetchedTokenRef = useRef<string | null>(null);
+  const [instructions, setInstructions] = useState<PaymentInstructions | null>(null);
+  const [instructionsError, setInstructionsError] = useState<string | null>(null);
+  const [uploadState, setUploadState] = useState<UploadState>("idle");
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
 
   useEffect(() => {
     const id = requestAnimationFrame(() => setAnimated(true));
     return () => cancelAnimationFrame(id);
+  }, []);
+
+  useEffect(() => {
+    async function loadInstructions() {
+      try {
+        setInstructionsError(null);
+        const data = await customerApi.getPaymentInstructions();
+        setInstructions(data);
+      } catch (err: any) {
+        setInstructionsError(err?.message || "โหลดคำแนะนำการชำระเงินไม่สำเร็จ");
+      }
+    }
+    void loadInstructions();
   }, []);
 
   useEffect(() => {
@@ -78,6 +110,104 @@ export default function OrderStatusPage() {
     } finally {
       setLoading(false);
     }
+  }
+
+  async function handleUpload(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!statusData?.public_token || !selectedFile) {
+      setUploadError("กรุณาเลือกไฟล์หลักฐาน");
+      return;
+    }
+
+    const allowedTypes = instructions?.allowed_file_types ?? ["image/jpeg", "image/png", "image/webp"];
+    if (selectedFile && !allowedTypes.includes(selectedFile.type)) {
+      setUploadError("ประเภทไฟล์ไม่รองรับ");
+      return;
+    }
+
+    const maxBytes = (instructions?.max_file_mb ?? 5) * 1024 * 1024;
+    if (selectedFile.size > maxBytes) {
+      setUploadError(`ไฟล์ต้องไม่เกิน ${instructions?.max_file_mb ?? 5}MB`);
+      return;
+    }
+
+    setUploadState("uploading");
+    setUploadError(null);
+    try {
+      await customerApi.uploadPaymentSlip(statusData.public_token, selectedFile);
+      setUploadState("success");
+      setSelectedFile(null);
+      await fetchStatusByToken(statusData.public_token);
+    } catch (err: any) {
+      setUploadState("error");
+      setUploadError(err?.message || "อัปโหลดไม่สำเร็จ");
+    } finally {
+      setTimeout(() => setUploadState("idle"), 3000);
+    }
+  }
+
+  const canUploadSlip = (() => {
+    if (!statusData) return false;
+    const paymentStatus = statusData.payment?.status?.toLowerCase?.() ?? "";
+    return ["pending", "unpaid", "rejected"].includes(paymentStatus);
+  })();
+
+  const isPendingReview = statusData?.payment?.status?.toLowerCase() === "pending_review";
+  const isPaid = statusData?.payment?.status?.toLowerCase() === "paid";
+
+  function renderInstructionCard() {
+    if (instructionsError) {
+      return (
+        <div className="rounded-2xl border border-destructive/40 bg-destructive/5 p-4 text-sm text-destructive">
+          {instructionsError}
+        </div>
+      );
+    }
+    if (!instructions?.enabled) {
+      return (
+        <div className="rounded-2xl border bg-muted/30 p-4 text-sm text-muted-foreground">
+          ระบบคำแนะนำการชำระเงินยังไม่พร้อมใช้งาน
+        </div>
+      );
+    }
+
+    return (
+      <div className="rounded-2xl border bg-white p-5 shadow-sm">
+        <div className="flex flex-col gap-1">
+          <p className="text-xs font-semibold text-primary/70">ช่องทางการชำระเงิน</p>
+          <h3 className="text-xl font-semibold">{instructions.method_label}</h3>
+        </div>
+        <div className="mt-4 space-y-3 text-sm">
+          {instructions.bank_name && (
+            <p>
+              <span className="text-muted-foreground">ธนาคาร:</span> {instructions.bank_name}
+            </p>
+          )}
+          {instructions.account_name && (
+            <p>
+              <span className="text-muted-foreground">ชื่อบัญชี:</span> {instructions.account_name}
+            </p>
+          )}
+          {instructions.account_number && (
+            <p>
+              <span className="text-muted-foreground">เลขบัญชี:</span> {instructions.account_number}
+            </p>
+          )}
+          {instructions.promptpay_id && (
+            <p>
+              <span className="text-muted-foreground">PromptPay:</span> {instructions.promptpay_id}
+            </p>
+          )}
+        </div>
+        {instructions.note_lines.length ? (
+          <ul className="mt-4 list-disc space-y-1 pl-4 text-sm text-muted-foreground">
+            {instructions.note_lines.map((note, idx) => (
+              <li key={`${note}-${idx}`}>{note}</li>
+            ))}
+          </ul>
+        ) : null}
+      </div>
+    );
   }
 
   function handleStatusSuccess(response: OrderStatusSummary, fallbackToken: string | null) {
@@ -253,24 +383,76 @@ export default function OrderStatusPage() {
       ) : null}
 
       {statusData ? (
-        <section className="rounded-2xl border bg-white p-5 shadow-sm">
-          <h2 className="text-base font-semibold">การชำระเงิน</h2>
-          <div className="mt-3 grid gap-3 md:grid-cols-2">
-            <div className="rounded-xl bg-muted/40 p-3 text-sm">
-              <p className="text-muted-foreground">สถานะการชำระเงิน</p>
-              <p className="text-base font-semibold">{statusData.payment.status}</p>
-              <p className="text-xs text-muted-foreground">
-                {statusData.payment.slip_submitted ? "มีการแนบสลิปแล้ว" : "ยังไม่ส่งหลักฐานการโอน"}
-              </p>
-            </div>
-            <div className="rounded-xl bg-muted/40 p-3 text-sm">
-              <p className="text-muted-foreground">ช่องทางที่ใช้แจ้ง</p>
-              <p className="text-base font-semibold capitalize">{statusData.payment.method}</p>
-              <p className="text-xs text-muted-foreground">
-                จำนวน {formatCurrency(statusData.payment.amount)}
-              </p>
+        <section className="space-y-4">
+          <div className="rounded-2xl border bg-white p-5 shadow-sm">
+            <h2 className="text-base font-semibold">การชำระเงิน</h2>
+            <div className="mt-3 grid gap-3 md:grid-cols-2">
+              <div className="rounded-xl bg-muted/40 p-3 text-sm">
+                <p className="text-muted-foreground">สถานะการชำระเงิน</p>
+                <p className="text-base font-semibold capitalize">{statusData.payment.status}</p>
+                <p className="text-xs text-muted-foreground">
+                  {statusData.payment.slip_submitted
+                    ? `แนบล่าสุดเมื่อ ${statusData.payment.last_submitted_at ?? "-"}`
+                    : "ยังไม่ส่งหลักฐานการโอน"}
+                </p>
+                {statusData.payment.reject_reason ? (
+                  <p className="mt-2 rounded-lg bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                    เหตุผลการปฏิเสธ: {statusData.payment.reject_reason}
+                  </p>
+                ) : null}
+              </div>
+              <div className="rounded-xl bg-muted/40 p-3 text-sm">
+                <p className="text-muted-foreground">ช่องทางที่ใช้แจ้ง</p>
+                <p className="text-base font-semibold capitalize">{statusData.payment.method}</p>
+                <p className="text-xs text-muted-foreground">
+                  จำนวน {formatCurrency(statusData.payment.amount)}
+                </p>
+              </div>
             </div>
           </div>
+
+          {renderInstructionCard()}
+
+          {instructions?.enabled ? (
+            <div className="rounded-2xl border bg-white p-5 shadow-sm">
+              <h2 className="text-base font-semibold">อัปโหลดสลิปการโอน</h2>
+              {isPaid ? (
+                <p className="mt-2 rounded-xl bg-emerald-50 px-4 py-2 text-sm text-emerald-700">
+                  ร้านยืนยันการชำระเงินแล้ว ขอบคุณค่ะ
+                </p>
+              ) : isPendingReview ? (
+                <p className="mt-2 rounded-xl bg-amber-50 px-4 py-2 text-sm text-amber-800">
+                  ร้านได้รับสลิปแล้ว กำลังตรวจสอบ โปรดรอการยืนยัน
+                </p>
+              ) : canUploadSlip ? (
+                <form onSubmit={handleUpload} className="mt-3 space-y-3">
+                  <input
+                    type="file"
+                    accept={(instructions?.allowed_file_types ?? []).join(",")}
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      setSelectedFile(file ?? null);
+                    }}
+                    className="w-full rounded-xl border px-3 py-2 text-sm file:mr-4 file:rounded-full file:border-0 file:bg-primary/10 file:px-4 file:py-1 file:text-sm file:font-semibold file:text-primary"
+                  />
+                  {uploadError ? (
+                    <p className="text-sm text-destructive">{uploadError}</p>
+                  ) : null}
+                  <button
+                    type="submit"
+                    disabled={uploadState === "uploading" || !selectedFile}
+                    className="inline-flex w-full items-center justify-center rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-60"
+                  >
+                    {uploadState === "uploading" ? "กำลังอัปโหลด..." : "ส่งหลักฐานการโอน"}
+                  </button>
+                </form>
+              ) : (
+                <p className="mt-2 rounded-xl bg-muted/30 px-4 py-2 text-sm text-muted-foreground">
+                  ไม่สามารถอัปโหลดสลิปได้ในสถานะปัจจุบัน
+                </p>
+              )}
+            </div>
+          ) : null}
         </section>
       ) : null}
 
