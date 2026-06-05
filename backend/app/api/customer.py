@@ -409,13 +409,32 @@ def _resolve_customer_display_name(
         return None
 
 
+def _short_identifier(value: Optional[str]) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if len(text) <= 8:
+        return text
+    return f"{text[:4]}...{text[-4:]}"
+
+
+def _safe_error_detail(err: Any) -> str:
+    detail = getattr(err, "message", None) or getattr(err, "detail", None)
+    if not detail and isinstance(err, dict):
+        detail = err.get("message") or err.get("detail")
+    if not detail and getattr(err, "args", None):
+        detail = err.args[0]
+    text = str(detail or err or "")
+    return text[:500]
+
+
 def _load_order_items(client: Client, order_id: str) -> List[Dict[str, Any]]:
     select_cols = [
         "product_id",
         "product_name_snapshot",
         "quantity",
         "unit_price",
-        "line_total",
+        "total_price",
     ]
     while True:
         query = client.table("order_items").select(", ".join(select_cols)).eq("order_id", order_id)
@@ -436,13 +455,11 @@ def _load_order_items(client: Client, order_id: str) -> List[Dict[str, Any]]:
                     or row.get("product_id")
                 )
                 quantity = int(row.get("quantity") or 0)
-                unit_price = row.get("unit_price")
-                if unit_price is None:
-                    unit_price = row.get("price") or row.get("unit_price_amount")
-                unit_price = float(unit_price or 0.0)
-                line_total = row.get("line_total")
-                if line_total is None:
-                    line_total = row.get("total_price") or row.get("line_total_amount")
+                unit_price_value = row.get("unit_price")
+                if unit_price_value is None:
+                    unit_price_value = row.get("price") or row.get("unit_price_amount")
+                unit_price = float(unit_price_value or 0.0)
+                line_total = row.get("total_price") or row.get("line_total") or row.get("line_total_amount")
                 if line_total is None and quantity and unit_price:
                     line_total = quantity * unit_price
                 items.append(
@@ -772,8 +789,20 @@ def _update_payment_after_upload(
         "reject_reason": None,
     }
     payment_id = str(payment_row.get("id"))
+    logger.info(
+        "payment_slip_payment_update order=%s payment=%s",
+        _short_identifier(order_id),
+        _short_identifier(payment_id),
+    )
     resp = client.table("payments").update(update_payload).eq("id", payment_id).eq("order_id", order_id).execute()
-    if getattr(resp, "error", None):
+    update_err = getattr(resp, "error", None)
+    if update_err:
+        logger.error(
+            "payment_slip_payment_update_failed order=%s payment=%s detail=%s",
+            _short_identifier(order_id),
+            _short_identifier(payment_id),
+            _safe_error_detail(update_err),
+        )
         raise HTTPException(status_code=500, detail="payment_update_failed")
 
     order_update = (
@@ -784,7 +813,18 @@ def _update_payment_after_upload(
     )
     order_error = getattr(order_update, "error", None)
     if order_error:
+        logger.error(
+            "payment_slip_order_status_update_failed order=%s detail=%s",
+            _short_identifier(order_id),
+            _safe_error_detail(order_error),
+        )
         raise HTTPException(status_code=500, detail="order_payment_status_sync_failed")
+
+    logger.info(
+        "payment_slip_order_status_updated order=%s payment=%s",
+        _short_identifier(order_id),
+        _short_identifier(payment_id),
+    )
 
     _write_payment_status_log_customer(
         client,
@@ -1176,6 +1216,15 @@ async def upload_payment_slip_endpoint(
 
     file_bytes = _validate_upload_file(file, max_mb, allowed_types)
     storage_key = _generate_slip_storage_key(order_id, file.filename or "slip.jpg")
+    file_size = len(file_bytes)
+    logger.info(
+        "payment_slip_upload_begin order=%s bucket=%s key=%s size=%s type=%s",
+        _short_identifier(order_id),
+        settings.payment_slip_bucket or "",
+        _short_identifier(storage_key),
+        file_size,
+        file.content_type or "unknown",
+    )
 
     try:
         upload_result = storage_upload_payment_slip(
@@ -1184,7 +1233,19 @@ async def upload_payment_slip_endpoint(
             data=file_bytes,
             content_type=file.content_type or "application/octet-stream",
         )
+        logger.info(
+            "payment_slip_storage_uploaded order=%s key=%s public_url=%s",
+            _short_identifier(order_id),
+            _short_identifier(storage_key),
+            bool(upload_result.get("public_url")),
+        )
     except StorageUploadError as exc:
+        logger.error(
+            "payment_slip_storage_failed order=%s key=%s detail=%s",
+            _short_identifier(order_id),
+            _short_identifier(storage_key),
+            _safe_error_detail(exc),
+        )
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
 
     _update_payment_after_upload(client, order_id, payment_row, upload_result, order_previous_status)
@@ -1195,5 +1256,11 @@ async def upload_payment_slip_endpoint(
         not_found_detail="order_not_found",
     )
     status_payload = _build_customer_order_status_response(client, refreshed_order_row)
+    logger.info(
+        "payment_slip_upload_completed order=%s payment_status=%s slip_submitted=%s",
+        _short_identifier(order_id),
+        status_payload.get("payment", {}).get("status"),
+        status_payload.get("payment", {}).get("slip_submitted"),
+    )
     return status_payload
 

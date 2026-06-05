@@ -1,12 +1,16 @@
 """Supabase Storage helpers for customer slip uploads."""
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
+from io import BytesIO
 from typing import Any, Dict
 
 from supabase import Client
 
 from app.core.supabase import get_supabase_admin_client
+
+logger = logging.getLogger(__name__)
 
 
 class StorageUploadError(RuntimeError):
@@ -27,6 +31,13 @@ class UploadedFile:
         }
 
 
+def _short_path(path: str) -> str:
+    value = str(path or "").strip()
+    if not value:
+        return ""
+    return value[-32:]
+
+
 def _get_storage_client(bucket: str) -> tuple[Client, Any]:
     client = get_supabase_admin_client()
     try:
@@ -43,16 +54,37 @@ def upload_payment_slip(bucket: str, path: str, data: bytes, content_type: str) 
         raise StorageUploadError("payment_slip_storage_path_missing")
 
     client, storage_client = _get_storage_client(bucket)
+    size_bytes = len(data or b"")
+    logger.info(
+        "storage_upload_begin bucket=%s key=%s size=%s content_type=%s",
+        bucket,
+        _short_path(path),
+        size_bytes,
+        content_type or "unknown",
+    )
     try:
+        buffer = BytesIO(data)
+        buffer.seek(0)
         storage_client.upload(
             path,
-            data,
+            buffer,
             {
                 "contentType": content_type or "application/octet-stream",
                 "upsert": True,
             },
         )
+        logger.info(
+            "storage_upload_success bucket=%s key=%s",
+            bucket,
+            _short_path(path),
+        )
     except Exception as exc:  # pragma: no cover
+        logger.error(
+            "storage_upload_failed bucket=%s key=%s detail=%s",
+            bucket,
+            _short_path(path),
+            str(exc)[:300],
+        )
         raise StorageUploadError("payment_slip_upload_failed") from exc
 
     public_url = None
