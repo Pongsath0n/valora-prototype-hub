@@ -393,10 +393,24 @@ def _payments_supports_store_scope(client: Client) -> bool:
 
 
 def _payment_lookup_columns(client: Client) -> str:
-    base = ["id", "order_id", "status"]
+    columns: List[str] = ["id", "order_id", "status"]
     if _payments_supports_store_scope(client):
-        base.insert(1, "store_id")
-    return ", ".join(base)
+        columns.insert(1, "store_id")
+
+    optional_fields = [
+        "slip_storage_path",
+        "slip_file_name",
+        "slip_url",
+        "submitted_at",
+        "reject_reason",
+        "confirmed_by",
+        "confirmed_at",
+    ]
+    for field in optional_fields:
+        if _payments_has_column(client, field):
+            columns.append(field)
+
+    return ", ".join(columns)
 
 
 def _payment_select_clause(client: Client, include_relations: bool = False, include_slip_fields: bool = True) -> str:
@@ -3145,41 +3159,78 @@ def reject_payment(payment_id: str, payload: PaymentRejectPayload, authorization
     if not _valid_payment_transition(str(current.get("status") or ""), "rejected"):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid_payment_status_transition")
 
+    order_id = str(current.get("order_id"))
+    payment_short = _short_identifier(payment_id)
+    order_short = _short_identifier(order_id)
+    logger.info(
+        "payment_reject_begin payment=%s order=%s status=%s",
+        payment_short,
+        order_short,
+        current.get("status"),
+    )
+
     update_payload = {
         "status": "rejected",
         "reject_reason": (payload.reason or "").strip() or None,
         "confirmed_by": None,
         "confirmed_at": None,
     }
-    resp = ctx["client"].table("payments").update(update_payload).eq("id", payment_id).eq("store_id", store_id_resolved).execute()
+    update_query = ctx["client"].table("payments").update(update_payload).eq("id", payment_id)
+    if _payments_supports_store_scope(ctx["client"]):
+        update_query = update_query.eq("store_id", store_id_resolved)
+    resp = update_query.execute()
     err = getattr(resp, "error", None)
     if err and any(_is_missing_column(err, k) for k in ["reject_reason", "confirmed_by", "confirmed_at"]):
+        logger.warning("payment_reject_optional_columns_missing payment=%s detail=%s", payment_short, _safe_error_detail(err))
         trimmed = _omit_optional_fields(update_payload, ["reject_reason", "confirmed_by", "confirmed_at"])
-        resp = ctx["client"].table("payments").update(trimmed).eq("id", payment_id).eq("store_id", store_id_resolved).execute()
+        trimmed_query = ctx["client"].table("payments").update(trimmed).eq("id", payment_id)
+        if _payments_supports_store_scope(ctx["client"]):
+            trimmed_query = trimmed_query.eq("store_id", store_id_resolved)
+        resp = trimmed_query.execute()
         err = getattr(resp, "error", None)
     if err:
+        logger.error("payment_reject_failed payment=%s detail=%s", payment_short, _safe_error_detail(err))
         raise HTTPException(status_code=500, detail="payment_reject_failed")
+    logger.info("payment_reject_payment_updated payment=%s", payment_short)
 
-    order_id = str(current.get("order_id"))
     note = (payload.note or "").strip() or (payload.reason or "").strip() or None
-    _sync_order_payment_status(
-        ctx["client"],
-        store_id_resolved,
-        order_id,
-        "rejected",
-        None,
-        ctx.get("user_id"),
-        note,
-    )
-    _write_payment_status_log(
-        ctx["client"],
-        payment_id,
-        order_id,
-        str(current.get("status") or ""),
-        "rejected",
-        ctx.get("user_id"),
-        note,
-    )
+    try:
+        _sync_order_payment_status(
+            ctx["client"],
+            store_id_resolved,
+            order_id,
+            "rejected",
+            None,
+            ctx.get("user_id"),
+            note,
+        )
+        logger.info("payment_reject_order_synced order=%s", order_short)
+    except HTTPException:
+        logger.error("payment_reject_order_sync_failed order=%s", order_short)
+        raise
+    except Exception as exc:  # pragma: no cover
+        logger.exception("payment_reject_order_sync_unexpected order=%s", order_short)
+        raise HTTPException(status_code=500, detail="order_payment_status_sync_failed") from exc
+
+    try:
+        _write_payment_status_log(
+            ctx["client"],
+            payment_id,
+            order_id,
+            str(current.get("status") or ""),
+            "rejected",
+            ctx.get("user_id"),
+            note,
+        )
+    except Exception as exc:  # pragma: no cover
+        logger.warning(
+            "payment_reject_log_failed payment=%s detail=%s",
+            payment_short,
+            _safe_error_detail(exc),
+        )
+    else:
+        logger.info("payment_reject_log_written payment=%s", payment_short)
+
     return {
         "id": payment_id,
         "status": "rejected",
