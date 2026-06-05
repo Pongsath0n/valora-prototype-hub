@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from supabase import Client
 
@@ -95,3 +95,41 @@ def upload_payment_slip(bucket: str, path: str, data: bytes, content_type: str) 
         public_url = None
 
     return UploadedFile(path=path, file_name=path.split("/")[-1], public_url=public_url).as_dict()
+
+
+def create_signed_slip_url(bucket: str, path: str, expires_in: int = 60) -> Dict[str, Any]:
+    """Create a short-lived signed URL for a private payment slip."""
+    if not bucket:
+        raise StorageUploadError("payment_slip_storage_not_configured")
+    if not path:
+        raise StorageUploadError("payment_slip_storage_path_missing")
+
+    _, storage_client = _get_storage_client(bucket)
+    ttl = max(1, int(expires_in or 1))
+    try:
+        signed_resp = storage_client.create_signed_url(path, ttl)
+    except Exception as exc:  # pragma: no cover
+        logger.error(
+            "storage_signed_url_failed bucket=%s key=%s detail=%s",
+            bucket,
+            _short_path(path),
+            str(exc)[:300],
+        )
+        raise StorageUploadError("payment_slip_signed_url_failed") from exc
+
+    signed_url: Optional[str] = None
+    if isinstance(signed_resp, dict):
+        signed_url = signed_resp.get("signedURL") or signed_resp.get("signed_url")
+    elif isinstance(signed_resp, str):
+        signed_url = signed_resp
+
+    if not signed_url:
+        raise StorageUploadError("payment_slip_signed_url_failed")
+
+    logger.info(
+        "storage_signed_url_issued bucket=%s key=%s ttl=%s",
+        bucket,
+        _short_path(path),
+        ttl,
+    )
+    return {"signed_url": signed_url, "expires_in": ttl}

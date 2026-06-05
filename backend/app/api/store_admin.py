@@ -8,8 +8,10 @@ from fastapi import APIRouter, Header, HTTPException, status
 from pydantic import BaseModel
 from supabase import Client
 
+from app.core.config import settings
 from app.core.supabase import SupabaseConfigurationError, get_supabase_admin_client
 from app.services.notification_sender import send_line_notification
+from app.services.storage import StorageUploadError, create_signed_slip_url
 
 logger = logging.getLogger(__name__)
 
@@ -2760,6 +2762,32 @@ def _sync_order_payment_status(
             changed_by,
             note,
         )
+
+
+@router.get("/payments/{payment_id}/slip-preview")
+def get_payment_slip_preview(payment_id: str, authorization: Optional[str] = Header(None), store_id: Optional[str] = None) -> Dict[str, Any]:
+    ctx = _get_ctx(authorization)
+    store_id_resolved, _role = _resolve_store_id(ctx["memberships"], store_id)
+
+    payment_row = _get_payment_row(ctx["client"], payment_id, store_id_resolved)
+    storage_path = payment_row.get("slip_storage_path")
+    if not storage_path:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="payment_slip_not_found")
+
+    bucket = settings.payment_slip_bucket or "payment-slips"
+    try:
+        signed_payload = create_signed_slip_url(bucket, storage_path, expires_in=60)
+    except StorageUploadError:
+        logger.warning("payment_slip_preview_failed payment_id=%s", payment_id)
+        raise HTTPException(status_code=500, detail="payment_slip_preview_failed")
+
+    return {
+        "payment_id": payment_id,
+        "signed_url": signed_payload.get("signed_url"),
+        "expires_in": signed_payload.get("expires_in"),
+        "file_name": payment_row.get("slip_file_name"),
+        "submitted_at": payment_row.get("submitted_at"),
+    }
 
 
 @router.get("/payments")

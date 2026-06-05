@@ -5,6 +5,7 @@ import AdminLayout from "@/components/admin/AdminLayout";
 import StatusBadge from "@/components/shared/StatusBadge";
 import DataTable from "@/components/shared/DataTable";
 import { storeAdminApi, type ApiOrder, type ApiPayment } from "@/services/storeAdminApi";
+import { PaymentSlipPreviewModal } from "@/components/admin/PaymentSlipPreviewModal";
 
 const nextStatusActions: { label: string; next: string }[] = [
   { label: "Mark Waiting Payment Review", next: "waiting_payment_review" },
@@ -22,6 +23,9 @@ export default function AdminOrderDetailPage() {
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
   const [rejectReasonByPaymentId, setRejectReasonByPaymentId] = useState<Record<string, string>>({});
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [activePayment, setActivePayment] = useState<ApiPayment | null>(null);
+  const [modalRejectReason, setModalRejectReason] = useState("");
 
   const refresh = async () => {
     if (!id) return;
@@ -38,6 +42,30 @@ export default function AdminOrderDetailPage() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const openPaymentPreview = (payment: ApiPayment) => {
+    setActivePayment(payment);
+    setModalRejectReason(rejectReasonByPaymentId[payment.id] || "");
+    setPreviewOpen(true);
+  };
+
+  const closePaymentPreview = () => {
+    setPreviewOpen(false);
+    setActivePayment(null);
+    setModalRejectReason("");
+  };
+
+  const handleApproveFromModal = async (payment: ApiPayment) => {
+    await handleApprovePayment(payment.id);
+    closePaymentPreview();
+  };
+
+  const handleRejectFromModal = async (payment: ApiPayment) => {
+    const resolved = modalRejectReason.trim() || "rejected_by_admin";
+    setRejectReasonByPaymentId((prev) => ({ ...prev, [payment.id]: resolved }));
+    await handleRejectPayment(payment.id, resolved);
+    closePaymentPreview();
   };
 
   useEffect(() => {
@@ -100,10 +128,10 @@ export default function AdminOrderDetailPage() {
     }
   };
 
-  const handleRejectPayment = async (paymentId: string) => {
+  const handleRejectPayment = async (paymentId: string, providedReason?: string) => {
     setError("");
     try {
-      const reason = rejectReasonByPaymentId[paymentId] || "rejected_by_admin";
+      const reason = providedReason?.trim() || rejectReasonByPaymentId[paymentId] || "rejected_by_admin";
       const res = await storeAdminApi.rejectPayment(paymentId, { reason });
       if (res.message) setInfo(res.message);
       await refresh();
@@ -170,6 +198,20 @@ export default function AdminOrderDetailPage() {
             { key: "id", header: "Payment ID" },
             { key: "amount", header: "จำนวนเงิน", render: (r) => `฿${Number(r.amount || 0).toFixed(2)}` },
             { key: "method", header: "วิธีชำระ" },
+            {
+              key: "slip",
+              header: "หลักฐาน",
+              render: (r) => (
+                <button
+                  type="button"
+                  className="underline"
+                  onClick={() => openPaymentPreview(r)}
+                  disabled={!r.slip_storage_path && !r.slip_url}
+                >
+                  ตรวจสลิป
+                </button>
+              ),
+            },
             { key: "status", header: "สถานะ", render: (r) => <StatusBadge label={r.status} tone="info" /> },
             {
               key: "actions",
@@ -197,6 +239,15 @@ export default function AdminOrderDetailPage() {
           rows={payments}
         />
       </div>
+      <PaymentSlipPreviewModal
+        payment={activePayment}
+        isOpen={previewOpen}
+        onClose={closePaymentPreview}
+        onApprove={(payment) => handleApproveFromModal(payment)}
+        onReject={(payment) => handleRejectFromModal(payment)}
+        rejectReason={modalRejectReason}
+        onRejectReasonChange={setModalRejectReason}
+      />
     </AdminLayout>
   );
 }

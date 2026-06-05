@@ -220,6 +220,14 @@ export type ApiPayment = {
   message?: string;
 };
 
+export type PaymentSlipPreviewResponse = {
+  payment_id: string;
+  signed_url: string;
+  expires_in: number;
+  file_name?: string | null;
+  submitted_at?: string | null;
+};
+
 export type PaymentPayload = {
   amount?: number;
   method?: "transfer" | "bank_transfer" | "promptpay" | "cash" | "other";
@@ -469,6 +477,10 @@ export const storeAdminApi = {
 
   async rejectPayment(paymentId: string, payload: PaymentRejectPayload): Promise<{ id: string; status: string; message?: string }> {
     return request<{ id: string; status: string; message?: string }>(`/api/store-admin/payments/${paymentId}/reject`, { method: "POST", body: JSON.stringify(payload) });
+  },
+
+  async getPaymentSlipPreview(paymentId: string): Promise<PaymentSlipPreviewResponse> {
+    return request<PaymentSlipPreviewResponse>(`/api/store-admin/payments/${paymentId}/slip-preview`);
   },
 
   // Customers + LINE binding
