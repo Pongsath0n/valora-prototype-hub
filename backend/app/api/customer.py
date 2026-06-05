@@ -1,5 +1,6 @@
 import logging
 import re
+import secrets
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
@@ -34,6 +35,11 @@ class CustomerOrderCreatePayload(BaseModel):
     store_id: Optional[str] = None
 
 
+class CustomerOrderLookupPayload(BaseModel):
+    order_no: str
+    phone: str
+
+
 def _get_client() -> Client:
     try:
         return get_supabase_admin_client()
@@ -58,6 +64,22 @@ def _generate_order_number() -> str:
     timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
     suffix = uuid4().hex[:4].upper()
     return f"ORD-{timestamp}-{suffix}"
+
+
+def _generate_public_token() -> str:
+    return secrets.token_urlsafe(32)
+
+
+def _is_unique_violation(error: Any, column: str) -> bool:
+    message = str(getattr(error, "message", error) or "")
+    lowered = message.lower()
+    return "duplicate key value" in lowered and column.lower() in lowered
+
+
+def _normalize_phone(value: str) -> str:
+    trimmed = str(value or "").strip()
+    digits = re.sub(r"\D+", "", trimmed)
+    return digits or trimmed
 
 
 def _try_select_products(client: Client, store_id: Optional[str], product_id: Optional[str] = None) -> List[Dict[str, Any]]:
@@ -273,8 +295,263 @@ def _recalculate_order_totals(client: Client, store_id: str, order_id: str) -> N
         raise HTTPException(status_code=500, detail="customer_order_totals_recalc_failed")
 
 
+def _order_select_columns() -> List[str]:
+    return [
+        "id",
+        "store_id",
+        "order_no",
+        "public_token",
+        "status",
+        "payment_status",
+        "total_amount",
+        "pickup_time",
+        "created_at",
+        "customer_id",
+        "customer_name",
+        "customer_phone",
+    ]
+
+
+def _fetch_single_order_row(
+    client: Client,
+    filters: Dict[str, Any],
+    not_found_detail: str = "order_not_found",
+) -> Dict[str, Any]:
+    order_cols = _order_select_columns()
+    while True:
+        if not order_cols:
+            raise HTTPException(status_code=500, detail="customer_order_lookup_failed")
+        order_select = ", ".join(order_cols)
+        query = client.table("orders").select(order_select)
+        for key, value in filters.items():
+            query = query.eq(key, value)
+        query = query.limit(1)
+        resp = query.execute()
+        err = getattr(resp, "error", None)
+        if not err:
+            rows = getattr(resp, "data", None) or []
+            if not rows:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=not_found_detail)
+            return rows[0]
+        missing = _extract_missing_column(err)
+        if missing and missing in order_cols:
+            order_cols = [c for c in order_cols if c != missing]
+            continue
+        raise HTTPException(status_code=500, detail="customer_order_lookup_failed")
+
+
+def _resolve_customer_display_name(
+    client: Client,
+    store_id: Optional[str],
+    order_row: Dict[str, Any],
+) -> Optional[str]:
+    snapshot = str(order_row.get("customer_name") or "").strip()
+    if snapshot:
+        return snapshot
+    customer_id = order_row.get("customer_id")
+    if not customer_id or not store_id:
+        return None
+
+    select_cols = "id, display_name, name, full_name"
+    while True:
+        try:
+            customer_resp = (
+                client.table("customers")
+                .select(select_cols)
+                .eq("id", customer_id)
+                .eq("store_id", store_id)
+                .limit(1)
+                .execute()
+            )
+            c_err = getattr(customer_resp, "error", None)
+        except Exception as exc:
+            c_err = exc
+            customer_resp = None
+
+        if not c_err:
+            rows = getattr(customer_resp, "data", None) or []
+            if rows:
+                return (
+                    rows[0].get("display_name")
+                    or rows[0].get("name")
+                    or rows[0].get("full_name")
+                )
+            return None
+
+        missing = _extract_missing_column(c_err)
+        if missing and missing in select_cols:
+            select_cols = ", ".join([c.strip() for c in select_cols.split(",") if c.strip() != missing])
+            if not select_cols:
+                return None
+            continue
+        logger.warning("customer_lookup_failed: %s", getattr(c_err, "message", str(c_err)))
+        return None
+
+
+def _load_order_items(client: Client, order_id: str) -> List[Dict[str, Any]]:
+    select_cols = [
+        "product_id",
+        "product_name_snapshot",
+        "quantity",
+        "unit_price",
+        "line_total",
+    ]
+    while True:
+        query = client.table("order_items").select(", ".join(select_cols)).eq("order_id", order_id)
+        resp = query.execute()
+        err = getattr(resp, "error", None)
+        if not err:
+            rows = getattr(resp, "data", None) or []
+            items: List[Dict[str, Any]] = []
+            for row in rows:
+                items.append(
+                    {
+                        "product_id": row.get("product_id"),
+                        "product_name": row.get("product_name_snapshot") or row.get("product_id"),
+                        "quantity": int(row.get("quantity") or 0),
+                        "line_total": float(row.get("line_total") or 0.0),
+                        "unit_price": float(row.get("unit_price") or 0.0),
+                    }
+                )
+            return items
+        missing = _extract_missing_column(err)
+        if missing and missing in select_cols:
+            select_cols = [c for c in select_cols if c != missing]
+            continue
+        logger.warning("order_items_lookup_failed: %s", getattr(err, "message", str(err)))
+        return []
+
+
+def _load_latest_payment(client: Client, order_id: str) -> Optional[Dict[str, Any]]:
+    select_cols = [
+        "id",
+        "status",
+        "method",
+        "amount",
+        "slip_url",
+        "slip_storage_path",
+        "slip_file_name",
+        "submitted_at",
+        "customer_id",
+    ]
+    while True:
+        query = (
+            client.table("payments")
+            .select(", ".join(select_cols))
+            .eq("order_id", order_id)
+            .order("created_at", desc=True)
+            .limit(1)
+        )
+        resp = query.execute()
+        err = getattr(resp, "error", None)
+        if not err:
+            rows = getattr(resp, "data", None) or []
+            return rows[0] if rows else None
+        missing = _extract_missing_column(err)
+        if missing and missing in select_cols:
+            select_cols = [c for c in select_cols if c != missing]
+            continue
+        logger.warning("payment_lookup_failed: %s", getattr(err, "message", str(err)))
+        return None
+
+
+def _create_initial_payment(
+    client: Client,
+    order_id: str,
+    customer_id: Optional[str],
+    amount: float,
+) -> None:
+    payload: Dict[str, Any] = {
+        "order_id": order_id,
+        "customer_id": customer_id,
+        "amount": amount,
+        "method": "transfer",
+        "status": "pending",
+    }
+    attempt_payload = dict(payload)
+    for _ in range(2):
+        try:
+            resp = client.table("payments").insert(attempt_payload).execute()
+            err = getattr(resp, "error", None)
+        except Exception as exc:
+            err = exc
+        if not err:
+            return
+        missing = _extract_missing_column(err)
+        if missing and missing in attempt_payload:
+            attempt_payload.pop(missing, None)
+            continue
+        logger.warning("initial_payment_create_failed: %s", getattr(err, "message", str(err)))
+        return
+
+
+def _build_payment_summary(payment_row: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    if not payment_row:
+        return {
+            "status": "pending",
+            "method": "transfer",
+            "amount": 0.0,
+            "slip_submitted": False,
+            "last_submitted_at": None,
+        }
+    slip_present = bool(
+        payment_row.get("slip_url")
+        or payment_row.get("slip_storage_path")
+        or payment_row.get("submitted_at")
+    )
+    return {
+        "status": payment_row.get("status") or "pending",
+        "method": payment_row.get("method") or "transfer",
+        "amount": float(payment_row.get("amount") or 0.0),
+        "slip_submitted": slip_present,
+        "last_submitted_at": payment_row.get("submitted_at"),
+    }
+
+
+def _build_customer_order_status_response(
+    client: Client,
+    order_row: Dict[str, Any],
+) -> Dict[str, Any]:
+    order_id = str(order_row.get("id"))
+    store_id = str(order_row.get("store_id") or "").strip() or None
+    customer_name = _resolve_customer_display_name(client, store_id, order_row)
+    items = _load_order_items(client, order_id)
+    payment_row = _load_latest_payment(client, order_id)
+    payment_summary = _build_payment_summary(payment_row)
+
+    return {
+        "order_no": order_row.get("order_no"),
+        "order_status": order_row.get("status") or "pending_payment",
+        "payment_status": order_row.get("payment_status") or "unpaid",
+        "pickup_time": order_row.get("pickup_time"),
+        "total_amount": float(order_row.get("total_amount") or 0.0),
+        "created_at": order_row.get("created_at"),
+        "customer_name": customer_name,
+        "items": [
+            {
+                "product_name": item.get("product_name"),
+                "quantity": item.get("quantity"),
+                "line_total": item.get("line_total"),
+            }
+            for item in items
+        ],
+        "payment": payment_summary,
+        "public_token": order_row.get("public_token"),
+    }
+
+
 def _order_response(client: Client, store_id: str, order_id: str) -> Dict[str, Any]:
-    order_cols = ["id", "order_no", "status", "payment_status", "total_amount", "pickup_time", "created_at", "customer_id"]
+    order_cols = [
+        "id",
+        "order_no",
+        "status",
+        "payment_status",
+        "total_amount",
+        "pickup_time",
+        "created_at",
+        "customer_id",
+        "customer_name",
+    ]
     while True:
         order_select = ", ".join(order_cols)
         try:
@@ -345,7 +622,16 @@ def _order_response(client: Client, store_id: str, order_id: str) -> Dict[str, A
         "pickup_time": order_row.get("pickup_time"),
         "created_at": order_row.get("created_at"),
         "customer_name": customer_name,
-        "items": items,
+        "items": [
+            {
+                "product_id": item.get("product_id"),
+                "product_name": item.get("product_name"),
+                "quantity": item.get("quantity"),
+                "unit_price": item.get("unit_price"),
+                "line_total": item.get("line_total"),
+            }
+            for item in items
+        ],
     }
 
 
@@ -379,11 +665,12 @@ def create_customer_order(payload: CustomerOrderCreatePayload) -> Dict[str, Any]
     pickup_time = str(payload.pickup_time or "").strip()
     customer_name = str(payload.customer.name or "").strip()
     customer_phone = str(payload.customer.phone or "").strip()
+    normalized_phone = _normalize_phone(customer_phone)
     if not pickup_time:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="pickup_time_required")
     if not customer_name:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="customer_name_required")
-    if not customer_phone:
+    if not normalized_phone:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="customer_phone_required")
     try:
         datetime.fromisoformat(pickup_time.replace("Z", "+00:00"))
@@ -457,12 +744,26 @@ def create_customer_order(payload: CustomerOrderCreatePayload) -> Dict[str, Any]
         "gross_profit": gross_profit,
         "note": str(payload.note or "").strip() or None,
         "order_no": _generate_order_number(),
+        "public_token": _generate_public_token(),
+        "customer_name": customer_name,
+        "customer_phone": normalized_phone,
     }
+    max_attempts = 5
+    attempts = 0
     while True:
+        attempts += 1
         order_resp = client.table("orders").insert(order_data).execute()
         order_err = getattr(order_resp, "error", None)
         if not order_err:
             break
+        if _is_unique_violation(order_err, "order_no"):
+            order_data["order_no"] = _generate_order_number()
+            if attempts < max_attempts:
+                continue
+        if _is_unique_violation(order_err, "public_token"):
+            order_data["public_token"] = _generate_public_token()
+            if attempts < max_attempts:
+                continue
         missing = _extract_missing_column(order_err)
         if missing and missing in order_data:
             order_data.pop(missing, None)
@@ -492,10 +793,18 @@ def create_customer_order(payload: CustomerOrderCreatePayload) -> Dict[str, Any]
             }
         )
     _insert_order_items(client, resolved_store_id, order_id, item_rows)
+    _create_initial_payment(
+        client,
+        order_id,
+        customer_id,
+        float(order_row.get("total_amount") or total_amount),
+    )
 
     return {
         "order_id": order_id,
+        "order_no": order_row.get("order_no"),
         "order_number": order_row.get("order_no"),
+        "public_token": order_row.get("public_token"),
         "status": order_row.get("status") or "pending_payment",
         "payment_status": order_row.get("payment_status") or "unpaid",
         "total_amount": float(order_row.get("total_amount") or total_amount),
@@ -532,4 +841,35 @@ def get_customer_order(order_id: str, store_id: Optional[str] = Query(default=No
         raise HTTPException(status_code=500, detail="store_resolution_failed")
 
     return _order_response(client, store_id_resolved, order_id)
+
+
+@router.get("/orders/status")
+def get_customer_order_status(token: str = Query(default="")) -> Dict[str, Any]:
+    token_value = str(token or "").strip()
+    if not token_value:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="token_required")
+
+    client = _get_client()
+    order_row = _fetch_single_order_row(
+        client,
+        {"public_token": token_value},
+        not_found_detail="order_not_found",
+    )
+    return _build_customer_order_status_response(client, order_row)
+
+
+@router.post("/orders/lookup")
+def lookup_customer_order(payload: CustomerOrderLookupPayload) -> Dict[str, Any]:
+    order_no = str(payload.order_no or "").strip()
+    phone = _normalize_phone(payload.phone)
+    if not order_no or not phone:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="lookup_fields_required")
+
+    client = _get_client()
+    order_row = _fetch_single_order_row(
+        client,
+        {"order_no": order_no, "customer_phone": phone},
+        not_found_detail="order_not_found",
+    )
+    return _build_customer_order_status_response(client, order_row)
 

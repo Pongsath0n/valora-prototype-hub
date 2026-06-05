@@ -2,7 +2,15 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { customerApi, type CustomerOrderSummary } from "@/services/customerApi";
-import { clearCart, getLastOrderId, setLastOrderId } from "@/services/cartStorage";
+import {
+  clearCart,
+  getLastOrderId,
+  getLastOrderNo,
+  getLastOrderToken,
+  setLastOrderId,
+  setLastOrderNo,
+  setLastOrderToken,
+} from "@/services/cartStorage";
 
 type StatusBadgeProps = {
   label: string;
@@ -67,6 +75,8 @@ export default function OrderSuccessPage() {
   const [order, setOrder] = useState<CustomerOrderSummary | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [orderNo, setOrderNo] = useState<string | null>(() => getLastOrderNo());
+  const [publicToken, setPublicToken] = useState<string | null>(() => getLastOrderToken());
 
   useEffect(() => {
     if (!orderId) {
@@ -83,6 +93,15 @@ export default function OrderSuccessPage() {
         if (!mounted) return;
         setOrder(data);
         setLastOrderId(data.order_id);
+        const resolvedOrderNo = data.order_number ?? data.order_no ?? orderNo;
+        if (resolvedOrderNo) {
+          setOrderNo(resolvedOrderNo);
+          setLastOrderNo(resolvedOrderNo);
+        }
+        const storedToken = getLastOrderToken();
+        if (storedToken) {
+          setPublicToken(storedToken);
+        }
       } catch (err: any) {
         if (!mounted) return;
         setError(err?.message || "ไม่สามารถโหลดข้อมูลคำสั่งซื้อได้");
@@ -106,6 +125,15 @@ export default function OrderSuccessPage() {
       payment: translatePaymentStatus(order.payment_status),
     };
   }, [order]);
+
+  const displayOrderNo = order?.order_number ?? order?.order_no ?? orderNo;
+
+  function handleCopyOrderNo() {
+    if (!displayOrderNo) return;
+    navigator.clipboard?.writeText(displayOrderNo).catch(() => {
+      /* ignore */
+    });
+  }
 
   if (!orderId) {
     return (
@@ -134,8 +162,17 @@ export default function OrderSuccessPage() {
       <div className="space-y-1">
         <h1 className="text-2xl font-semibold">สั่งซื้อสำเร็จ</h1>
         <p className="text-sm text-muted-foreground">
-          หมายเลขคำสั่งซื้อ: {orderId}
+          หมายเลขคำสั่งซื้อ: {displayOrderNo || orderId}
         </p>
+        {displayOrderNo ? (
+          <button
+            type="button"
+            onClick={handleCopyOrderNo}
+            className="text-sm text-primary underline"
+          >
+            คัดลอกรหัสออเดอร์
+          </button>
+        ) : null}
       </div>
 
       <section className="rounded-2xl border bg-white p-4 shadow-sm">
@@ -208,6 +245,25 @@ export default function OrderSuccessPage() {
         )}
       </section>
 
+      <section className="rounded-2xl border bg-white/80 p-4 shadow-sm">
+        <h2 className="text-base font-semibold">ขั้นตอนถัดไป</h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          กรุณาชำระเงินตามคำแนะนำของร้านค้า และเตรียมหลักฐานการโอนเพื่ออัปโหลดผ่านหน้าเช็กสถานะ
+        </p>
+        {publicToken ? (
+          <a
+            href={`/order/status?token=${encodeURIComponent(publicToken)}`}
+            className="mt-3 inline-flex w-full items-center justify-center rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground"
+          >
+            ดูสถานะออเดอร์
+          </a>
+        ) : (
+          <p className="mt-3 text-xs text-muted-foreground">
+            หากยังไม่มีลิงก์ ให้เตรียมเลขออเดอร์ไว้เพื่อค้นหาสถานะในภายหลัง
+          </p>
+        )}
+      </section>
+
       <section className="rounded-2xl border border-dashed bg-white/60 p-4 text-sm text-muted-foreground">
         <p>LINE แจ้งเตือนยังเป็นโหมดทดสอบ ทำให้ข้อความอาจไม่ถูกส่งจริง</p>
         <p className="mt-1">หากมีข้อสงสัย กรุณาติดต่อร้านค้าโดยตรง</p>
@@ -225,6 +281,10 @@ export default function OrderSuccessPage() {
           onClick={() => {
             clearCart();
             setOrderId(null);
+            setOrderNo(null);
+            setLastOrderNo(null);
+            setPublicToken(null);
+            setLastOrderToken(null);
           }}
           className="inline-flex w-full items-center justify-center rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground"
         >

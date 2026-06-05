@@ -7,6 +7,9 @@ export type CartItem = {
 };
 
 const CART_KEY = "valora:liff:cart";
+const LAST_ORDER_ID_KEY = "valora:liff:last_order";
+const LAST_ORDER_NO_KEY = "valora:liff:last_order_no";
+const LAST_ORDER_TOKEN_KEY = "valora:liff:last_order_token";
 
 function safeParse(): CartItem[] {
   if (typeof window === "undefined") return [];
@@ -80,10 +83,50 @@ export function clearCart(): void {
 
 export function getLastOrderId(): string | null {
   if (typeof window === "undefined") return null;
-  return window.localStorage.getItem("valora:liff:last_order");
+  return window.localStorage.getItem(LAST_ORDER_ID_KEY);
 }
 
 export function setLastOrderId(orderId: string): void {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem("valora:liff:last_order", orderId);
+  window.localStorage.setItem(LAST_ORDER_ID_KEY, orderId);
+}
+
+export function getLastOrderNo(): string | null {
+  if (typeof window === "undefined") return null;
+  return window.localStorage.getItem(LAST_ORDER_NO_KEY);
+}
+
+export function setLastOrderNo(orderNo: string | null | undefined): void {
+  if (typeof window === "undefined") return;
+  if (!orderNo) {
+    window.localStorage.removeItem(LAST_ORDER_NO_KEY);
+    return;
+  }
+  window.localStorage.setItem(LAST_ORDER_NO_KEY, orderNo);
+}
+
+export function getLastOrderToken(): string | null {
+  if (typeof window === "undefined") return null;
+  return window.localStorage.getItem(LAST_ORDER_TOKEN_KEY);
+}
+
+export function setLastOrderToken(token: string | null | undefined): void {
+  if (typeof window === "undefined") return;
+  if (!token) {
+    window.localStorage.removeItem(LAST_ORDER_TOKEN_KEY);
+    return;
+  }
+  window.localStorage.setItem(LAST_ORDER_TOKEN_KEY, token);
+}
+
+export function setLastOrderMetadata(params: { orderId?: string | null; orderNo?: string | null; publicToken?: string | null }): void {
+  if (params.orderId) {
+    setLastOrderId(params.orderId);
+  }
+  if (params.orderNo !== undefined) {
+    setLastOrderNo(params.orderNo);
+  }
+  if (params.publicToken !== undefined) {
+    setLastOrderToken(params.publicToken);
+  }
 }

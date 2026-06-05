@@ -12,7 +12,7 @@ import {
   type CartItem,
   clearCart,
   readCart,
-  setLastOrderId,
+  setLastOrderMetadata,
 } from "@/services/cartStorage";
 
 function toLocalDateInputValue(date: Date): string {
@@ -117,7 +117,11 @@ export default function OrderConfirmPage() {
       });
 
       clearCart();
-      setLastOrderId(order.order_id);
+      setLastOrderMetadata({
+        orderId: order.order_id,
+        orderNo: order.order_no ?? order.order_number ?? null,
+        publicToken: order.public_token ?? null,
+      });
       navigate("/liff/success");
     } catch (error: any) {
       setFormError(error?.message || "ไม่สามารถส่งคำสั่งซื้อได้");

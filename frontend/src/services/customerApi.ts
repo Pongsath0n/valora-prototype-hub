@@ -21,6 +21,8 @@ export type CustomerOrderItem = {
 export type CustomerOrderSummary = {
   order_id: string;
   order_number?: string | null;
+  order_no?: string | null;
+  public_token?: string | null;
   status: string;
   payment_status: string;
   total_amount: number;
@@ -28,6 +30,33 @@ export type CustomerOrderSummary = {
   created_at?: string | null;
   customer_name?: string | null;
   items: CustomerOrderItem[];
+};
+
+export type OrderStatusItem = {
+  product_name?: string | null;
+  quantity: number;
+  line_total: number;
+};
+
+export type OrderStatusPaymentSummary = {
+  status: string;
+  method: string;
+  amount: number;
+  slip_submitted: boolean;
+  last_submitted_at?: string | null;
+};
+
+export type OrderStatusSummary = {
+  order_no?: string | null;
+  order_status: string;
+  payment_status: string;
+  pickup_time?: string | null;
+  total_amount: number;
+  created_at?: string | null;
+  customer_name?: string | null;
+  items: OrderStatusItem[];
+  payment: OrderStatusPaymentSummary;
+  public_token?: string | null;
 };
 
 type CustomerOrderCreatePayload = {
@@ -107,6 +136,18 @@ export const customerApi = {
 
   async getOrder(orderId: string): Promise<CustomerOrderSummary> {
     return request<CustomerOrderSummary>(`/api/customer/orders/${orderId}`);
+  },
+
+  async getOrderStatusByToken(token: string): Promise<OrderStatusSummary> {
+    const query = new URLSearchParams({ token });
+    return request<OrderStatusSummary>(`/api/customer/orders/status?${query.toString()}`);
+  },
+
+  async lookupOrderStatus(payload: { order_no: string; phone: string }): Promise<OrderStatusSummary> {
+    return request<OrderStatusSummary>("/api/customer/orders/lookup", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
   },
 };
 
