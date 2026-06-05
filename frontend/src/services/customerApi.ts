@@ -45,6 +45,7 @@ export type OrderStatusPaymentSummary = {
   slip_submitted: boolean;
   last_submitted_at?: string | null;
   reject_reason?: string | null;
+  can_upload_slip?: boolean;
 };
 
 export type OrderStatusSummary = {

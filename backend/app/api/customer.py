@@ -537,6 +537,28 @@ def _create_initial_payment(
         return
 
 
+def _has_submitted_slip(payment_row: Optional[Dict[str, Any]]) -> bool:
+    if not payment_row:
+        return False
+    return bool(
+        payment_row.get("slip_url")
+        or payment_row.get("slip_storage_path")
+        or payment_row.get("slip_file_name")
+        or payment_row.get("submitted_at")
+    )
+
+
+def _payment_status_allows_upload(payment_status: str, slip_submitted: bool) -> bool:
+    normalized = (payment_status or "").lower()
+    if normalized in {"paid"}:
+        return False
+    if normalized in {"pending", "unpaid", "rejected"}:
+        return True
+    if normalized == "pending_review":
+        return not slip_submitted
+    return False
+
+
 def _build_payment_summary(payment_row: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     if not payment_row:
         return {
@@ -546,19 +568,18 @@ def _build_payment_summary(payment_row: Optional[Dict[str, Any]]) -> Dict[str, A
             "slip_submitted": False,
             "last_submitted_at": None,
             "reject_reason": None,
+            "can_upload_slip": True,
         }
-    slip_present = bool(
-        payment_row.get("slip_url")
-        or payment_row.get("slip_storage_path")
-        or payment_row.get("submitted_at")
-    )
+    slip_present = _has_submitted_slip(payment_row)
+    status_value = payment_row.get("status") or "pending"
     return {
-        "status": payment_row.get("status") or "pending",
+        "status": status_value,
         "method": payment_row.get("method") or "transfer",
         "amount": float(payment_row.get("amount") or 0.0),
         "slip_submitted": slip_present,
         "last_submitted_at": payment_row.get("submitted_at"),
         "reject_reason": payment_row.get("reject_reason"),
+        "can_upload_slip": _payment_status_allows_upload(status_value, slip_present),
     }
 
 
@@ -628,19 +649,21 @@ def _resolve_payment_instruction_payload() -> Dict[str, Any]:
 def _is_payment_upload_allowed(payment_row: Dict[str, Any], order_row: Dict[str, Any]) -> str:
     payment_status = str((payment_row or {}).get("status") or "pending").lower()
     order_payment_status = str(order_row.get("payment_status") or "unpaid").lower()
+    slip_submitted = _has_submitted_slip(payment_row)
 
     allowed_states = {"pending", "unpaid", "rejected"}
-    blocked_states = {"pending_review", "paid"}
+    if payment_status == "paid" or order_payment_status == "paid":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="payment_already_paid")
 
-    if payment_status in blocked_states or order_payment_status in {"pending_review", "paid"}:
-        if payment_status == "pending_review" or order_payment_status == "pending_review":
+    if payment_status == "pending_review" or order_payment_status == "pending_review":
+        if slip_submitted:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="payment_under_review")
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="payment_already_processed")
+        return payment_status
 
-    if payment_status not in allowed_states and order_payment_status not in allowed_states:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="payment_upload_not_allowed")
+    if payment_status in allowed_states or order_payment_status in allowed_states:
+        return payment_status
 
-    return payment_status
+    raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="payment_upload_not_allowed")
 
 
 def _validate_upload_file(file: UploadFile, max_mb: float, allowed_types: List[str]) -> bytes:

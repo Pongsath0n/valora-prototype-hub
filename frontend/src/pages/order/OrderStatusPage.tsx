@@ -148,12 +148,16 @@ export default function OrderStatusPage() {
 
   const canUploadSlip = (() => {
     if (!statusData) return false;
+    if (typeof statusData.payment?.can_upload_slip === "boolean") {
+      return statusData.payment.can_upload_slip;
+    }
     const paymentStatus = statusData.payment?.status?.toLowerCase?.() ?? "";
     return ["pending", "unpaid", "rejected"].includes(paymentStatus);
   })();
 
   const isPendingReview = statusData?.payment?.status?.toLowerCase() === "pending_review";
   const isPaid = statusData?.payment?.status?.toLowerCase() === "paid";
+  const hasSubmittedSlip = Boolean(statusData?.payment?.slip_submitted);
 
   function renderInstructionCard() {
     if (instructionsError) {
@@ -420,7 +424,7 @@ export default function OrderStatusPage() {
                 <p className="mt-2 rounded-xl bg-emerald-50 px-4 py-2 text-sm text-emerald-700">
                   ร้านยืนยันการชำระเงินแล้ว ขอบคุณค่ะ
                 </p>
-              ) : isPendingReview ? (
+              ) : isPendingReview && hasSubmittedSlip ? (
                 <p className="mt-2 rounded-xl bg-amber-50 px-4 py-2 text-sm text-amber-800">
                   ร้านได้รับสลิปแล้ว กำลังตรวจสอบ โปรดรอการยืนยัน
                 </p>
