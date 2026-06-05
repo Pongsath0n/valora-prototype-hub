@@ -3,7 +3,7 @@ import re
 import secrets
 from datetime import datetime
 from typing import Any, Dict, List, Optional
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel
@@ -882,25 +882,6 @@ def create_customer_order(payload: CustomerOrderCreatePayload) -> Dict[str, Any]
     }
 
 
-@router.get("/orders/{order_id}")
-def get_customer_order(order_id: str, store_id: Optional[str] = Query(default=None)) -> Dict[str, Any]:
-    client = _get_client()
-
-    store_id_resolved = store_id
-    if not store_id_resolved:
-        lookup = client.table("orders").select("id, store_id").eq("id", order_id).limit(1).execute()
-        if getattr(lookup, "error", None):
-            raise HTTPException(status_code=500, detail="customer_order_lookup_failed")
-        rows = getattr(lookup, "data", None) or []
-        if not rows:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="order_not_found")
-        store_id_resolved = str(rows[0].get("store_id") or "").strip()
-    if not store_id_resolved:
-        raise HTTPException(status_code=500, detail="store_resolution_failed")
-
-    return _order_response(client, store_id_resolved, order_id)
-
-
 @router.get("/orders/status")
 def get_customer_order_status(token: str = Query(default="")) -> Dict[str, Any]:
     token_value = str(token or "").strip()
@@ -930,4 +911,28 @@ def lookup_customer_order(payload: CustomerOrderLookupPayload) -> Dict[str, Any]
         not_found_detail="order_not_found",
     )
     return _build_customer_order_status_response(client, order_row)
+
+
+@router.get("/orders/{order_id}")
+def get_customer_order(order_id: str, store_id: Optional[str] = Query(default=None)) -> Dict[str, Any]:
+    try:
+        UUID(order_id)
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="order_not_found")
+
+    client = _get_client()
+
+    store_id_resolved = store_id
+    if not store_id_resolved:
+        lookup = client.table("orders").select("id, store_id").eq("id", order_id).limit(1).execute()
+        if getattr(lookup, "error", None):
+            raise HTTPException(status_code=500, detail="customer_order_lookup_failed")
+        rows = getattr(lookup, "data", None) or []
+        if not rows:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="order_not_found")
+        store_id_resolved = str(rows[0].get("store_id") or "").strip()
+    if not store_id_resolved:
+        raise HTTPException(status_code=500, detail="store_resolution_failed")
+
+    return _order_response(client, store_id_resolved, order_id)
 
