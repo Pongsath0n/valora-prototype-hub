@@ -285,6 +285,7 @@ async function main() {
     { name: "01-landing", path: "/", category: "public" },
     { name: "02-client-access", path: "/client-access", category: "public" },
     { name: "10-order-menu", path: "/order", category: "customer" },
+    { name: "16-order-status", path: "/order/status", category: "customer" },
     { name: "11-legacy-liff-menu", path: "/liff/menu", category: "customer" },
     { name: "12-liff-cart", path: "/liff/cart", category: "customer" },
     { name: "13-liff-confirm", path: "/liff/confirm", category: "customer" },

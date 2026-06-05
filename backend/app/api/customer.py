@@ -326,8 +326,12 @@ def _fetch_single_order_row(
         for key, value in filters.items():
             query = query.eq(key, value)
         query = query.limit(1)
-        resp = query.execute()
-        err = getattr(resp, "error", None)
+        try:
+            resp = query.execute()
+            err = getattr(resp, "error", None)
+        except Exception as exc:
+            resp = None
+            err = exc
         if not err:
             rows = getattr(resp, "data", None) or []
             if not rows:
@@ -337,6 +341,19 @@ def _fetch_single_order_row(
         if missing and missing in order_cols:
             order_cols = [c for c in order_cols if c != missing]
             continue
+        if missing and missing in filters:
+            logger.warning(
+                "order_lookup_filter_missing_column",
+                extra={
+                    "missing_column": missing,
+                    "filters": list(filters.keys()),
+                },
+            )
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=not_found_detail)
+        logger.error(
+            "customer_order_lookup_failed: %s",
+            getattr(err, "message", str(err)),
+        )
         raise HTTPException(status_code=500, detail="customer_order_lookup_failed")
 
 
@@ -398,27 +415,53 @@ def _load_order_items(client: Client, order_id: str) -> List[Dict[str, Any]]:
     ]
     while True:
         query = client.table("order_items").select(", ".join(select_cols)).eq("order_id", order_id)
-        resp = query.execute()
-        err = getattr(resp, "error", None)
+        try:
+            resp = query.execute()
+            err = getattr(resp, "error", None)
+        except Exception as exc:
+            resp = None
+            err = exc
         if not err:
             rows = getattr(resp, "data", None) or []
             items: List[Dict[str, Any]] = []
             for row in rows:
+                product_name = (
+                    row.get("product_name_snapshot")
+                    or row.get("product_name")
+                    or row.get("name")
+                    or row.get("product_id")
+                )
+                quantity = int(row.get("quantity") or 0)
+                unit_price = row.get("unit_price")
+                if unit_price is None:
+                    unit_price = row.get("price") or row.get("unit_price_amount")
+                unit_price = float(unit_price or 0.0)
+                line_total = row.get("line_total")
+                if line_total is None:
+                    line_total = row.get("total_price") or row.get("line_total_amount")
+                if line_total is None and quantity and unit_price:
+                    line_total = quantity * unit_price
                 items.append(
                     {
                         "product_id": row.get("product_id"),
-                        "product_name": row.get("product_name_snapshot") or row.get("product_id"),
-                        "quantity": int(row.get("quantity") or 0),
-                        "line_total": float(row.get("line_total") or 0.0),
-                        "unit_price": float(row.get("unit_price") or 0.0),
+                        "product_name": product_name,
+                        "quantity": quantity,
+                        "line_total": float(line_total or 0.0),
+                        "unit_price": unit_price,
                     }
                 )
             return items
         missing = _extract_missing_column(err)
         if missing and missing in select_cols:
             select_cols = [c for c in select_cols if c != missing]
+            if not select_cols:
+                logger.warning("order_items_lookup_missing_columns_exhausted")
+                return []
             continue
-        logger.warning("order_items_lookup_failed: %s", getattr(err, "message", str(err)))
+        logger.warning(
+            "order_items_lookup_failed: %s",
+            getattr(err, "message", str(err)),
+        )
         return []
 
 
@@ -442,8 +485,12 @@ def _load_latest_payment(client: Client, order_id: str) -> Optional[Dict[str, An
             .order("created_at", desc=True)
             .limit(1)
         )
-        resp = query.execute()
-        err = getattr(resp, "error", None)
+        try:
+            resp = query.execute()
+            err = getattr(resp, "error", None)
+        except Exception as exc:
+            resp = None
+            err = exc
         if not err:
             rows = getattr(resp, "data", None) or []
             return rows[0] if rows else None
@@ -515,17 +562,28 @@ def _build_customer_order_status_response(
     order_id = str(order_row.get("id"))
     store_id = str(order_row.get("store_id") or "").strip() or None
     customer_name = _resolve_customer_display_name(client, store_id, order_row)
-    items = _load_order_items(client, order_id)
+    items = _load_order_items(client, order_id) or []
     payment_row = _load_latest_payment(client, order_id)
     payment_summary = _build_payment_summary(payment_row)
 
+    order_status = order_row.get("status") or order_row.get("order_status") or "pending_payment"
+    payment_status = order_row.get("payment_status") or "unpaid"
+
+    pickup_time = order_row.get("pickup_time")
+    if pickup_time is not None:
+        pickup_time = str(pickup_time)
+
+    created_at = order_row.get("created_at")
+    if created_at is not None:
+        created_at = str(created_at)
+
     return {
-        "order_no": order_row.get("order_no"),
-        "order_status": order_row.get("status") or "pending_payment",
-        "payment_status": order_row.get("payment_status") or "unpaid",
-        "pickup_time": order_row.get("pickup_time"),
+        "order_no": order_row.get("order_no") or order_row.get("order_number"),
+        "order_status": str(order_status),
+        "payment_status": str(payment_status),
+        "pickup_time": pickup_time,
         "total_amount": float(order_row.get("total_amount") or 0.0),
-        "created_at": order_row.get("created_at"),
+        "created_at": created_at,
         "customer_name": customer_name,
         "items": [
             {
