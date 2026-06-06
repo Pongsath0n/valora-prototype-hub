@@ -315,6 +315,19 @@ def _is_missing_column(error: Any, column: str) -> bool:
     return column.lower() in message and ("column" in message or "does not exist" in message)
 
 
+def _short_identifier(value: Any) -> str:
+    s = str(value) if value is not None else ""
+    if len(s) <= 12:
+        return s
+    return f"{s[:6]}...{s[-6:]}"
+
+
+def _safe_error_detail(error: Any, limit: int = 300) -> str:
+    text = str(getattr(error, "message", "") or error or "")
+    text = text.replace("\n", " ").replace("\r", " ")
+    return text[:limit]
+
+
 _ORDER_ITEMS_COLUMN_CACHE: Dict[str, Optional[bool]] = {}
 _PAYMENTS_COLUMN_CACHE: Dict[str, Optional[bool]] = {}
 
@@ -2735,7 +2748,13 @@ def _get_payment_row(client: Client, payment_id: str, store_id: str) -> Dict[str
     query = client.table("payments").select(select_cols).eq("id", payment_id).limit(1)
     if _payments_supports_store_scope(client):
         query = query.eq("store_id", store_id)
-    resp = query.execute()
+    try:
+        resp = query.execute()
+    except Exception as exc:
+        err_msg = str(getattr(exc, "message", "") or exc or "").lower()
+        if "invalid" in err_msg and ("uuid" in err_msg or "syntax" in err_msg):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid_payment_id")
+        raise HTTPException(status_code=500, detail="payment_lookup_failed")
     if getattr(resp, "error", None):
         raise HTTPException(status_code=500, detail="payment_lookup_failed")
     rows = getattr(resp, "data", None) or []
