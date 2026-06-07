@@ -123,11 +123,23 @@ def _try_select_products(client: Client, store_id: Optional[str], product_id: Op
 
 
 def _resolve_store_id(client: Client, requested_store_id: Optional[str]) -> str:
-    if requested_store_id:
-        rows = _try_select_products(client, requested_store_id)
+    requested = str(requested_store_id or "").strip()
+    if requested:
+        rows = _try_select_products(client, requested)
         if rows:
-            return requested_store_id
+            return requested
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="store_not_found_or_empty")
+
+    default_store_id = str(settings.default_store_id or "").strip()
+    if default_store_id:
+        rows = _try_select_products(client, default_store_id)
+        if rows:
+            return default_store_id
+        logger.warning(
+            "customer_menu_default_store_empty store_id=%s",
+            _short_identifier(default_store_id),
+        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="menu_not_available")
 
     rows = _try_select_products(client, None)
     if not rows:
