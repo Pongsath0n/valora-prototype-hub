@@ -141,7 +141,7 @@ export default function AdminOrderDetailPage() {
   };
 
   return (
-    <AdminLayout title="รายละเอียดออเดอร์" subtitle={`Order #${order.id}`}>
+    <AdminLayout title="รายละเอียดออเดอร์" subtitle={`Order ${order.order_no || `#${order.id}`}`}>
       <div className="stat-card space-y-2">
         <div className="flex flex-wrap items-center gap-3">
           <StatusBadge label={order.status} tone="info" />
@@ -154,6 +154,9 @@ export default function AdminOrderDetailPage() {
         <p className="text-sm">
           ยอดขาย ฿{Number(order.total_amount || 0).toFixed(2)} | ต้นทุน ฿{Number(order.total_cost || 0).toFixed(2)} | ค่าช่องทาง ฿
           {Number(order.channel_fee || 0).toFixed(2)} | กำไร ฿{Number(order.gross_profit || 0).toFixed(2)}
+        </p>
+        <p className="text-sm text-muted-foreground">
+          ลูกค้า: {order.customer_name || "-"} ({order.customer_phone || "-"})
         </p>
         <div className="flex flex-wrap gap-2 pt-2">
           {nextStatusActions.map((a) => (
@@ -206,7 +209,7 @@ export default function AdminOrderDetailPage() {
                   type="button"
                   className="underline"
                   onClick={() => openPaymentPreview(r)}
-                  disabled={!r.slip_storage_path && !r.slip_url}
+                  disabled={!r.slip_submitted && !r.slip_storage_path && !r.slip_url}
                 >
                   ตรวจสลิป
                 </button>

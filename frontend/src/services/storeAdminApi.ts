@@ -137,16 +137,33 @@ export type ApiOrderItem = {
   created_at?: string;
 };
 
+export type LatestPaymentSummary = {
+  id?: string | null;
+  payment_id?: string | null;
+  status?: string | null;
+  method?: string | null;
+  amount?: number | null;
+  slip_submitted?: boolean | null;
+  slip_file_name?: string | null;
+  slip_storage_path?: string | null;
+  submitted_at?: string | null;
+  reject_reason?: string | null;
+};
+
 export type ApiOrder = {
   id: string;
   store_id: string;
   customer_id?: string | null;
   customer_name?: string | null;
+  customer_phone?: string | null;
   channel_id?: string | null;
   channel_name?: string | null;
+  order_no?: string | null;
+  order_number?: string | null;
   order_type?: string | null;
   pickup_type?: string | null;
   pickup_time?: string | null;
+  order_status?: string | null;
   status: string;
   payment_status: string;
   subtotal: number;
@@ -162,6 +179,7 @@ export type ApiOrder = {
   updated_at?: string;
   items?: ApiOrderItem[];
   mock_notification?: string;
+  latest_payment?: LatestPaymentSummary | null;
 };
 
 export type OrderPayload = {
@@ -202,9 +220,11 @@ export type ApiPayment = {
   id: string;
   store_id: string;
   order_id: string;
+  order_no?: string | null;
   order_status?: string | null;
   order_payment_status?: string | null;
   customer_name?: string | null;
+  customer_phone?: string | null;
   amount: number;
   method: string;
   status: string;
@@ -216,6 +236,7 @@ export type ApiPayment = {
   confirmed_at?: string | null;
   reject_reason?: string | null;
   created_at?: string;
+  slip_submitted?: boolean | null;
   mock_notification?: string;
   message?: string;
 };

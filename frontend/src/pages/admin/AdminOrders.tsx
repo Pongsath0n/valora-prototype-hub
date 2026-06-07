@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import AdminLayout from "@/components/admin/AdminLayout";
 import DataTable from "@/components/shared/DataTable";
 import StatusBadge from "@/components/shared/StatusBadge";
+import { Search } from "lucide-react";
 import {
   storeAdminApi,
   type ApiOrder,
@@ -11,15 +12,37 @@ import {
 } from "@/services/storeAdminApi";
 import { PaymentSlipPreviewModal } from "@/components/admin/PaymentSlipPreviewModal";
 
-type TabKey = "queue" | "payments" | "preparing" | "ready" | "completed" | "cancelled";
+type TabKey =
+  | "queue"
+  | "payments"
+  | "preparing"
+  | "ready"
+  | "ready_for_pickup"
+  | "completed"
+  | "cancelled"
+  | "rejected";
 
 const statusTabs: { key: TabKey; label: string; filter: string[] }[] = [
-  { key: "queue", label: "คิวออเดอร์", filter: ["pending_payment", "waiting_payment_review", "accepted", "preparing", "ready"] },
-  { key: "payments", label: "รายการรอตรวจสลิป", filter: ["waiting_payment_review"] },
-  { key: "preparing", label: "กำลังเตรียม", filter: ["preparing"] },
-  { key: "ready", label: "พร้อมรับ", filter: ["ready"] },
-  { key: "completed", label: "เสร็จสิ้น", filter: ["completed"] },
+  {
+    key: "queue",
+    label: "คิวออเดอร์",
+    filter: [
+      "pending_payment",
+      "waiting_payment_review",
+      "pending_review",
+      "accepted",
+      "preparing",
+      "ready",
+      "ready_for_pickup",
+    ],
+  },
+  { key: "payments", label: "รายการรอตรวจสลิป", filter: ["waiting_payment_review", "pending_review"] },
+  { key: "preparing", label: "กำลังเตรียม", filter: ["preparing", "accepted"] },
+  { key: "ready", label: "พร้อมรับ (Ready)", filter: ["ready"] },
+  { key: "ready_for_pickup", label: "พร้อมรับ (Legacy)", filter: ["ready_for_pickup"] },
+  { key: "completed", label: "เสร็จสิ้น", filter: ["completed", "paid"] },
   { key: "cancelled", label: "ยกเลิกแล้ว", filter: ["cancelled"] },
+  { key: "rejected", label: "ถูกปฏิเสธ", filter: ["rejected"] },
 ];
 
 const nextStatusByCurrent: Record<string, string[]> = {
@@ -51,6 +74,7 @@ export default function AdminOrdersPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
+  const [searchText, setSearchText] = useState("");
   const [creatingOrder, setCreatingOrder] = useState(false);
   const [orderForm, setOrderForm] = useState<OrderPayload>({
     order_type: "pickup",
@@ -85,19 +109,31 @@ export default function AdminOrdersPage() {
   }, []);
 
   const filteredOrders = useMemo(() => {
+    const query = searchText.trim().toLowerCase();
     const tab = statusTabs.find((t) => t.key === activeTab);
-    if (!tab) return rows;
-    const filtered = rows.filter((r) => tab.filter.includes(r.status));
+    const base = tab ? rows.filter((r) => tab.filter.includes(r.status)) : rows;
+    const searched = query
+      ? base.filter((order) => {
+          const shortId = order.id.slice(-6).toLowerCase();
+          return (
+            order.order_no?.toLowerCase().includes(query) ||
+            order.id.toLowerCase().includes(query) ||
+            shortId.includes(query) ||
+            order.customer_name?.toLowerCase().includes(query) ||
+            order.customer_phone?.toLowerCase().includes(query)
+          );
+        })
+      : base;
 
-    if (activeTab === "queue" || activeTab === "preparing" || activeTab === "ready") {
-      return [...filtered].sort((a, b) => {
+    if (["queue", "preparing", "ready", "ready_for_pickup"].includes(activeTab)) {
+      return [...searched].sort((a, b) => {
         const aTs = a.pickup_time ? new Date(a.pickup_time).getTime() : Number.MAX_SAFE_INTEGER;
         const bTs = b.pickup_time ? new Date(b.pickup_time).getTime() : Number.MAX_SAFE_INTEGER;
         return aTs - bTs;
       });
     }
-    return filtered;
-  }, [rows, activeTab]);
+    return searched;
+  }, [rows, activeTab, searchText]);
 
   const handleStatusChange = async (order: ApiOrder, nextStatus: string) => {
     setError("");
@@ -232,6 +268,15 @@ export default function AdminOrdersPage() {
           </button>
         ))}
         {refreshing ? <span className="text-xs text-muted-foreground self-center">กำลังโหลด...</span> : null}
+        <div className="ml-auto flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs text-muted-foreground bg-background">
+          <Search className="w-3.5 h-3.5" />
+          <input
+            className="bg-transparent text-foreground placeholder:text-muted-foreground text-xs focus:outline-none"
+            placeholder="ค้นหาเลขออเดอร์ / ลูกค้า / โทร"
+            value={searchText}
+            onChange={(e) => setSearchText(e.target.value)}
+          />
+        </div>
       </div>
 
       {error ? <div className="stat-card mb-4 text-sm text-destructive">{error}</div> : null}
@@ -259,15 +304,24 @@ export default function AdminOrdersPage() {
         <DataTable
           columns={[
             {
-              key: "order_id",
+              key: "order_no",
               header: "เลขออเดอร์",
               render: (r) => (
-                <Link to={`/store-admin/orders/${r.order_id}`} className="underline">
-                  {r.order_id}
+                <Link to={`/store-admin/orders/${r.order_id}`} className="underline font-mono text-xs">
+                  {r.order_no || r.order_id}
                 </Link>
               ),
             },
-            { key: "customer_name", header: "ลูกค้า", render: (r) => r.customer_name || "-" },
+            {
+              key: "customer_name",
+              header: "ลูกค้า",
+              render: (r) => (
+                <div className="flex flex-col">
+                  <span>{r.customer_name || "-"}</span>
+                  <span className="text-xs text-muted-foreground">{r.customer_phone || "-"}</span>
+                </div>
+              ),
+            },
             { key: "amount", header: "ยอดชำระ", render: (r) => `฿${Number(r.amount || 0).toFixed(2)}` },
             { key: "method", header: "วิธีชำระ" },
             {
@@ -278,14 +332,32 @@ export default function AdminOrdersPage() {
                   type="button"
                   className="underline"
                   onClick={() => openPaymentPreview(r)}
-                  disabled={!r.slip_storage_path && !r.slip_url}
+                  disabled={!r.slip_submitted && !r.slip_storage_path && !r.slip_url}
                 >
                   ตรวจสลิป
                 </button>
               ),
             },
-            { key: "submitted_at", header: "ส่งเมื่อ", render: (r) => r.submitted_at || "-" },
-            { key: "status", header: "สถานะชำระเงิน", render: (r) => <StatusBadge label={r.status} tone="info" /> },
+            {
+              key: "submitted_at",
+              header: "ส่งเมื่อ",
+              render: (r) => r.submitted_at || (r.slip_submitted ? "แนบแล้ว" : "-"),
+            },
+            {
+              key: "status",
+              header: "สถานะชำระเงิน",
+              render: (r) => (
+                <div className="flex flex-col gap-1">
+                  <StatusBadge label={r.status} tone="info" />
+                  {r.order_status ? (
+                    <StatusBadge label={`ออเดอร์: ${r.order_status}`} tone="neutral" />
+                  ) : null}
+                  {r.order_payment_status ? (
+                    <StatusBadge label={`ชำระ: ${r.order_payment_status}`} tone="warning" />
+                  ) : null}
+                </div>
+              ),
+            },
             {
               key: "actions",
               header: "จัดการ",
@@ -306,15 +378,44 @@ export default function AdminOrdersPage() {
               header: "เลขออเดอร์",
               render: (r) => (
                 <Link to={`/store-admin/orders/${r.id}`} className="underline">
-                  {r.id}
+                  {r.order_no || r.id}
                 </Link>
               ),
             },
-            { key: "customer_name", header: "ลูกค้า", render: (r) => r.customer_name || "-" },
+            {
+              key: "customer_name",
+              header: "ลูกค้า",
+              render: (r) => (
+                <div className="flex flex-col">
+                  <span>{r.customer_name || "-"}</span>
+                  <span className="text-xs text-muted-foreground">{r.customer_phone || "-"}</span>
+                </div>
+              ),
+            },
             { key: "pickup_time", header: "เวลารับ", render: (r) => r.pickup_time || "-" },
             { key: "channel_name", header: "ช่องทาง", render: (r) => r.channel_name || "-" },
             { key: "payment_status", header: "สถานะชำระเงิน", render: (r) => <StatusBadge label={r.payment_status} tone="warning" /> },
             { key: "status", header: "สถานะออเดอร์", render: (r) => <StatusBadge label={r.status} tone="info" /> },
+            {
+              key: "latest_payment",
+              header: "ชำระล่าสุด",
+              render: (r) => {
+                const latest = r.latest_payment;
+                if (!latest) {
+                  return <span className="text-xs text-muted-foreground">-</span>;
+                }
+                const amount = typeof latest.amount === "number" ? `฿${Number(latest.amount).toFixed(2)}` : "-";
+                return (
+                  <div className="flex flex-col text-xs">
+                    <span>สถานะ: {latest.status || "-"}</span>
+                    <span>ยอด: {amount}</span>
+                    <span className={latest.slip_submitted ? "text-emerald-600" : "text-muted-foreground"}>
+                      {latest.slip_submitted ? "มีสลิป" : "ยังไม่แนบสลิป"}
+                    </span>
+                  </div>
+                );
+              },
+            },
             { key: "total_amount", header: "ยอดรวม", render: (r) => `฿${Number(r.total_amount || 0).toFixed(2)}` },
             {
               key: "actions",

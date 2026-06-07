@@ -330,6 +330,7 @@ def _safe_error_detail(error: Any, limit: int = 300) -> str:
 
 _ORDER_ITEMS_COLUMN_CACHE: Dict[str, Optional[bool]] = {}
 _PAYMENTS_COLUMN_CACHE: Dict[str, Optional[bool]] = {}
+_ORDERS_COLUMN_CACHE: Dict[str, Optional[bool]] = {}
 
 
 def _order_items_has_column(client: Client, column: str) -> bool:
@@ -372,6 +373,27 @@ def _payments_has_column(client: Client, column: str) -> bool:
             _PAYMENTS_COLUMN_CACHE[column] = True
 
     return bool(_PAYMENTS_COLUMN_CACHE.get(column))
+
+
+def _orders_has_column(client: Client, column: str) -> bool:
+    cached = _ORDERS_COLUMN_CACHE.get(column)
+    if cached is not None:
+        return bool(cached)
+
+    try:
+        probe = client.table("orders").select(column).limit(1).execute()
+        err = getattr(probe, "error", None)
+        if err and _is_missing_column(err, column):
+            _ORDERS_COLUMN_CACHE[column] = False
+        else:
+            _ORDERS_COLUMN_CACHE[column] = True
+    except Exception as exc:
+        if _is_missing_column(exc, column):
+            _ORDERS_COLUMN_CACHE[column] = False
+        else:
+            _ORDERS_COLUMN_CACHE[column] = True
+
+    return bool(_ORDERS_COLUMN_CACHE.get(column))
 
 
 def _prune_payment_columns(client: Client, data: Dict[str, Any]) -> Dict[str, Any]:
@@ -449,7 +471,18 @@ def _payment_select_clause(client: Client, include_relations: bool = False, incl
         ])
     cols.append("created_at")
     if include_relations:
-        cols.append("orders(id, status, payment_status, customers(display_name))")
+        order_rel_fields = ["id", "status", "payment_status"]
+        if _orders_has_column(client, "order_no"):
+            order_rel_fields.append("order_no")
+        if _orders_has_column(client, "order_status"):
+            order_rel_fields.append("order_status")
+        if _orders_has_column(client, "customer_name"):
+            order_rel_fields.append("customer_name")
+        if _orders_has_column(client, "customer_phone"):
+            order_rel_fields.append("customer_phone")
+        cols.append(
+            f"orders({', '.join(order_rel_fields)}, customers(display_name))"
+        )
     return ", ".join(cols)
 
 
@@ -1984,6 +2017,7 @@ def _map_order(
     row: Dict[str, Any],
     customer_names: Optional[Dict[str, str]] = None,
     channel_names: Optional[Dict[str, str]] = None,
+    latest_payment: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     customer_name = None
     channel_name = None
@@ -1991,16 +2025,26 @@ def _map_order(
         customer_name = customer_names.get(str(row.get("customer_id")))
     if channel_names and row.get("channel_id"):
         channel_name = channel_names.get(str(row.get("channel_id")))
+    inline_customer_name = row.get("customer_name")
+    if inline_customer_name:
+        customer_name = inline_customer_name
+    order_no = row.get("order_no") or row.get("order_number")
+    order_status = row.get("order_status") or row.get("status")
+    customer_phone = row.get("customer_phone")
     return {
         "id": str(row.get("id")),
         "store_id": row.get("store_id"),
         "customer_id": row.get("customer_id"),
         "customer_name": customer_name,
+        "customer_phone": customer_phone,
         "channel_id": row.get("channel_id"),
         "channel_name": channel_name,
+        "order_no": order_no,
+        "order_number": order_no,
         "order_type": row.get("order_type"),
         "pickup_type": row.get("pickup_type"),
         "pickup_time": row.get("pickup_time"),
+        "order_status": order_status,
         "status": row.get("status"),
         "payment_status": "pending_review" if row.get("payment_status") == "pending" else row.get("payment_status"),
         "subtotal": float(row.get("subtotal") or 0),
@@ -2014,10 +2058,11 @@ def _map_order(
         "cancelled_at": row.get("cancelled_at"),
         "created_at": row.get("created_at"),
         "updated_at": row.get("updated_at"),
+        "latest_payment": latest_payment,
     }
 
 
-def _order_select_columns(use_channel_fee: bool = True) -> str:
+def _order_select_columns(client: Client, use_channel_fee: bool = True) -> str:
     columns = [
         "id",
         "store_id",
@@ -2038,11 +2083,104 @@ def _order_select_columns(use_channel_fee: bool = True) -> str:
         "cancelled_reason",
         "cancelled_at",
     ]
+    optional_fields = [
+        "order_no",
+        "order_number",
+        "order_status",
+        "customer_name",
+        "customer_phone",
+    ]
+    for field in optional_fields:
+        if _orders_has_column(client, field):
+            columns.append(field)
     columns.extend([
         "created_at",
         "updated_at",
     ])
     return ", ".join(columns)
+
+
+def _fetch_store_orders(client: Client, store_id: str) -> List[Dict[str, Any]]:
+    """Fetch all orders for the given store with compatibility fallbacks."""
+    use_channel_fee = True
+    while True:
+        select_cols = _order_select_columns(client, use_channel_fee)
+        resp = (
+            client.table("orders")
+            .select(select_cols)
+            .eq("store_id", store_id)
+            .order("created_at", desc=True)
+            .execute()
+        )
+        err = getattr(resp, "error", None)
+        if not err:
+            return getattr(resp, "data", None) or []
+        missing_col = _extract_missing_column(err)
+        if use_channel_fee and missing_col == "channel_fee":
+            use_channel_fee = False
+            continue
+        raise HTTPException(status_code=500, detail="order_query_failed")
+
+
+def _map_latest_payment_summary(row: Dict[str, Any]) -> Dict[str, Any]:
+    payment_id = row.get("id")
+    slip_submitted = bool(
+        row.get("slip_storage_path")
+        or row.get("slip_file_name")
+        or row.get("slip_url")
+        or row.get("submitted_at")
+    )
+    return {
+        "id": str(payment_id) if payment_id else None,
+        "payment_id": str(payment_id) if payment_id else None,
+        "status": row.get("status"),
+        "method": row.get("method"),
+        "amount": float(row.get("amount") or 0),
+        "slip_submitted": slip_submitted,
+        "slip_file_name": row.get("slip_file_name"),
+        "slip_storage_path": row.get("slip_storage_path"),
+        "submitted_at": row.get("submitted_at"),
+        "reject_reason": row.get("reject_reason"),
+    }
+
+
+def _load_latest_payments(client: Client, order_ids: List[str]) -> Dict[str, Dict[str, Any]]:
+    """Return a map of order_id -> latest payment summary."""
+    if not order_ids:
+        return {}
+
+    select_cols = _payment_select_clause(client, include_relations=False, include_slip_fields=True)
+    query = (
+        client.table("payments")
+        .select(select_cols)
+        .in_("order_id", order_ids)
+        .order("created_at", desc=True)
+    )
+    resp = query.execute()
+    err = getattr(resp, "error", None)
+    if err and _is_missing_column(err, "slip_url"):
+        fallback_cols = _payment_select_clause(client, include_relations=False, include_slip_fields=False)
+        resp = (
+            client.table("payments")
+            .select(fallback_cols)
+            .in_("order_id", order_ids)
+            .order("created_at", desc=True)
+            .execute()
+        )
+        err = getattr(resp, "error", None)
+    if err:
+        raise HTTPException(status_code=500, detail="latest_payments_query_failed")
+
+    latest_map: Dict[str, Dict[str, Any]] = {}
+    for row in getattr(resp, "data", None) or []:
+        oid = row.get("order_id")
+        if not oid:
+            continue
+        oid_str = str(oid)
+        if oid_str in latest_map:
+            continue
+        latest_map[oid_str] = _map_latest_payment_summary(row)
+    return latest_map
 
 
 def _recalculate_order_totals(client: Client, store_id: str, order_id: str) -> None:
@@ -2193,22 +2331,7 @@ def list_orders(authorization: Optional[str] = Header(None), store_id: Optional[
     ctx = _get_ctx(authorization)
     store_id_resolved, _role = _resolve_store_id(ctx["memberships"], store_id)
 
-    use_channel_fee = True
-    while True:
-        select_cols = _order_select_columns(use_channel_fee)
-        resp = (
-            ctx["client"].table("orders").select(select_cols).eq("store_id", store_id_resolved).order("created_at", desc=True).execute()
-        )
-        err = getattr(resp, "error", None)
-        if not err:
-            break
-        missing_col = _extract_missing_column(err)
-        if use_channel_fee and missing_col == "channel_fee":
-            use_channel_fee = False
-            continue
-        raise HTTPException(status_code=500, detail="order_query_failed")
-
-    rows = getattr(resp, "data", None) or []
+    rows = _fetch_store_orders(ctx["client"], store_id_resolved)
     customer_map, channel_map = _load_order_relation_maps(ctx["client"], store_id_resolved, rows)
     order_ids = [str(r.get("id")) for r in rows if r.get("id")]
 
@@ -2230,9 +2353,11 @@ def list_orders(authorization: Optional[str] = Header(None), store_id: Optional[
             oid = str(item.get("order_id"))
             item_map.setdefault(oid, []).append(_map_order_item(item))
 
+    latest_payments = _load_latest_payments(ctx["client"], order_ids)
     mapped = []
     for row in rows:
-        itemized = _map_order(row, customer_map, channel_map)
+        oid = str(row.get("id")) if row.get("id") else None
+        itemized = _map_order(row, customer_map, channel_map, latest_payments.get(oid))
         itemized["items"] = item_map.get(str(row.get("id")), [])
         mapped.append(itemized)
 
@@ -2321,7 +2446,7 @@ def get_order(order_id: str, authorization: Optional[str] = Header(None), store_
 
     use_channel_fee = True
     while True:
-        select_cols = _order_select_columns(use_channel_fee)
+        select_cols = _order_select_columns(ctx["client"], use_channel_fee)
         resp = (
             ctx["client"].table("orders").select(select_cols).eq("id", order_id).eq("store_id", store_id_resolved).limit(1).execute()
         )
@@ -2354,7 +2479,8 @@ def get_order(order_id: str, authorization: Optional[str] = Header(None), store_
     if getattr(item_resp, "error", None):
         raise HTTPException(status_code=500, detail="order_items_query_failed")
 
-    mapped = _map_order(row, customer_map, channel_map)
+    latest_map = _load_latest_payments(ctx["client"], [str(row.get("id"))])
+    mapped = _map_order(row, customer_map, channel_map, latest_map.get(str(row.get("id"))))
     mapped["items"] = [_map_order_item(i) for i in (getattr(item_resp, "data", None) or [])]
     return mapped
 
@@ -2672,8 +2798,8 @@ def _sanitize_payment_payload(payload: PaymentCreate | PaymentUpdate, partial: b
     return data
 
 
-def _map_payment(row: Dict[str, Any]) -> Dict[str, Any]:
-    order_rel = row.get("orders") if isinstance(row, dict) else None
+def _map_payment(row: Dict[str, Any], order_context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    order_rel = order_context or (row.get("orders") if isinstance(row, dict) else None)
     customer_rel = order_rel.get("customers") if isinstance(order_rel, dict) else None
     customer_name = None
     if isinstance(customer_rel, dict):
@@ -2682,13 +2808,26 @@ def _map_payment(row: Dict[str, Any]) -> Dict[str, Any]:
             or customer_rel.get("name")
             or customer_rel.get("customer_name")
         )
+    if not customer_name and isinstance(order_rel, dict):
+        customer_name = order_rel.get("customer_name")
+    customer_phone = None
+    if isinstance(order_rel, dict):
+        customer_phone = order_rel.get("customer_phone")
+    slip_submitted = bool(
+        row.get("slip_storage_path")
+        or row.get("slip_file_name")
+        or row.get("slip_url")
+        or row.get("submitted_at")
+    )
     return {
         "id": str(row.get("id")),
         "store_id": row.get("store_id"),
         "order_id": row.get("order_id"),
-        "order_status": order_rel.get("status") if isinstance(order_rel, dict) else None,
+        "order_no": order_rel.get("order_no") if isinstance(order_rel, dict) else None,
+        "order_status": order_rel.get("order_status") if isinstance(order_rel, dict) else (order_rel.get("status") if isinstance(order_rel, dict) else None),
         "order_payment_status": order_rel.get("payment_status") if isinstance(order_rel, dict) else None,
         "customer_name": customer_name,
+        "customer_phone": customer_phone,
         "amount": float(row.get("amount") or 0),
         "method": row.get("method"),
         "status": row.get("status"),
@@ -2700,6 +2839,7 @@ def _map_payment(row: Dict[str, Any]) -> Dict[str, Any]:
         "confirmed_at": row.get("confirmed_at"),
         "reject_reason": row.get("reject_reason"),
         "created_at": row.get("created_at"),
+        "slip_submitted": slip_submitted,
     }
 
 
@@ -2765,6 +2905,11 @@ def _get_payment_row(client: Client, payment_id: str, store_id: str) -> Dict[str
         store_value = row.get("store_id")
         if store_value is not None and str(store_value) != str(store_id):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="store_mismatch")
+    else:
+        order_id = row.get("order_id")
+        if not order_id:
+            raise HTTPException(status_code=500, detail="payment_order_missing")
+        _get_order_row(client, str(order_id), store_id)
     return row
 
 
@@ -2828,32 +2973,57 @@ def list_payments(authorization: Optional[str] = Header(None), store_id: Optiona
     ctx = _get_ctx(authorization)
     store_id_resolved, _role = _resolve_store_id(ctx["memberships"], store_id)
 
-    select_cols = _payment_select_clause(ctx["client"], include_relations=True, include_slip_fields=True)
-    query = ctx["client"].table("payments").select(select_cols).order("created_at", desc=True)
-    if _payments_supports_store_scope(ctx["client"]):
-        query = query.eq("store_id", store_id_resolved)
-    resp = query.execute()
+    all_orders = _fetch_store_orders(ctx["client"], store_id_resolved)
+    if not all_orders:
+        return {"items": [], "payment_queue": [], "store_id": store_id_resolved}
+
+    customer_map, channel_map = _load_order_relation_maps(ctx["client"], store_id_resolved, all_orders)
+    order_map: Dict[str, Dict[str, Any]] = {}
+    for row in all_orders:
+        mapped_order = _map_order(row, customer_map, channel_map)
+        order_map[mapped_order["id"]] = mapped_order
+
+    order_ids = list(order_map.keys())
+    if not order_ids:
+        return {"items": [], "payment_queue": [], "store_id": store_id_resolved}
+
+    select_cols = _payment_select_clause(ctx["client"], include_relations=False, include_slip_fields=True)
+    payments_query = (
+        ctx["client"]
+        .table("payments")
+        .select(select_cols)
+        .in_("order_id", order_ids)
+        .order("created_at", desc=True)
+    )
+    resp = payments_query.execute()
     err = getattr(resp, "error", None)
     if err and _is_missing_column(err, "slip_url"):
-        fallback_cols = _payment_select_clause(ctx["client"], include_relations=True, include_slip_fields=False)
-        fallback_query = ctx["client"].table("payments").select(fallback_cols).order("created_at", desc=True)
-        if _payments_supports_store_scope(ctx["client"]):
-            fallback_query = fallback_query.eq("store_id", store_id_resolved)
-        resp = fallback_query.execute()
-        err = getattr(resp, "error", None)
-    if err and (_is_missing_column(err, "customers") or _is_missing_column(err, "customers.name") or _is_missing_column(err, "customers.display_name")):
-        fallback_cols = _payment_select_clause(ctx["client"], include_relations=False, include_slip_fields=not _is_missing_column(err, "slip_url"))
-        fallback_query = ctx["client"].table("payments").select(fallback_cols).order("created_at", desc=True)
-        if _payments_supports_store_scope(ctx["client"]):
-            fallback_query = fallback_query.eq("store_id", store_id_resolved)
-        resp = fallback_query.execute()
+        fallback_cols = _payment_select_clause(ctx["client"], include_relations=False, include_slip_fields=False)
+        payments_query = (
+            ctx["client"]
+            .table("payments")
+            .select(fallback_cols)
+            .in_("order_id", order_ids)
+            .order("created_at", desc=True)
+        )
+        resp = payments_query.execute()
         err = getattr(resp, "error", None)
     if err:
         raise HTTPException(status_code=500, detail="payment_query_failed")
 
     rows = getattr(resp, "data", None) or []
-    mapped = [_map_payment(r) for r in rows]
-    queue = [p for p in mapped if p.get("status") in {"pending", "pending_review"}]
+    mapped: List[Dict[str, Any]] = []
+    queue: List[Dict[str, Any]] = []
+    for row in rows:
+        oid = str(row.get("order_id")) if row.get("order_id") else None
+        order_ctx = order_map.get(oid) if oid else None
+        payment = _map_payment(row, order_ctx)
+        mapped.append(payment)
+        order_status = (order_ctx or {}).get("status")
+        order_payment_status = (order_ctx or {}).get("payment_status")
+        if payment.get("status") in {"pending", "pending_review"} or order_payment_status == "pending_review" or order_status == "waiting_payment_review":
+            queue.append(payment)
+
     return {"items": mapped, "payment_queue": queue, "store_id": store_id_resolved}
 
 
@@ -2861,7 +3031,7 @@ def list_payments(authorization: Optional[str] = Header(None), store_id: Optiona
 def list_order_payments(order_id: str, authorization: Optional[str] = Header(None), store_id: Optional[str] = None) -> Dict[str, Any]:
     ctx = _get_ctx(authorization)
     store_id_resolved, _role = _resolve_store_id(ctx["memberships"], store_id)
-    _get_order_row(ctx["client"], order_id, store_id_resolved)
+    order_row = _get_order_row(ctx["client"], order_id, store_id_resolved)
 
     select_cols = _payment_select_clause(ctx["client"], include_relations=False, include_slip_fields=True)
     query = ctx["client"].table("payments").select(select_cols).eq("order_id", order_id).order("created_at", desc=True)
@@ -2880,7 +3050,12 @@ def list_order_payments(order_id: str, authorization: Optional[str] = Header(Non
         raise HTTPException(status_code=500, detail="payment_query_failed")
 
     rows = getattr(resp, "data", None) or []
-    return {"items": [_map_payment(r) for r in rows], "order_id": order_id, "store_id": store_id_resolved}
+    order_ctx = {
+        "id": str(order_row.get("id")),
+        "status": order_row.get("status"),
+        "payment_status": order_row.get("payment_status"),
+    }
+    return {"items": [_map_payment(r, order_ctx) for r in rows], "order_id": order_id, "store_id": store_id_resolved}
 
 
 @router.post("/orders/{order_id}/payments")
