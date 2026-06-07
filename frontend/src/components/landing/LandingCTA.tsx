@@ -21,7 +21,7 @@ export default function LandingCTA() {
               id="landing-cta-heading"
               className="text-3xl font-bold tracking-tight md:text-4xl lg:text-5xl"
             >
-              เริ่มจัดการร้านให้เป็นระบบกว่าเดิม
+              เปิดร้านรับออเดอร์ผ่าน LINE OA ได้ง่ายขึ้น
             </h2>
             <p className="mt-4 text-base text-primary-foreground/80 md:text-lg">
               ลองเปิด Valora ดูสักรอบ ดูว่าระบบเข้ากับวิธีการทำงานปัจจุบันของร้านได้แค่ไหน
@@ -31,11 +31,11 @@ export default function LandingCTA() {
             <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
               <Button asChild size="lg" variant="secondary" className="w-full sm:w-auto">
                 <Link
-                  to="/client-access"
+                  to="/order"
                   className="inline-flex items-center gap-2"
-                  aria-label="เข้าสู่ระบบ Valora"
+                  aria-label="เปิดเมนูร้าน / ทดลองสั่งสินค้า"
                 >
-                  เข้าสู่ระบบ
+                  เปิดเมนูร้าน / ทดลองสั่งสินค้า
                   <ArrowRight className="h-4 w-4" aria-hidden />
                 </Link>
               </Button>
@@ -46,12 +46,12 @@ export default function LandingCTA() {
                 className="w-full border-primary-foreground/30 bg-transparent text-primary-foreground hover:bg-primary-foreground/10 hover:text-primary-foreground sm:w-auto"
               >
                 <Link
-                  to="/admin"
+                  to="/client-access"
                   className="inline-flex items-center gap-2"
-                  aria-label="ดูตัวอย่าง Admin Dashboard"
+                  aria-label="เข้าสู่ระบบร้านค้า"
                 >
                   <LayoutDashboard className="h-4 w-4" aria-hidden />
-                  ดู Admin Demo
+                  เข้าสู่ระบบร้านค้า
                 </Link>
               </Button>
             </div>

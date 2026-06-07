@@ -63,20 +63,30 @@ export default function CustomerMenuPage() {
           <Link
             key={m.id}
             to={`/liff/menu/${m.id}`}
-            className="block rounded-xl border bg-white p-4 shadow-sm"
+            className="group block rounded-2xl border bg-white p-4 shadow-sm transition-all hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md active:scale-[0.99]"
           >
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="font-semibold">{m.name}</p>
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="font-semibold leading-snug">{m.name}</p>
                 {m.description ? (
-                  <p className="text-xs text-muted-foreground mt-1">{m.description}</p>
+                  <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{m.description}</p>
+                ) : null}
+                {m.category ? (
+                  <span className="mt-2 inline-flex rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">
+                    {m.category}
+                  </span>
                 ) : null}
               </div>
-              <p className="text-sm font-semibold">฿{m.price.toLocaleString()}</p>
+              <span className="shrink-0 rounded-full bg-primary/10 px-3 py-1 text-sm font-semibold text-primary">
+                ฿{m.price.toLocaleString()}
+              </span>
             </div>
-            {m.category ? (
-              <p className="mt-2 text-xs text-muted-foreground">หมวด: {m.category}</p>
-            ) : null}
+            <div className="mt-3 flex items-center justify-end">
+              <span className="inline-flex items-center gap-1 text-sm font-semibold text-primary">
+                เลือกเมนูนี้
+                <span aria-hidden className="transition-transform group-hover:translate-x-0.5">→</span>
+              </span>
+            </div>
           </Link>
         ))}
       </div>
@@ -84,9 +94,29 @@ export default function CustomerMenuPage() {
   }, [loading, error, menus]);
 
   return (
-    <div className="max-w-md mx-auto p-4 space-y-4">
-      <h1 className="text-xl font-bold">เมนูสำหรับสั่งรับหน้าร้าน</h1>
-      <p className="text-sm text-muted-foreground">เลือกเมนูที่ต้องการ แล้วกดเพิ่มในตะกร้า</p>
+    <div className="mx-auto max-w-md space-y-4 p-4">
+      <div className="space-y-1">
+        <h1 className="text-xl font-bold">เมนูร้าน</h1>
+        <p className="text-sm text-muted-foreground">
+          เลือกเมนูที่ต้องการ แล้วกดเพิ่มลงตะกร้าได้เลย ไม่ต้องสมัครหรือล็อกอิน
+        </p>
+      </div>
+
+      <div className="flex gap-2">
+        <Link
+          to="/liff/cart"
+          className="flex-1 rounded-full border border-primary/40 px-4 py-2 text-center text-sm font-semibold text-primary"
+        >
+          ดูตะกร้า
+        </Link>
+        <Link
+          to="/order/status"
+          className="flex-1 rounded-full border px-4 py-2 text-center text-sm font-semibold text-muted-foreground"
+        >
+          เช็กสถานะออเดอร์
+        </Link>
+      </div>
+
       {content}
     </div>
   );

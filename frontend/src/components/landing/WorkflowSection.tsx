@@ -10,14 +10,14 @@ import {
 } from "lucide-react";
 
 const flow = [
-  { icon: MessageCircle, label: "LINE OA", note: "ลูกค้าทักร้าน (เสริม)" },
-  { icon: Smartphone, label: "/order", note: "เปิดเมนูออนไลน์และสั่งได้ทันที" },
-  { icon: ShoppingBag, label: "Create Order", note: "เลือกของ + สรุปยอด" },
-  { icon: Receipt, label: "Upload Slip", note: "โอนเงิน + แนบสลิป" },
-  { icon: ClipboardCheck, label: "Admin Approve", note: "ตรวจสลิปด้วยมือ" },
-  { icon: ChefHat, label: "Prepare", note: "ร้านเริ่มเตรียม" },
-  { icon: BadgeCheck, label: "Ready", note: "พร้อมรับ / ส่ง" },
-  { icon: BadgeCheck, label: "Profit Summary", note: "สรุปยอด + กำไร" },
+  { icon: MessageCircle, label: "LINE OA", note: "ลูกค้ากดลิงก์จาก Rich Menu" },
+  { icon: Smartphone, label: "เปิดเมนูร้าน", note: "เปิดหน้าสั่งได้ทันที" },
+  { icon: ShoppingBag, label: "สร้างออเดอร์", note: "เลือกของ + สรุปยอด" },
+  { icon: Receipt, label: "อัปโหลดสลิป", note: "โอนเงิน + แนบสลิป" },
+  { icon: ClipboardCheck, label: "ร้านยืนยัน", note: "ตรวจสลิปด้วยมือ" },
+  { icon: ChefHat, label: "กำลังเตรียม", note: "ร้านเริ่มเตรียม" },
+  { icon: BadgeCheck, label: "พร้อมรับ", note: "พร้อมรับ / ส่ง" },
+  { icon: BadgeCheck, label: "สรุปยอด", note: "สรุปยอด + กำไร" },
 ];
 
 export default function WorkflowSection() {
@@ -36,10 +36,10 @@ export default function WorkflowSection() {
             id="workflow-heading"
             className="text-3xl font-bold tracking-tight text-foreground md:text-4xl"
           >
-            จากลูกค้าทักไลน์ ถึงสรุปกำไร ในไม่กี่ขั้นตอน
+            จากลูกค้ากดลิงก์ ถึงสรุปกำไร ในไม่กี่ขั้นตอน
           </h2>
           <p className="mt-4 text-base text-muted-foreground md:text-lg">
-            เห็นภาพรวมว่าระบบเชื่อมต่อกันยังไง ตั้งแต่ลูกค้าเปิดเมนูจนกระทั่งร้านปิดยอดของวัน
+            วางลิงก์หน้า ร้านไว้ใน Rich Menu ของ LINE OA ลูกค้ากดเข้ามาสั่งได้ทันที ไม่ต้องล็อกอิน ส่วนร้านตรวจสลิปและจัดคิวในหลังบ้าน
           </p>
         </div>
 
@@ -76,7 +76,7 @@ export default function WorkflowSection() {
           </div>
 
           <p className="mt-6 text-center text-xs text-muted-foreground">
-            สถานะออเดอร์: pending_payment → waiting_payment_review → accepted → preparing → ready → completed
+            รับออเดอร์แล้ว → รอชำระเงิน/รอตรวจสลิป → ยืนยันแล้ว → กำลังเตรียม → พร้อมรับ / เสร็จสิ้น
           </p>
         </div>
       </div>

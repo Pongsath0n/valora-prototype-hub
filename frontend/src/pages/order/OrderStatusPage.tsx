@@ -6,18 +6,53 @@ import { customerApi, type OrderStatusSummary } from "@/services/customerApi";
 import { getLastOrderNo, getLastOrderToken, setLastOrderNo, setLastOrderToken } from "@/services/cartStorage";
 
 const TIMELINE: { key: string; label: string }[] = [
-  { key: "pending_payment", label: "รอชำระเงิน" },
-  { key: "waiting_payment_review", label: "รอตรวจสอบสลิป" },
-  { key: "accepted", label: "ร้านรับออเดอร์" },
+  { key: "received", label: "รับออเดอร์แล้ว" },
+  { key: "payment", label: "รอชำระเงิน / รอตรวจสลิป" },
+  { key: "confirmed", label: "ยืนยันแล้ว" },
   { key: "preparing", label: "กำลังเตรียม" },
-  { key: "ready", label: "พร้อมรับ" },
-  { key: "completed", label: "รับเรียบร้อย" },
+  { key: "ready", label: "พร้อมรับ / เสร็จสิ้น" },
 ];
 
 const EXTRA_STATUS_LABELS: Record<string, string> = {
+  pending_payment: "รอชำระเงิน",
+  waiting_payment_review: "รอตรวจสลิป",
+  accepted: "ยืนยันแล้ว",
+  preparing: "กำลังเตรียม",
+  ready: "พร้อมรับ",
+  completed: "เสร็จสิ้น",
   cancelled: "ยกเลิกแล้ว",
   paid: "ชำระเงินแล้ว",
 };
+
+const PAYMENT_STATUS_LABELS: Record<string, string> = {
+  pending: "รอชำระเงิน",
+  unpaid: "รอชำระเงิน",
+  pending_review: "รอตรวจสลิป",
+  paid: "ชำระเงินแล้ว",
+  rejected: "สลิปไม่ผ่าน",
+};
+
+function paymentStatusLabel(value: string | undefined | null): string {
+  const key = (value || "").toLowerCase();
+  return PAYMENT_STATUS_LABELS[key] ?? value ?? "-";
+}
+
+function timelineIndexForStatus(status: string): number {
+  switch (status) {
+    case "pending_payment":
+    case "waiting_payment_review":
+      return 1;
+    case "accepted":
+      return 2;
+    case "preparing":
+      return 3;
+    case "ready":
+    case "completed":
+      return 4;
+    default:
+      return 0;
+  }
+}
 
 function formatCurrency(value: number): string {
   return new Intl.NumberFormat("th-TH", {
@@ -157,6 +192,7 @@ export default function OrderStatusPage() {
 
   const isPendingReview = statusData?.payment?.status?.toLowerCase() === "pending_review";
   const isPaid = statusData?.payment?.status?.toLowerCase() === "paid";
+  const isRejected = statusData?.payment?.status?.toLowerCase() === "rejected";
   const hasSubmittedSlip = Boolean(statusData?.payment?.slip_submitted);
 
   function renderInstructionCard() {
@@ -260,32 +296,129 @@ export default function OrderStatusPage() {
   }
 
   const normalizedStatus = normalizeStatus(statusData?.order_status);
+  const isCancelled = normalizedStatus === "cancelled";
+  const isCompleted = normalizedStatus === "completed";
   const timelineSteps = useMemo(() => {
-    const steps = [...TIMELINE];
-    if (!steps.find((step) => step.key === "cancelled")) {
-      steps.push({ key: "cancelled", label: EXTRA_STATUS_LABELS.cancelled });
-    }
-    const index = steps.findIndex((step) => step.key === normalizedStatus);
-    return steps.map((step, idx) => ({
+    const index = timelineIndexForStatus(normalizedStatus);
+    return TIMELINE.map((step, idx) => ({
       ...step,
-      active: index === idx,
-      completed: index > idx,
+      active: !isCompleted && index === idx,
+      completed: isCompleted ? true : index > idx,
     }));
-  }, [normalizedStatus]);
+  }, [normalizedStatus, isCompleted]);
+
+  const banner = useMemo(() => {
+    if (!statusData) return null;
+    if (isCancelled) {
+      return {
+        tone: "muted" as const,
+        title: "ออเดอร์นี้ถูกยกเลิกแล้ว",
+        desc: "หากต้องการสั่งใหม่ กรุณาเปิดเมนูร้านอีกครั้ง",
+        anim: "",
+      };
+    }
+    if (isPaid && (normalizedStatus === "ready" || isCompleted)) {
+      return {
+        tone: "success" as const,
+        title: isCompleted ? "เสร็จสิ้น ขอบคุณที่อุดหนุน" : "ออเดอร์พร้อมรับแล้ว",
+        desc: "ยืนยันการชำระเงินแล้ว และร้านเตรียมออเดอร์เสร็จเรียบร้อย",
+        anim: "animate-check-pop",
+      };
+    }
+    if (isPaid) {
+      return {
+        tone: "success" as const,
+        title: "ยืนยันการชำระเงินแล้ว",
+        desc: "ร้านกำลังเตรียมออเดอร์ของคุณ ติดตามสถานะได้ที่ไทม์ไลน์ด้านล่าง",
+        anim: "animate-check-pop",
+      };
+    }
+    if (isRejected) {
+      return {
+        tone: "danger" as const,
+        title: "สลิปไม่ผ่านการตรวจสอบ",
+        desc: statusData.payment?.reject_reason
+          ? `เหตุผล: ${statusData.payment.reject_reason}`
+          : "กรุณาตรวจสอบยอดโอนและอัปโหลดสลิปใหม่อีกครั้ง",
+        anim: "animate-gentle-shake",
+      };
+    }
+    if (isPendingReview) {
+      return {
+        tone: "info" as const,
+        title: "ร้านกำลังตรวจสอบสลิปของคุณ",
+        desc: "โปรดรอสักครู่ ระบบจะอัปเดตสถานะเมื่อร้านยืนยัน",
+        anim: "animate-soft-pulse",
+      };
+    }
+    return {
+      tone: "warning" as const,
+      title: "กรุณาชำระเงินและอัปโหลดสลิป",
+      desc: "โอนเงินตามช่องทางด้านล่าง แล้วแนบสลิปเพื่อให้ร้านตรวจสอบ",
+      anim: "animate-soft-pulse",
+    };
+  }, [statusData, isCancelled, isCompleted, isPaid, isRejected, isPendingReview, normalizedStatus]);
 
   return (
     <div className="mx-auto max-w-3xl space-y-6 px-4 py-8">
       <header className="space-y-2 text-center">
-        <p className="text-sm font-semibold text-primary/80">Web-first Ordering</p>
-        <h1 className="text-3xl font-bold tracking-tight">ติดตามสถานะออเดอร์</h1>
+        <p className="text-sm font-semibold text-primary/80">ติดตามออเดอร์ของคุณ</p>
+        <h1 className="text-3xl font-bold tracking-tight">สถานะออเดอร์</h1>
         <p className="text-sm text-muted-foreground">
-          กรอกเลขออเดอร์หรือใช้ลิงก์สถานะเพื่อดูความคืบหน้าการเตรียมสินค้าและการชำระเงิน
+          ดูความคืบหน้าการเตรียมสินค้า ชำระเงิน และอัปโหลดสลิปได้จากหน้านี้
         </p>
       </header>
 
       {error ? (
         <div className="rounded-2xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
           {error}
+        </div>
+      ) : null}
+
+      {banner ? (
+        <div
+          className={cn(
+            "rounded-2xl border p-4 shadow-sm",
+            banner.anim,
+            banner.tone === "success" && "border-emerald-200 bg-emerald-50",
+            banner.tone === "info" && "border-sky-200 bg-sky-50",
+            banner.tone === "warning" && "border-amber-200 bg-amber-50",
+            banner.tone === "danger" && "border-destructive/30 bg-destructive/5",
+            banner.tone === "muted" && "border-border bg-muted/40",
+          )}
+          role="status"
+          aria-live="polite"
+        >
+          <div className="flex items-start gap-3">
+            <span
+              className={cn(
+                "flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-lg font-bold",
+                banner.tone === "success" && "bg-emerald-100 text-emerald-700 animate-check-pop",
+                banner.tone === "info" && "bg-sky-100 text-sky-700",
+                banner.tone === "warning" && "bg-amber-100 text-amber-700",
+                banner.tone === "danger" && "bg-destructive/10 text-destructive",
+                banner.tone === "muted" && "bg-muted text-muted-foreground",
+              )}
+              aria-hidden
+            >
+              {banner.tone === "success" ? "✓" : banner.tone === "danger" ? "!" : banner.tone === "muted" ? "–" : "•"}
+            </span>
+            <div className="min-w-0">
+              <p
+                className={cn(
+                  "text-base font-semibold",
+                  banner.tone === "success" && "text-emerald-800",
+                  banner.tone === "info" && "text-sky-800",
+                  banner.tone === "warning" && "text-amber-800",
+                  banner.tone === "danger" && "text-destructive",
+                  banner.tone === "muted" && "text-foreground",
+                )}
+              >
+                {banner.title}
+              </p>
+              <p className="mt-0.5 text-sm text-muted-foreground">{banner.desc}</p>
+            </div>
+          </div>
         </div>
       ) : null}
 
@@ -330,29 +463,52 @@ export default function OrderStatusPage() {
                 {EXTRA_STATUS_LABELS[normalizedStatus] ?? statusData.order_status}
               </span>
               <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-800">
-                {statusData.payment_status}
+                {paymentStatusLabel(statusData.payment_status)}
               </span>
             </div>
 
-            <div className="space-y-2">
-              {timelineSteps.map((step) => (
-                <div key={step.key} className="flex items-center gap-3">
-                  <span
+            <ol className="relative space-y-1">
+              {timelineSteps.map((step, idx) => (
+                <li key={step.key} className="flex items-stretch gap-3">
+                  <div className="flex flex-col items-center">
+                    <span
+                      className={cn(
+                        "flex h-7 w-7 items-center justify-center rounded-full text-xs font-semibold transition-colors",
+                        step.active
+                          ? "bg-primary text-primary-foreground animate-ring-pulse"
+                          : step.completed
+                            ? "bg-primary/20 text-primary animate-check-pop"
+                            : "bg-muted text-muted-foreground",
+                      )}
+                      aria-current={step.active ? "step" : undefined}
+                    >
+                      {step.completed ? "✓" : step.active ? "•" : idx + 1}
+                    </span>
+                    {idx < timelineSteps.length - 1 ? (
+                      <span
+                        className={cn(
+                          "my-1 w-0.5 flex-1",
+                          step.completed ? "bg-primary/30" : "bg-muted",
+                        )}
+                        aria-hidden
+                      />
+                    ) : null}
+                  </div>
+                  <p
                     className={cn(
-                      "flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold",
+                      "py-0.5 text-sm",
                       step.active
-                        ? "bg-primary text-primary-foreground animate-pulse"
+                        ? "font-semibold text-foreground"
                         : step.completed
-                          ? "bg-primary/20 text-primary"
-                          : "bg-muted text-muted-foreground",
+                          ? "font-medium text-foreground/80"
+                          : "text-muted-foreground",
                     )}
                   >
-                    {step.completed ? "✓" : step.active ? "•" : ""}
-                  </span>
-                  <p className="text-sm font-medium text-muted-foreground">{step.label}</p>
-                </div>
+                    {step.label}
+                  </p>
+                </li>
               ))}
-            </div>
+            </ol>
           </div>
         ) : (
           <div className="space-y-2 text-center text-sm text-muted-foreground">
@@ -393,7 +549,7 @@ export default function OrderStatusPage() {
             <div className="mt-3 grid gap-3 md:grid-cols-2">
               <div className="rounded-xl bg-muted/40 p-3 text-sm">
                 <p className="text-muted-foreground">สถานะการชำระเงิน</p>
-                <p className="text-base font-semibold capitalize">{statusData.payment.status}</p>
+                <p className="text-base font-semibold">{paymentStatusLabel(statusData.payment.status)}</p>
                 <p className="text-xs text-muted-foreground">
                   {statusData.payment.slip_submitted
                     ? `แนบล่าสุดเมื่อ ${statusData.payment.last_submitted_at ?? "-"}`
@@ -415,7 +571,14 @@ export default function OrderStatusPage() {
             </div>
           </div>
 
-          {renderInstructionCard()}
+          <div
+            className={cn(
+              "rounded-2xl",
+              !isPaid && !isPendingReview && canUploadSlip && "animate-soft-pulse ring-2 ring-amber-200 ring-offset-2",
+            )}
+          >
+            {renderInstructionCard()}
+          </div>
 
           {instructions?.enabled ? (
             <div className="rounded-2xl border bg-white p-5 shadow-sm">
@@ -425,11 +588,28 @@ export default function OrderStatusPage() {
                   ร้านยืนยันการชำระเงินแล้ว ขอบคุณค่ะ
                 </p>
               ) : isPendingReview && hasSubmittedSlip ? (
-                <p className="mt-2 rounded-xl bg-amber-50 px-4 py-2 text-sm text-amber-800">
-                  ร้านได้รับสลิปแล้ว กำลังตรวจสอบ โปรดรอการยืนยัน
-                </p>
+                <div className="mt-3 overflow-hidden rounded-xl border border-sky-200 bg-sky-50 p-4">
+                  <div className="flex items-center gap-2 text-sm font-medium text-sky-800">
+                    <span className="flex h-2.5 w-2.5 animate-soft-pulse rounded-full bg-sky-500" aria-hidden />
+                    ร้านกำลังตรวจสอบสลิปของคุณ
+                  </div>
+                  <div className="relative mt-3 h-2 overflow-hidden rounded-full bg-sky-100">
+                    <div className="absolute inset-y-0 left-0 w-1/3 animate-shimmer rounded-full bg-gradient-to-r from-transparent via-sky-300 to-transparent" />
+                  </div>
+                  <p className="mt-2 text-xs text-sky-700/80">ระบบจะอัปเดตสถานะให้อัตโนมัติเมื่อร้านยืนยัน</p>
+                </div>
               ) : canUploadSlip ? (
                 <form onSubmit={handleUpload} className="mt-3 space-y-3">
+                  {isRejected ? (
+                    <div className="animate-gentle-shake rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+                      <p className="font-semibold">สลิปไม่ผ่านการตรวจสอบ</p>
+                      <p className="mt-0.5 text-xs">
+                        {statusData.payment.reject_reason
+                          ? `เหตุผล: ${statusData.payment.reject_reason}`
+                          : "กรุณาตรวจสอบยอดโอนและอัปโหลดสลิปใหม่อีกครั้ง"}
+                      </p>
+                    </div>
+                  ) : null}
                   <input
                     type="file"
                     accept={(instructions?.allowed_file_types ?? []).join(",")}
@@ -447,7 +627,11 @@ export default function OrderStatusPage() {
                     disabled={uploadState === "uploading" || !selectedFile}
                     className="inline-flex w-full items-center justify-center rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-60"
                   >
-                    {uploadState === "uploading" ? "กำลังอัปโหลด..." : "ส่งหลักฐานการโอน"}
+                    {uploadState === "uploading"
+                      ? "กำลังอัปโหลด..."
+                      : isRejected
+                        ? "อัปโหลดสลิปใหม่อีกครั้ง"
+                        : "ส่งหลักฐานการโอน"}
                   </button>
                 </form>
               ) : (

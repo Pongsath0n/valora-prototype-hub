@@ -6,7 +6,7 @@ const productLinks = [
   { href: "#features", label: "ฟีเจอร์" },
   { href: "#workflow", label: "ขั้นตอนใช้งาน" },
   { href: "#use-cases", label: "เหมาะกับใคร" },
-  { href: "#transparency", label: "ความโปร่งใส Phase 1" },
+  { href: "#transparency", label: "พูดตรงไปตรงมา" },
 ];
 
 export default function LandingFooter() {
@@ -21,8 +21,8 @@ export default function LandingFooter() {
           <div>
             <LogoBrand size="sm" />
             <p className="mt-4 max-w-sm text-sm leading-relaxed text-muted-foreground">
-              POS + Profit Control + LINE OA Order Engine สำหรับร้านเล็ก
-              ที่อยากเห็นกำไรจริงและจัดการออเดอร์ได้ในระบบเดียว
+              ระบบรับออเดอร์ออนไลน์สำหรับร้านเล็กที่ขายผ่าน LINE OA
+              ลูกค้าสั่งเอง ร้านตรวจสลิปและเห็นกำไรจริงได้ในหลังบ้านเดียว
             </p>
           </div>
 
@@ -51,10 +51,10 @@ export default function LandingFooter() {
               </li>
               <li>
                 <Link
-                  to="/admin"
+                  to="/order"
                   className="text-foreground/80 transition-colors hover:text-foreground"
                 >
-                  ดู Admin Demo
+                  เปิดเมนูร้าน
                 </Link>
               </li>
             </ul>

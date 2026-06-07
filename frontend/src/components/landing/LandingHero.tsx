@@ -3,9 +3,9 @@ import { ArrowRight, CheckCircle2, LayoutDashboard, MessageCircle, Sparkles } fr
 import { Button } from "@/components/ui/button";
 
 const trustPoints = [
-  "เริ่มใช้ได้ทันที ไม่ต้องลงโปรแกรม",
+  "ลูกค้าสั่งเองได้ ไม่ต้องสมัครหรือล็อกอิน",
   "เห็นต้นทุน–กำไรต่อเมนูจริง",
-  "รองรับลูกค้าสั่งผ่าน LINE OA",
+  "เปิดร้านผ่าน LINE OA ได้ทันที",
 ];
 
 const metrics = [
@@ -54,7 +54,7 @@ export default function LandingHero() {
         <div className="mx-auto max-w-3xl text-center">
           <p className="mb-5 inline-flex items-center gap-2 rounded-full border border-accent/30 bg-accent/10 px-3 py-1 text-xs font-medium text-foreground">
             <Sparkles className="h-3.5 w-3.5 text-accent" aria-hidden />
-            POS + Profit Control + LINE OA Order Engine
+            ระบบรับออเดอร์ออนไลน์สำหรับร้านเล็กที่ขายผ่าน LINE OA
           </p>
 
           <h1
@@ -62,13 +62,13 @@ export default function LandingHero() {
             className="text-4xl font-bold tracking-tight text-foreground md:text-5xl lg:text-6xl"
             style={{ lineHeight: 1.25 }}
           >
-            จัดการออเดอร์ <span className="text-accent">เห็นกำไรจริง</span>
-            <br className="hidden sm:block" /> เชื่อม LINE OA ได้ในระบบเดียว
+            ลูกค้าสั่งเอง <span className="text-accent">โอนเอง อัปโหลดสลิปเอง</span>
+            <br className="hidden sm:block" /> ร้านตรวจสลิปและดูกำไรในที่เดียว
           </h1>
 
           <p className="mx-auto mt-6 max-w-2xl text-base text-muted-foreground md:text-lg">
-            Valora ช่วยร้านเล็กจัดการออเดอร์ ตรวจสลิป และดูต้นทุน–กำไรต่อเมนูได้ง่ายขึ้น
-            ออกแบบมาให้เจ้าของร้านใช้คนเดียวก็ไหว
+            ลูกค้ากดลิงก์จาก LINE OA สั่งสินค้า โอนเงิน อัปโหลดสลิป และติดตามสถานะได้เอง
+            ส่วนร้านตรวจสลิป จัดคิว และติดตามยอดขาย/กำไรต่อเมนูได้ในหลังบ้านเดียว
           </p>
 
           <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
@@ -86,12 +86,21 @@ export default function LandingHero() {
               <Link
                 to="/client-access"
                 className="inline-flex items-center gap-2"
-                aria-label="เข้าสู่ระบบผู้ดูแลระบบ"
+                aria-label="เข้าสู่ระบบร้านค้า"
               >
                 <LayoutDashboard className="h-4 w-4" aria-hidden />
-                เข้าสู่ระบบผู้ดูแลระบบ
+                เข้าสู่ระบบร้านค้า
               </Link>
             </Button>
+          </div>
+
+          <div className="mt-3">
+            <Link
+              to="/order/status"
+              className="text-sm font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+            >
+              เช็กสถานะออเดอร์ที่สั่งไว้
+            </Link>
           </div>
 
           <ul className="mx-auto mt-8 flex max-w-2xl flex-wrap items-center justify-center gap-x-6 gap-y-2 text-sm text-muted-foreground">
@@ -120,7 +129,7 @@ export default function LandingHero() {
                   <span className="h-2.5 w-2.5 rounded-full bg-destructive/70" aria-hidden />
                   <span className="h-2.5 w-2.5 rounded-full bg-warning/70" aria-hidden />
                   <span className="h-2.5 w-2.5 rounded-full bg-success/70" aria-hidden />
-                  <span className="ml-3 text-xs text-muted-foreground">valora.app/admin</span>
+                  <span className="ml-3 text-xs text-muted-foreground">valora.app/store-admin</span>
                 </div>
                 <span className="hidden text-xs text-muted-foreground sm:inline">
                   วันนี้ • อัปเดตล่าสุด 09:42

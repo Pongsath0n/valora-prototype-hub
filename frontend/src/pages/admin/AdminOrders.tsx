@@ -14,12 +14,12 @@ import { PaymentSlipPreviewModal } from "@/components/admin/PaymentSlipPreviewMo
 type TabKey = "queue" | "payments" | "preparing" | "ready" | "completed" | "cancelled";
 
 const statusTabs: { key: TabKey; label: string; filter: string[] }[] = [
-  { key: "queue", label: "Order Queue", filter: ["pending_payment", "waiting_payment_review", "accepted", "preparing", "ready"] },
-  { key: "payments", label: "Payment Queue", filter: ["waiting_payment_review"] },
-  { key: "preparing", label: "Preparing", filter: ["preparing"] },
-  { key: "ready", label: "Ready for Pickup", filter: ["ready"] },
-  { key: "completed", label: "Completed", filter: ["completed"] },
-  { key: "cancelled", label: "Cancelled", filter: ["cancelled"] },
+  { key: "queue", label: "คิวออเดอร์", filter: ["pending_payment", "waiting_payment_review", "accepted", "preparing", "ready"] },
+  { key: "payments", label: "รายการรอตรวจสลิป", filter: ["waiting_payment_review"] },
+  { key: "preparing", label: "กำลังเตรียม", filter: ["preparing"] },
+  { key: "ready", label: "พร้อมรับ", filter: ["ready"] },
+  { key: "completed", label: "เสร็จสิ้น", filter: ["completed"] },
+  { key: "cancelled", label: "ยกเลิกแล้ว", filter: ["cancelled"] },
 ];
 
 const nextStatusByCurrent: Record<string, string[]> = {

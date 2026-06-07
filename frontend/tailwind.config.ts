@@ -98,11 +98,38 @@ export default {
           from: { opacity: "0", transform: "translateY(8px)" },
           to: { opacity: "1", transform: "translateY(0)" },
         },
+        shimmer: {
+          "100%": { transform: "translateX(100%)" },
+        },
+        "soft-pulse": {
+          "0%, 100%": { opacity: "1" },
+          "50%": { opacity: "0.55" },
+        },
+        "gentle-shake": {
+          "0%, 100%": { transform: "translateX(0)" },
+          "20%, 60%": { transform: "translateX(-3px)" },
+          "40%, 80%": { transform: "translateX(3px)" },
+        },
+        "check-pop": {
+          "0%": { transform: "scale(0)", opacity: "0" },
+          "60%": { transform: "scale(1.15)", opacity: "1" },
+          "100%": { transform: "scale(1)", opacity: "1" },
+        },
+        "ring-pulse": {
+          "0%": { boxShadow: "0 0 0 0 hsl(var(--accent) / 0.45)" },
+          "70%": { boxShadow: "0 0 0 8px hsl(var(--accent) / 0)" },
+          "100%": { boxShadow: "0 0 0 0 hsl(var(--accent) / 0)" },
+        },
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
         "accordion-up": "accordion-up 0.2s ease-out",
         "fade-in": "fade-in 0.4s ease-out",
+        shimmer: "shimmer 1.6s infinite",
+        "soft-pulse": "soft-pulse 2s ease-in-out infinite",
+        "gentle-shake": "gentle-shake 0.5s ease-in-out",
+        "check-pop": "check-pop 0.45s ease-out",
+        "ring-pulse": "ring-pulse 1.8s ease-out infinite",
       },
     },
   },
