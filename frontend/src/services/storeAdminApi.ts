@@ -182,6 +182,43 @@ export type ApiOrder = {
   latest_payment?: LatestPaymentSummary | null;
 };
 
+export type DashboardQueueStatus =
+  | "pending_payment"
+  | "waiting_payment_review"
+  | "accepted"
+  | "preparing"
+  | "ready"
+  | "ready_for_pickup"
+  | "completed"
+  | "cancelled";
+
+export type DashboardRecentOrder = {
+  order_id?: string | null;
+  order_no?: string | null;
+  customer_name?: string | null;
+  customer_phone?: string | null;
+  status?: string | null;
+  order_status?: string | null;
+  payment_status?: string | null;
+  total_amount?: number | null;
+  created_at?: string | null;
+  latest_payment?: LatestPaymentSummary | null;
+};
+
+export type DashboardSummaryResponse = {
+  store_id: string;
+  store_timezone?: string | null;
+  today_orders_count: number;
+  confirmed_revenue_today: number;
+  pending_revenue_today: number;
+  pending_payment_review_count: number;
+  paid_orders_count: number;
+  active_orders_count: number;
+  completed_orders_count: number;
+  queues: Record<DashboardQueueStatus | string, number>;
+  recent_orders: DashboardRecentOrder[];
+};
+
 export type OrderPayload = {
   customer_id?: string | null;
   channel_id?: string | null;
@@ -329,6 +366,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const storeAdminApi = {
+  async getDashboardSummary(): Promise<DashboardSummaryResponse> {
+    return request("/api/store-admin/dashboard-summary");
+  },
+
   async listSalesChannels(): Promise<ApiSalesChannel[]> {
     const data = await request<{ items: ApiSalesChannel[] }>("/api/store-admin/channels");
     return data.items ?? [];

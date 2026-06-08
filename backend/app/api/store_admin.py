@@ -1,12 +1,17 @@
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple, Literal, Set
 from uuid import uuid4
 
 from fastapi import APIRouter, Header, HTTPException, status
 from pydantic import BaseModel
 from supabase import Client
+
+try:  # Python 3.9+
+    from zoneinfo import ZoneInfo  # type: ignore
+except Exception:  # pragma: no cover
+    ZoneInfo = None  # type: ignore
 
 from app.core.config import settings
 from app.core.supabase import SupabaseConfigurationError, get_supabase_admin_client
@@ -32,6 +37,19 @@ OrderStatus = Literal[
     "cancelled",
 ]
 PaymentStatus = Literal["unpaid", "pending", "pending_review", "paid", "rejected", "refunded"]
+
+_DASHBOARD_QUEUE_STATUSES: List[str] = [
+    "pending_payment",
+    "waiting_payment_review",
+    "accepted",
+    "preparing",
+    "ready",
+    "ready_for_pickup",
+    "completed",
+    "cancelled",
+]
+_FINALIZED_ORDER_STATUSES: Set[str] = {"completed", "cancelled"}
+_RECENT_ORDERS_LIMIT = 10
 
 
 class SalesChannelCreate(BaseModel):
@@ -539,6 +557,61 @@ def _omit_optional_fields(data: Dict[str, Any], optional_keys: List[str]) -> Dic
 
 def _clean_optional(data: Dict[str, Any]) -> Dict[str, Any]:
     return {k: v for k, v in data.items() if v is not None}
+
+
+def _get_store_timezone(client: Client, store_id: str) -> Optional[str]:
+    try:
+        resp = client.table("stores").select("timezone").eq("id", store_id).limit(1).execute()
+    except Exception:
+        return None
+    error = getattr(resp, "error", None)
+    if error:
+        if _is_missing_column(error, "timezone"):
+            return None
+        return None
+    rows = getattr(resp, "data", None) or []
+    tz_value = rows[0].get("timezone") if rows else None
+    if tz_value:
+        return str(tz_value)
+    return None
+
+
+def _today_range(store_tz: Optional[str]) -> Tuple[datetime, datetime]:
+    tzinfo = None
+    if store_tz and ZoneInfo is not None:
+        try:
+            tzinfo = ZoneInfo(store_tz)
+        except Exception:
+            tzinfo = None
+    if tzinfo is None:
+        tzinfo = timezone.utc
+
+    now = datetime.now(tzinfo)
+    start = datetime(year=now.year, month=now.month, day=now.day, tzinfo=tzinfo)
+    end = start + timedelta(days=1)
+    return start, end
+
+
+def _parse_float(value: Any) -> float:
+    try:
+        return float(value)
+    except Exception:
+        return 0.0
+
+
+def _parse_iso_datetime(value: Any) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        text = str(value)
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        dt = datetime.fromisoformat(text)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except Exception:
+        return None
 
 
 def _sanitize_channel_payload(payload: SalesChannelCreate | SalesChannelUpdate, partial: bool = False) -> Dict[str, Any]:
@@ -2120,6 +2193,120 @@ def _fetch_store_orders(client: Client, store_id: str) -> List[Dict[str, Any]]:
             use_channel_fee = False
             continue
         raise HTTPException(status_code=500, detail="order_query_failed")
+
+
+def _load_orders_for_dashboard(client: Client, store_id: str) -> List[Dict[str, Any]]:
+    rows = _fetch_store_orders(client, store_id)
+    if not rows:
+        return []
+
+    customer_map, channel_map = _load_order_relation_maps(client, store_id, rows)
+    order_ids = [str(r.get("id")) for r in rows if r.get("id")]
+    latest_payments = _load_latest_payments(client, order_ids)
+
+    mapped: List[Dict[str, Any]] = []
+    for row in rows:
+        oid = str(row.get("id")) if row.get("id") else None
+        mapped.append(_map_order(row, customer_map, channel_map, latest_payments.get(oid) if oid else None))
+    return mapped
+
+
+def _map_recent_order(order: Dict[str, Any]) -> Dict[str, Any]:
+    order_id = str(order.get("id")) if order.get("id") else None
+    order_no = order.get("order_no") or order.get("order_number") or _make_fallback_label("Order", order_id)
+    order_status = order.get("order_status") or order.get("status")
+    return {
+        "order_id": order_id,
+        "order_no": order_no,
+        "customer_name": order.get("customer_name") or _make_fallback_label("Customer", order.get("customer_id")),
+        "customer_phone": order.get("customer_phone") or "-",
+        "status": order.get("status"),
+        "order_status": order_status,
+        "payment_status": order.get("payment_status"),
+        "total_amount": _parse_float(order.get("total_amount")),
+        "created_at": order.get("created_at"),
+        "latest_payment": order.get("latest_payment"),
+    }
+
+
+def _build_dashboard_summary(orders: List[Dict[str, Any]], today_start: datetime, today_end: datetime) -> Dict[str, Any]:
+    tzinfo = today_start.tzinfo or timezone.utc
+    queue_counts: Dict[str, int] = {status: 0 for status in _DASHBOARD_QUEUE_STATUSES}
+    today_orders_count = 0
+    confirmed_revenue_today = 0.0
+    pending_revenue_today = 0.0
+    pending_payment_review_count = 0
+    paid_orders_count = 0
+    active_orders_count = 0
+    completed_orders_count = 0
+    recent_candidates: List[Tuple[datetime, Dict[str, Any]]] = []
+    default_dt = datetime.min.replace(tzinfo=timezone.utc)
+
+    for order in orders:
+        status_value = str(order.get("status") or order.get("order_status") or "").strip()
+        payment_status_value = str(order.get("payment_status") or "").strip().lower()
+        created_dt = _parse_iso_datetime(order.get("created_at"))
+        created_in_tz = created_dt.astimezone(tzinfo) if created_dt else None
+        is_today = bool(created_in_tz and today_start <= created_in_tz < today_end)
+
+        if is_today:
+            today_orders_count += 1
+            amount = _parse_float(order.get("total_amount"))
+            if payment_status_value == "paid":
+                confirmed_revenue_today += amount
+            elif payment_status_value == "pending_review":
+                pending_revenue_today += amount
+
+        if payment_status_value == "pending_review" or status_value == "waiting_payment_review":
+            pending_payment_review_count += 1
+
+        if payment_status_value == "paid":
+            paid_orders_count += 1
+
+        if status_value and status_value not in _FINALIZED_ORDER_STATUSES:
+            active_orders_count += 1
+
+        if status_value == "completed":
+            completed_orders_count += 1
+
+        if status_value in queue_counts:
+            queue_counts[status_value] += 1
+
+        recent_candidates.append((created_in_tz or default_dt, order))
+
+    recent_candidates.sort(key=lambda item: item[0], reverse=True)
+    recent_orders = [_map_recent_order(order) for _, order in recent_candidates[:_RECENT_ORDERS_LIMIT]]
+
+    return {
+        "today_orders_count": today_orders_count,
+        "confirmed_revenue_today": confirmed_revenue_today,
+        "pending_revenue_today": pending_revenue_today,
+        "pending_payment_review_count": pending_payment_review_count,
+        "paid_orders_count": paid_orders_count,
+        "active_orders_count": active_orders_count,
+        "completed_orders_count": completed_orders_count,
+        "queues": queue_counts,
+        "recent_orders": recent_orders,
+    }
+
+
+@router.get("/dashboard-summary")
+def get_dashboard_summary(authorization: Optional[str] = Header(None), store_id: Optional[str] = None) -> Dict[str, Any]:
+    ctx = _get_ctx(authorization)
+    store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
+    _require_manager(role)
+
+    store_timezone = _get_store_timezone(ctx["client"], store_id_resolved)
+    orders = _load_orders_for_dashboard(ctx["client"], store_id_resolved)
+    today_start, today_end = _today_range(store_timezone)
+    summary = _build_dashboard_summary(orders, today_start, today_end)
+
+    response = {
+        "store_id": store_id_resolved,
+        "store_timezone": store_timezone,
+        **summary,
+    }
+    return response
 
 
 def _map_latest_payment_summary(row: Dict[str, Any]) -> Dict[str, Any]:
