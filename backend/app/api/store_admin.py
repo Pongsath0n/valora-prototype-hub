@@ -1,6 +1,6 @@
 import logging
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple, Literal, Set
 from uuid import uuid4
 
@@ -157,6 +157,13 @@ class OrderItemUpdate(BaseModel):
     quantity: Optional[int] = None
     unit_price: Optional[float] = None
     unit_cost: Optional[float] = None
+
+
+class SalesReportFilters(BaseModel):
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    channel_id: Optional[str] = None
+    product_id: Optional[str] = None
 
 
 class OrderCreate(BaseModel):
@@ -326,6 +333,18 @@ def _is_managerial(role: str) -> bool:
 def _require_manager(role: str) -> None:
     if not _is_managerial(role):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="insufficient_role")
+
+
+def _require_owner_profile(profile: Dict[str, Any]) -> None:
+    role_value = str((profile or {}).get("role") or "").lower()
+    if role_value != "owner":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="owner_role_required")
+
+
+def _get_system_ctx(authorization: Optional[str]) -> Dict[str, Any]:
+    ctx = _get_ctx(authorization)
+    _require_owner_profile(ctx.get("profile", {}))
+    return ctx
 
 
 def _is_missing_column(error: Any, column: str) -> bool:
@@ -564,6 +583,69 @@ def _get_store_timezone(client: Client, store_id: str) -> Optional[str]:
         resp = client.table("stores").select("timezone").eq("id", store_id).limit(1).execute()
     except Exception:
         return None
+
+
+_REPORT_DEFAULT_RANGE_DAYS = 7
+
+
+def _parse_report_date(value: Optional[str]) -> Optional[date]:
+    if not value:
+        return None
+    try:
+        return datetime.strptime(value, "%Y-%m-%d").date()
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid_date")
+
+
+def _normalize_filter_value(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+    value = str(value).strip()
+    if not value or value.lower() in {"all", "null", "undefined"}:
+        return None
+    return value
+
+
+def _compute_report_range(store_tz: Optional[str], start_text: Optional[str], end_text: Optional[str]) -> Dict[str, Any]:
+    tzinfo = _resolve_timezone(store_tz)
+    today = datetime.now(tzinfo).date()
+    end_date = _parse_report_date(end_text) or today
+    start_date = _parse_report_date(start_text) or (end_date - timedelta(days=_REPORT_DEFAULT_RANGE_DAYS - 1))
+    if start_date > end_date:
+        start_date, end_date = end_date, start_date
+
+    start_dt = datetime(year=start_date.year, month=start_date.month, day=start_date.day, tzinfo=tzinfo)
+    end_dt = datetime(year=end_date.year, month=end_date.month, day=end_date.day, tzinfo=tzinfo) + timedelta(days=1)
+
+    return {
+        "start_date": start_date.isoformat(),
+        "end_date": end_date.isoformat(),
+        "start_datetime": start_dt.astimezone(timezone.utc),
+        "end_datetime": end_dt.astimezone(timezone.utc),
+        "timezone": str(tzinfo),
+    }
+
+
+def _line_total(row: Dict[str, Any]) -> float:
+    if row.get("line_total") is not None:
+        return _parse_float(row.get("line_total"))
+    quantity = int(row.get("quantity") or 0)
+    unit_price = _parse_float(row.get("unit_price"))
+    return quantity * unit_price
+
+
+def _line_cost(row: Dict[str, Any]) -> float:
+    if row.get("line_cost") is not None:
+        return _parse_float(row.get("line_cost"))
+    quantity = int(row.get("quantity") or 0)
+    unit_cost = _parse_float(row.get("unit_cost"))
+    return quantity * unit_cost
+
+
+def _line_profit(row: Dict[str, Any]) -> float:
+    if row.get("line_profit") is not None:
+        return _parse_float(row.get("line_profit"))
+    return _line_total(row) - _line_cost(row)
     error = getattr(resp, "error", None)
     if error:
         if _is_missing_column(error, "timezone"):
@@ -576,16 +658,17 @@ def _get_store_timezone(client: Client, store_id: str) -> Optional[str]:
     return None
 
 
-def _today_range(store_tz: Optional[str]) -> Tuple[datetime, datetime]:
-    tzinfo = None
+def _resolve_timezone(store_tz: Optional[str]):
     if store_tz and ZoneInfo is not None:
         try:
-            tzinfo = ZoneInfo(store_tz)
+            return ZoneInfo(store_tz)
         except Exception:
-            tzinfo = None
-    if tzinfo is None:
-        tzinfo = timezone.utc
+            return timezone.utc
+    return timezone.utc
 
+
+def _today_range(store_tz: Optional[str]) -> Tuple[datetime, datetime]:
+    tzinfo = _resolve_timezone(store_tz)
     now = datetime.now(tzinfo)
     start = datetime(year=now.year, month=now.month, day=now.day, tzinfo=tzinfo)
     end = start + timedelta(days=1)
@@ -2085,6 +2168,297 @@ def _load_order_relation_maps(client: Client, store_id: str, rows: List[Dict[str
 
     return customer_map, channel_map
 
+
+def _load_order_items_map(client: Client, order_ids: List[str]) -> Dict[str, List[Dict[str, Any]]]:
+    if not order_ids:
+        return {}
+
+    select_cols = _order_item_select_clause(client)
+    try:
+        resp = (
+            client.table("order_items")
+            .select(select_cols)
+            .in_("order_id", order_ids)
+            .order("created_at", desc=False)
+            .execute()
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="order_items_query_failed") from exc
+
+    err = getattr(resp, "error", None)
+    if err:
+        raise HTTPException(status_code=500, detail="order_items_query_failed")
+
+    items_map: Dict[str, List[Dict[str, Any]]] = {}
+    for row in getattr(resp, "data", None) or []:
+        mapped = _map_order_item(row)
+        order_id = mapped.get("order_id")
+        if not order_id:
+            continue
+        key = str(order_id)
+        items_map.setdefault(key, []).append(mapped)
+    return items_map
+
+
+def _initialize_sales_summary() -> Dict[str, Any]:
+    return {
+        "order_count": 0,
+        "total_sales_confirmed": 0.0,
+        "pending_revenue": 0.0,
+        "total_cost": 0.0,
+        "gross_profit": 0.0,
+        "gross_margin_percent": 0.0,
+    }
+
+
+def _empty_sales_report(store_id: str, range_meta: Dict[str, Any], channel_id: Optional[str], product_id: Optional[str]) -> Dict[str, Any]:
+    return {
+        "store_id": store_id,
+        "range": {
+            "start": range_meta["start_date"],
+            "end": range_meta["end_date"],
+            "timezone": range_meta["timezone"],
+        },
+        "summary": _initialize_sales_summary(),
+        "orders": [],
+        "order_items": [],
+        "channels": [],
+        "products": [],
+        "filters": {
+            "channels": [],
+            "products": [],
+            "applied": {
+                "channel_id": channel_id,
+                "product_id": product_id,
+            },
+        },
+    }
+
+
+@router.get("/reports/sales")
+def get_sales_report(
+    filters: SalesReportFilters = SalesReportFilters(),
+    authorization: Optional[str] = Header(None),
+    store_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    ctx = _get_ctx(authorization)
+    store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
+    _require_manager(role)
+
+    store_timezone = _get_store_timezone(ctx["client"], store_id_resolved)
+    normalized_channel = _normalize_filter_value(filters.channel_id)
+    normalized_product = _normalize_filter_value(filters.product_id)
+    range_meta = _compute_report_range(store_timezone, filters.start_date, filters.end_date)
+
+    start_iso = range_meta["start_datetime"].isoformat()
+    end_iso = range_meta["end_datetime"].isoformat()
+
+    use_channel_fee = True
+    orders_rows: List[Dict[str, Any]] = []
+    while True:
+        select_cols = _order_select_columns(ctx["client"], use_channel_fee)
+        query = (
+            ctx["client"].table("orders")
+            .select(select_cols)
+            .eq("store_id", store_id_resolved)
+            .gte("created_at", start_iso)
+            .lt("created_at", end_iso)
+            .order("created_at", desc=True)
+        )
+        if normalized_channel:
+            query = query.eq("channel_id", normalized_channel)
+
+        resp = query.execute()
+        err = getattr(resp, "error", None)
+        if not err:
+            orders_rows = getattr(resp, "data", None) or []
+            break
+        missing_col = _extract_missing_column(err)
+        if use_channel_fee and missing_col == "channel_fee":
+            use_channel_fee = False
+            continue
+        raise HTTPException(status_code=500, detail="order_query_failed")
+
+    if not orders_rows:
+        return _empty_sales_report(store_id_resolved, range_meta, normalized_channel, normalized_product)
+
+    customer_map, channel_map = _load_order_relation_maps(ctx["client"], store_id_resolved, orders_rows)
+    order_ids = [str(row.get("id")) for row in orders_rows if row.get("id")]
+    items_map = _load_order_items_map(ctx["client"], order_ids)
+    mapped_orders = [_map_order(row, customer_map, channel_map) for row in orders_rows]
+
+    return _build_sales_report_payload(
+        mapped_orders,
+        items_map,
+        store_id_resolved,
+        range_meta,
+        normalized_channel,
+        normalized_product,
+    )
+
+
+def _build_sales_report_payload(
+    orders: List[Dict[str, Any]],
+    items_map: Dict[str, List[Dict[str, Any]]],
+    store_id: str,
+    range_meta: Dict[str, Any],
+    channel_id: Optional[str],
+    product_id: Optional[str],
+) -> Dict[str, Any]:
+    summary = _initialize_sales_summary()
+    order_rows: List[Dict[str, Any]] = []
+    order_item_rows: List[Dict[str, Any]] = []
+    channel_totals: Dict[str, Dict[str, Any]] = {}
+    product_totals: Dict[str, Dict[str, Any]] = {}
+    channel_options: Dict[str, str] = {}
+    product_options: Dict[str, str] = {}
+
+    normalized_product = _normalize_filter_value(product_id)
+
+    for order in orders:
+        order_id = str(order.get("id")) if order.get("id") else None
+        if not order_id:
+            continue
+        items = items_map.get(order_id, [])
+        matched_items = items
+        if normalized_product:
+            matched_items = [item for item in items if str(item.get("product_id")) == normalized_product]
+            if not matched_items:
+                continue
+
+        amount_total = _parse_float(order.get("total_amount"))
+        cost_total = _parse_float(order.get("total_cost"))
+        profit_total = _parse_float(order.get("gross_profit"))
+        if normalized_product:
+            amount_total = sum(_line_total(item) for item in matched_items)
+            cost_total = sum(_line_cost(item) for item in matched_items)
+            profit_total = sum(_line_profit(item) for item in matched_items)
+
+        payment_status = str(order.get("payment_status") or "").lower()
+        if payment_status == "pending":
+            payment_status = "pending_review"
+
+        if payment_status == "paid":
+            summary["total_sales_confirmed"] += amount_total
+        elif payment_status == "pending_review":
+            summary["pending_revenue"] += amount_total
+
+        summary["total_cost"] += cost_total
+        summary["gross_profit"] += profit_total
+        summary["order_count"] += 1
+
+        order_rows.append({
+            "order_id": order_id,
+            "order_no": order.get("order_no") or order.get("order_number"),
+            "channel_id": order.get("channel_id"),
+            "channel_name": order.get("channel_name"),
+            "status": order.get("status") or order.get("order_status"),
+            "payment_status": payment_status,
+            "sales_amount": amount_total,
+            "cost_amount": cost_total,
+            "gross_profit": profit_total,
+            "created_at": order.get("created_at"),
+        })
+
+        channel_key = str(order.get("channel_id") or "unassigned")
+        channel_entry = channel_totals.setdefault(
+            channel_key,
+            {
+                "channel_id": order.get("channel_id"),
+                "channel_name": order.get("channel_name") or _make_fallback_label("Channel", order.get("channel_id")),
+                "orders": 0,
+                "sales_confirmed": 0.0,
+                "pending_revenue": 0.0,
+                "gross_profit": 0.0,
+            },
+        )
+        channel_entry["orders"] += 1
+        if payment_status == "paid":
+            channel_entry["sales_confirmed"] += amount_total
+        elif payment_status == "pending_review":
+            channel_entry["pending_revenue"] += amount_total
+        channel_entry["gross_profit"] += profit_total
+
+        channel_id_value = order.get("channel_id")
+        if channel_id_value is not None:
+            channel_options[str(channel_id_value)] = order.get("channel_name") or _make_fallback_label("Channel", channel_id_value)
+
+        for item in matched_items:
+            sales_amount = _line_total(item)
+            cost_amount = _line_cost(item)
+            profit_amount = _line_profit(item)
+            order_item_rows.append({
+                "order_id": order_id,
+                "product_id": item.get("product_id"),
+                "product_name": item.get("product_name") or _make_fallback_label("Product", item.get("product_id")),
+                "quantity": int(item.get("quantity") or 0),
+                "sales_amount": sales_amount,
+                "cost_amount": cost_amount,
+                "gross_profit": profit_amount,
+                "channel_id": order.get("channel_id"),
+                "channel_name": order.get("channel_name"),
+            })
+
+            product_key = str(item.get("product_id") or "unassigned")
+            product_entry = product_totals.setdefault(
+                product_key,
+                {
+                    "product_id": item.get("product_id"),
+                    "product_name": item.get("product_name") or _make_fallback_label("Product", item.get("product_id")),
+                    "quantity": 0,
+                    "sales_amount": 0.0,
+                    "cost_amount": 0.0,
+                    "gross_profit": 0.0,
+                },
+            )
+            product_entry["quantity"] += int(item.get("quantity") or 0)
+            product_entry["sales_amount"] += sales_amount
+            product_entry["cost_amount"] += cost_amount
+            product_entry["gross_profit"] += profit_amount
+
+            if item.get("product_id") is not None:
+                product_options[str(item.get("product_id"))] = item.get("product_name") or _make_fallback_label("Product", item.get("product_id"))
+
+        for item in items:
+            if item.get("product_id") is not None:
+                product_options.setdefault(
+                    str(item.get("product_id")),
+                    item.get("product_name") or _make_fallback_label("Product", item.get("product_id")),
+                )
+
+    summary["gross_margin_percent"] = (
+        (summary["gross_profit"] / summary["total_sales_confirmed"]) * 100
+        if summary["total_sales_confirmed"] > 0
+        else 0.0
+    )
+
+    return {
+        "store_id": store_id,
+        "range": {
+            "start": range_meta["start_date"],
+            "end": range_meta["end_date"],
+            "timezone": range_meta["timezone"],
+        },
+        "summary": summary,
+        "orders": order_rows,
+        "order_items": order_item_rows,
+        "channels": sorted(channel_totals.values(), key=lambda row: row["sales_confirmed"], reverse=True),
+        "products": sorted(product_totals.values(), key=lambda row: row["sales_amount"], reverse=True),
+        "filters": {
+            "channels": [
+                {"id": key, "name": name}
+                for key, name in sorted(channel_options.items(), key=lambda item: item[1])
+            ],
+            "products": [
+                {"id": key, "name": name}
+                for key, name in sorted(product_options.items(), key=lambda item: item[1])
+            ],
+            "applied": {
+                "channel_id": _normalize_filter_value(channel_id),
+                "product_id": normalized_product,
+            },
+        },
+    }
 
 def _map_order(
     row: Dict[str, Any],
