@@ -17,7 +17,7 @@ export default function LoginPage() {
     setIsLoading(true);
 
     try {
-      const { error: authError } = await supabase.auth.signInWithPassword({
+      const { data: signInData, error: authError } = await supabase.auth.signInWithPassword({
         email: email.trim(),
         password,
       });
@@ -31,9 +31,40 @@ export default function LoginPage() {
         return;
       }
 
-      // Check if user has completed Onboarding
+      const userId = signInData?.user?.id;
+      if (!userId) {
+        setError("เกิดข้อผิดพลาด ไม่พบข้อมูลผู้ใช้");
+        return;
+      }
+
+      const { data: profileData, error: profileError } = await supabase
+        .from("profiles")
+        .select("role")
+        .eq("id", userId)
+        .single();
+
+      if (profileError || !profileData) {
+        setError("บัญชีนี้ยังไม่ได้รับสิทธิ์การใช้งาน");
+        return;
+      }
+
+      const role = (profileData.role ?? null) as string | null;
+      if (!role) {
+        setError("บัญชีนี้ยังไม่ได้รับสิทธิ์การใช้งาน");
+        return;
+      }
+
       const hasOnboarded = localStorage.getItem("valora:onboarded") === "1";
-      navigate(hasOnboarded ? "/dashboard" : "/onboarding", { replace: true });
+      if (!hasOnboarded) {
+        navigate("/onboarding", { replace: true });
+        return;
+      }
+
+      if (role === "staff") {
+        navigate("/store-admin", { replace: true });
+      } else {
+        navigate("/app/dashboard", { replace: true });
+      }
     } catch {
       setError("เกิดข้อผิดพลาด กรุณาลองใหม่");
     } finally {
