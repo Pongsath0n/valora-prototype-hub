@@ -1,5 +1,5 @@
 import logging
-from typing import Any, Dict, List, Optional, Literal, Tuple
+from typing import Any, Dict, List, Optional, Literal, Tuple, Set
 
 from fastapi import APIRouter, Header, HTTPException, status
 from pydantic import BaseModel
@@ -13,6 +13,8 @@ router = APIRouter(prefix="/api/system", tags=["system"])
 
 SystemRole = Literal["owner", "admin", "manager", "staff"]
 StoreRole = Literal["owner", "admin", "manager", "staff"]
+
+ALLOWED_ROLES: Set[str] = {"owner", "admin", "manager", "staff"}
 
 
 class UserRoleUpdate(BaseModel):
@@ -37,6 +39,13 @@ def _normalize_role(value: Optional[str]) -> Optional[str]:
     if value is None:
         return None
     return str(value).strip().lower() or None
+
+
+def _require_valid_role(value: Optional[str], *, field: str = "role") -> str:
+    normalized = _normalize_role(value)
+    if not normalized or normalized not in ALLOWED_ROLES:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid_role")
+    return normalized
 
 
 def _fetch_profiles(client: Client, limit: int = 200) -> List[Dict[str, Any]]:
@@ -132,6 +141,24 @@ def _count_owners(client: Client) -> int:
     return len(getattr(resp, "data", None) or [])
 
 
+def _count_store_owner_memberships(client: Client, store_id: Optional[str]) -> int:
+    if not store_id:
+        return 0
+    try:
+        resp = (
+            client.table("store_members")
+            .select("id")
+            .eq("store_id", store_id)
+            .eq("role", "owner")
+            .execute()
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="store_owner_count_failed") from exc
+    if getattr(resp, "error", None):
+        raise HTTPException(status_code=500, detail="store_owner_count_failed")
+    return len(getattr(resp, "data", None) or [])
+
+
 def _require_user_exists(client: Client, user_id: str) -> Dict[str, Any]:
     try:
         resp = client.table("profiles").select("id, role").eq("id", user_id).limit(1).execute()
@@ -205,13 +232,11 @@ def update_user_role(
 
     existing = _require_user_exists(client, user_id)
     current_role = _normalize_role(existing.get("role"))
-    next_role = _normalize_role(payload.role)
-    if not next_role:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="role_required")
+    next_role = _require_valid_role(payload.role)
 
     if current_role == "owner" and next_role != "owner":
         if _count_owners(client) <= 1:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="cannot_remove_last_owner")
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="cannot_demote_last_owner")
 
     try:
         resp = client.table("profiles").update({"role": next_role}).eq("id", user_id).execute()
@@ -277,13 +302,15 @@ def create_store_member(
         raise HTTPException(status_code=500, detail="store_member_lookup_failed") from exc
     if getattr(existing, "error", None):
         raise HTTPException(status_code=500, detail="store_member_lookup_failed")
-    if (getattr(existing, "data", None) or []):
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="membership_exists")
+    if getattr(existing, "data", None) or []:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="duplicate_membership")
+
+    role_value = _require_valid_role(payload.role)
 
     data = {
         "user_id": payload.user_id,
         "store_id": payload.store_id,
-        "role": payload.role,
+        "role": role_value,
     }
 
     try:
@@ -313,11 +340,23 @@ def update_store_member(
 
     existing = _ensure_membership(client, member_id)
     update_data: Dict[str, Any] = {}
+    next_role: Optional[str] = None
     if payload.role:
-        update_data["role"] = payload.role
+        next_role = _require_valid_role(payload.role)
+        update_data["role"] = next_role
 
     if not update_data:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="no_fields_to_update")
+
+    current_role = _normalize_role(existing.get("role"))
+    store_id = str(existing.get("store_id")) if existing.get("store_id") else None
+    if (
+        current_role == "owner"
+        and next_role
+        and next_role != "owner"
+        and _count_store_owner_memberships(client, store_id) <= 1
+    ):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="cannot_demote_last_store_owner")
 
     try:
         resp = client.table("store_members").update(update_data).eq("id", member_id).execute()
@@ -340,7 +379,11 @@ def delete_store_member(member_id: str, authorization: Optional[str] = Header(No
     ctx = _get_system_ctx(authorization)
     client = ctx["client"]
 
-    _ensure_membership(client, member_id)
+    membership = _ensure_membership(client, member_id)
+    store_id = str(membership.get("store_id")) if membership.get("store_id") else None
+    current_role = _normalize_role(membership.get("role"))
+    if current_role == "owner" and _count_store_owner_memberships(client, store_id) <= 1:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="cannot_remove_last_store_owner")
     try:
         resp = client.table("store_members").delete().eq("id", member_id).execute()
     except Exception as exc:

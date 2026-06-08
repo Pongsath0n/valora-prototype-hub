@@ -31,3 +31,18 @@ Use these quick checks before deployments touching RBAC or permissions.
 4. Owner can access `/system/*` pages; staff navigate there should be blocked by guard.
 
 Record any deviations before release.
+
+## System Role Management (Step 4)
+1. **Owner user list**
+   - `GET /api/system/users` with owner token → 200 and returns memberships.
+   - Repeat call with staff token → 403 `owner_role_required`.
+2. **Profile role changes**
+   - Owner updates a staff profile to manager via `/api/system/users/{id}/role` → 200.
+   - Attempt to demote the last remaining owner → 400 `cannot_demote_last_owner`.
+3. **Store membership lifecycle**
+   - Owner adds a staff user to store `348544d2-9a2c-4ba4-8875-bc106fed752e` via `POST /api/system/store-members` → 200.
+   - Owner updates the membership role via `PATCH /api/system/store-members/{membership_id}` → 200.
+   - Owner deletes the membership via `DELETE /api/system/store-members/{membership_id}` → 200 (non-owner) and 400 `cannot_remove_last_store_owner` when deleting the final owner.
+4. **Frontend controls**
+   - Owner can visit `/system/users`, view memberships, change roles, add/remove memberships with confirmations.
+   - Staff navigating to `/system/users` is blocked at auth guard or backend (403).

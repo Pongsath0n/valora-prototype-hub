@@ -164,6 +164,13 @@ export type SystemUserRow = {
   memberships: SystemUserMembership[];
 };
 
+export type SystemRoleId = "owner" | "admin" | "manager" | "staff";
+
+export type SystemStoreRow = {
+  id: string;
+  name: string | null;
+};
+
 async function authRequest<T>(path: string, init?: RequestInit): Promise<T> {
   const client = getSupabase();
   const { data, error } = await client.auth.getSession();
@@ -189,7 +196,31 @@ export const systemConsoleApi = {
   async listUsers(): Promise<{ items: SystemUserRow[] }> {
     return authRequest("/api/system/users");
   },
+  async listStores(): Promise<{ items: SystemStoreRow[] }> {
+    return authRequest("/api/system/stores");
+  },
   async listRoles(): Promise<{ profile_roles: unknown[]; store_roles: unknown[] }> {
     return authRequest("/api/system/roles");
+  },
+  async updateUserRole(userId: string, role: SystemRoleId): Promise<{ status: string }> {
+    return authRequest(`/api/system/users/${userId}/role`, {
+      method: "PATCH",
+      body: JSON.stringify({ role }),
+    });
+  },
+  async createStoreMember(userId: string, storeId: string, role: SystemRoleId): Promise<{ status: string }> {
+    return authRequest("/api/system/store-members", {
+      method: "POST",
+      body: JSON.stringify({ user_id: userId, store_id: storeId, role }),
+    });
+  },
+  async updateStoreMember(memberId: string, role: SystemRoleId): Promise<{ status: string }> {
+    return authRequest(`/api/system/store-members/${memberId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ role }),
+    });
+  },
+  async deleteStoreMember(memberId: string): Promise<{ status: string }> {
+    return authRequest(`/api/system/store-members/${memberId}`, { method: "DELETE" });
   },
 };
