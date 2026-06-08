@@ -19,6 +19,8 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import LogoBrand from "@/components/LogoBrand";
+import { PortalSwitcher } from "@/components/navigation/PortalSwitcher";
+import { useProfileRole } from "@/contexts/RoleContext";
 
 const mainNav = [
   { title: "แดชบอร์ด", path: "/app/dashboard", icon: LayoutDashboard },
@@ -67,6 +69,7 @@ function NavItem({ path, icon: Icon, title }: { path: string; icon: React.Elemen
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const { role, loading } = useProfileRole();
 
   return (
     <div className="min-h-screen flex w-full bg-background">
@@ -89,6 +92,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           {mainNav.map((item) => (
             <NavItem key={item.path} {...item} />
           ))}
+          <div className="mt-6 px-3">
+            {!loading && role ? <PortalSwitcher variant="stack" /> : null}
+          </div>
         </nav>
 
         {/* Utility nav */}

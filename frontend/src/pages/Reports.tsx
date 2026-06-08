@@ -1,68 +1,168 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import AppLayout from "@/components/AppLayout";
 import DataTable from "@/components/shared/DataTable";
 import LoadingState from "@/components/shared/LoadingState";
-import { dashboardReportService } from "@/features/store/dashboardReportService";
+import EmptyState from "@/components/shared/EmptyState";
+import { useSalesReport } from "@/hooks/useSalesReport";
+import type { Column } from "@/components/shared/DataTable";
+import type { SalesReportItemRow, SalesReportOrderRow } from "@/services/storeAdminApi";
+
+const currency = new Intl.NumberFormat("th-TH", { style: "currency", currency: "THB" });
+
+function useDefaultRange() {
+  const end = new Date();
+  const start = new Date();
+  start.setDate(start.getDate() - 6);
+  return {
+    start: start.toISOString().slice(0, 10),
+    end: end.toISOString().slice(0, 10),
+  };
+}
 
 export default function ReportsPage() {
-  const [from, setFrom] = useState(new Date().toISOString().slice(0, 10));
-  const [to, setTo] = useState(new Date().toISOString().slice(0, 10));
-  const [channel, setChannel] = useState("ALL");
-  const [menuId, setMenuId] = useState("ALL");
-  const [data, setData] = useState<any>(null);
+  const defaultRange = useDefaultRange();
+  const [filters, setFilters] = useState({
+    start_date: defaultRange.start,
+    end_date: defaultRange.end,
+    channel_id: "",
+    product_id: "",
+  });
 
-  useEffect(() => {
-    const fromDefault = new Date();
-    fromDefault.setDate(fromDefault.getDate() - 7);
-    setFrom(fromDefault.toISOString().slice(0, 10));
-  }, []);
+  const { data, isLoading, isError } = useSalesReport(filters);
 
-  useEffect(() => {
-    if (!from || !to) return;
-    dashboardReportService.getReport({ from, to, channel, menuId }).then(setData);
-  }, [from, to, channel, menuId]);
+  const orderColumns = useMemo<Column<SalesReportOrderRow>[]>(() => [
+    { key: "order_no", header: "Order" },
+    { key: "created_at", header: "วันที่" },
+    { key: "channel_name", header: "ช่องทาง" },
+    {
+      key: "sales_amount",
+      header: "ยอดขาย",
+      render: (row) => currency.format(row.sales_amount ?? 0),
+      className: "text-right",
+    },
+    {
+      key: "gross_profit",
+      header: "กำไร (฿)",
+      render: (row) => currency.format(row.gross_profit ?? 0),
+      className: "text-right",
+    },
+    { key: "payment_status", header: "สถานะชำระ" },
+  ], []);
 
-  const totals = data?.totals;
+  const itemColumns = useMemo<Column<SalesReportItemRow>[]>(() => [
+    { key: "product_name", header: "เมนู" },
+    { key: "quantity", header: "จำนวน", className: "text-center" },
+    {
+      key: "sales_amount",
+      header: "ยอดขาย",
+      render: (row) => currency.format(row.sales_amount ?? 0),
+      className: "text-right",
+    },
+    {
+      key: "gross_profit",
+      header: "กำไร (฿)",
+      render: (row) => currency.format(row.gross_profit ?? 0),
+      className: "text-right",
+    },
+  ], []);
 
-  const exportCsv = () => {
-    if (!data) return;
-    const csv = dashboardReportService.exportReportCsv(data.orders);
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `valora-report-${from}-to-${to}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
+  const summary = data?.summary;
 
   return (
     <AppLayout>
-      <div className="space-y-4">
-        <h1 className="page-title">Reports</h1>
-        <div className="stat-card grid md:grid-cols-5 gap-3">
-          <input type="date" className="form-input" value={from} onChange={(e) => setFrom(e.target.value)} />
-          <input type="date" className="form-input" value={to} onChange={(e) => setTo(e.target.value)} />
-          <select className="form-input" value={channel} onChange={(e) => setChannel(e.target.value)}>
-            <option value="ALL">All channels</option>
-            {data?.channels?.map((c: any) => <option key={c.id} value={c.name}>{c.name}</option>)}
-          </select>
-          <select className="form-input" value={menuId} onChange={(e) => setMenuId(e.target.value)}>
-            <option value="ALL">All menu</option>
-            {data?.menus?.map((m: any) => <option key={m.id} value={m.id}>{m.name}</option>)}
-          </select>
-          <button className="bg-primary text-primary-foreground rounded px-3 py-2" onClick={exportCsv}>Export CSV</button>
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="page-title">รายงานยอดขาย</h1>
+            <p className="page-subtitle">ข้อมูลจริงจาก Store Admin Orders & Payments</p>
+          </div>
+          <button
+            type="button"
+            className="rounded-lg border px-3 py-2 text-sm font-medium"
+            onClick={() => setFilters({ ...filters })}
+          >
+            รีเฟรชข้อมูล
+          </button>
         </div>
 
-        {!data ? <LoadingState /> : (
+        <div className="stat-card grid gap-3 md:grid-cols-5">
+          <input
+            type="date"
+            className="form-input"
+            value={filters.start_date}
+            max={filters.end_date}
+            onChange={(e) => setFilters((prev) => ({ ...prev, start_date: e.target.value }))}
+          />
+          <input
+            type="date"
+            className="form-input"
+            value={filters.end_date}
+            min={filters.start_date}
+            onChange={(e) => setFilters((prev) => ({ ...prev, end_date: e.target.value }))}
+          />
+          <select
+            className="form-input"
+            value={filters.channel_id || ""}
+            onChange={(e) => setFilters((prev) => ({ ...prev, channel_id: e.target.value }))}
+          >
+            <option value="">ทุกช่องทาง</option>
+            {data?.filters.channels.map((channel) => (
+              <option key={channel.id} value={channel.id}>{channel.name}</option>
+            ))}
+          </select>
+          <select
+            className="form-input"
+            value={filters.product_id || ""}
+            onChange={(e) => setFilters((prev) => ({ ...prev, product_id: e.target.value }))}
+          >
+            <option value="">ทุกเมนู</option>
+            {data?.filters.products.map((product) => (
+              <option key={product.id} value={product.id}>{product.name}</option>
+            ))}
+          </select>
+          <div className="flex items-center justify-end">
+            <span className="text-xs text-muted-foreground">
+              เขตเวลา: {data?.range.timezone ?? "UTC"}
+            </span>
+          </div>
+        </div>
+
+        {isLoading ? (
+          <LoadingState label="กำลังโหลดรายงานจริงจาก backend..." />
+        ) : isError ? (
+          <EmptyState
+            title="ไม่สามารถโหลดรายงานได้"
+            description="ตรวจสอบการเชื่อมต่อ backend และลองอีกครั้ง"
+          />
+        ) : !data || data.orders.length === 0 ? (
+          <EmptyState
+            title="ยังไม่มีรายการที่ชำระเงินสำเร็จในช่วงวันที่นี้"
+            description="เมื่อมีออเดอร์ที่ชำระเงินเรียบร้อย รายงานจะอัปเดตอัตโนมัติ"
+          />
+        ) : (
           <>
-            <div className="grid md:grid-cols-4 gap-3">
-              <Card label="Total Sales" value={`฿${totals.totalSales.toFixed(2)}`} />
-              <Card label="Total Cost" value={`฿${totals.totalCost.toFixed(2)}`} />
-              <Card label="Gross Profit" value={`฿${totals.grossProfit.toFixed(2)}`} />
-              <Card label="Gross Margin %" value={`${totals.grossMarginPercent.toFixed(2)}%`} />
+            <div className="grid gap-3 md:grid-cols-4">
+              <SummaryCard label="ยอดขายยืนยันแล้ว" value={currency.format(summary?.total_sales_confirmed ?? 0)} />
+              <SummaryCard label="รอการยืนยัน" value={currency.format(summary?.pending_revenue ?? 0)} />
+              <SummaryCard label="ต้นทุน" value={currency.format(summary?.total_cost ?? 0)} />
+              <SummaryCard label="กำไรขั้นต้น" value={currency.format(summary?.gross_profit ?? 0)} subLabel={`Margin ${(summary?.gross_margin_percent ?? 0).toFixed(1)}%`} />
             </div>
-            <DataTable columns={[{ key: "id", header: "Order" }, { key: "createdAt", header: "Date" }, { key: "channelName", header: "Channel" }, { key: "totalAmount", header: "Sales" }, { key: "totalCost", header: "Cost" }, { key: "grossProfit", header: "Profit" }]} rows={data.orders} />
+
+            <section className="stat-card space-y-4">
+              <div className="flex items-center justify-between">
+                <h2 className="section-title mb-0">รายการออเดอร์</h2>
+                <p className="text-xs text-muted-foreground">{summary?.order_count ?? 0} รายการ</p>
+              </div>
+              <DataTable columns={orderColumns} rows={data.orders} />
+            </section>
+
+            <section className="stat-card space-y-4">
+              <div className="flex items-center justify-between">
+                <h2 className="section-title mb-0">ยอดขายตามเมนู</h2>
+                <p className="text-xs text-muted-foreground">Top {Math.min(10, data.order_items.length)} เมนูล่าสุด</p>
+              </div>
+              <DataTable columns={itemColumns} rows={data.order_items.slice(0, 10)} />
+            </section>
           </>
         )}
       </div>
@@ -70,6 +170,13 @@ export default function ReportsPage() {
   );
 }
 
-function Card({ label, value }: { label: string; value: string }) {
-  return <div className="kpi-card"><p className="metric-label">{label}</p><p className="metric-value">{value}</p></div>;
+function SummaryCard({ label, value, subLabel }: { label: string; value: string; subLabel?: string }) {
+  return (
+    <div className="rounded-2xl border border-border bg-card p-4 shadow-sm">
+      <p className="text-sm text-muted-foreground">{label}</p>
+      <p className="mt-1 text-2xl font-semibold text-foreground">{value}</p>
+      {subLabel ? <p className="text-xs text-muted-foreground">{subLabel}</p> : null}
+    </div>
+  );
 }
+

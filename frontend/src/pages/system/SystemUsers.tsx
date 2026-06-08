@@ -4,18 +4,19 @@ import DataTable from "@/components/shared/DataTable";
 import LoadingState from "@/components/shared/LoadingState";
 import EmptyState from "@/components/shared/EmptyState";
 import StatusBadge from "@/components/shared/StatusBadge";
-import { loadProfiles, type ProfileRow } from "@/services/systemConsoleService";
+import { systemConsoleApi, type SystemUserRow } from "@/services/systemConsoleService";
 
 export default function SystemUsersPage() {
-  const [rows, setRows] = useState<ProfileRow[]>([]);
+  const [rows, setRows] = useState<SystemUserRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [state, setState] = useState<"ok" | "empty" | "error">("empty");
 
   useEffect(() => {
-    loadProfiles()
+    systemConsoleApi
+      .listUsers()
       .then((res) => {
-        if (res.status === "ok" && res.rows.length > 0) {
-          setRows(res.rows);
+        if (res.items.length) {
+          setRows(res.items);
           setState("ok");
         } else {
           setState("empty");
@@ -47,7 +48,22 @@ export default function SystemUsersPage() {
                 header: "Role",
                 render: (r) => <StatusBadge label={String(r.role ?? "-")} tone="info" />,
               },
-              { key: "store_id", header: "Store ID" },
+              {
+                key: "memberships",
+                header: "Store Memberships",
+                render: (row) => (
+                  <div className="space-y-1 text-xs">
+                    {row.memberships?.length
+                      ? row.memberships.map((member) => (
+                          <div key={member.id} className="rounded-md bg-muted px-2 py-1">
+                            <span className="font-medium">{member.store_name ?? member.store_id}</span>
+                            <span className="ml-2 text-muted-foreground">{member.role ?? "-"}</span>
+                          </div>
+                        ))
+                      : <span className="text-muted-foreground">ไม่มีการเชื่อมต่อร้าน</span>}
+                  </div>
+                ),
+              },
               {
                 key: "created_at",
                 header: "สร้างเมื่อ",

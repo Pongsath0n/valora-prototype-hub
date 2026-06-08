@@ -7,6 +7,7 @@ from app.api.health import router as health_router
 from app.api.customer import router as customer_router
 from app.api.line import router as line_router
 from app.api.store_admin import router as store_admin_router
+from app.api.system_console import router as system_router
 
 LOCAL_DEFAULT_ORIGINS = ["http://localhost:8080", "http://127.0.0.1:8080"]
 
@@ -41,6 +42,7 @@ app.include_router(health_router)
 app.include_router(line_router)
 app.include_router(customer_router)
 app.include_router(store_admin_router)
+app.include_router(system_router)
 
 
 @app.get("/")

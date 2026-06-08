@@ -146,3 +146,50 @@ export async function loadAuditBuckets(): Promise<{ status: "ok" | "partial" | "
 
   return { status: hadError ? "partial" : "partial", buckets, reason: hadError ? "query_failed" : "no_logs_found" };
 }
+
+export type SystemUserMembership = {
+  id: string;
+  store_id: string | null;
+  store_name?: string | null;
+  role?: string | null;
+  created_at?: string | null;
+};
+
+export type SystemUserRow = {
+  id: string;
+  email: string | null;
+  full_name: string | null;
+  role: string | null;
+  created_at: string | null;
+  memberships: SystemUserMembership[];
+};
+
+async function authRequest<T>(path: string, init?: RequestInit): Promise<T> {
+  const client = getSupabase();
+  const { data, error } = await client.auth.getSession();
+  if (error || !data.session?.access_token) {
+    throw new Error("unauthorized");
+  }
+  const res = await fetch(`${BACKEND_BASE}${path}`, {
+    ...(init || {}),
+    headers: {
+      "Content-Type": "application/json",
+      ...(init?.headers || {}),
+      Authorization: `Bearer ${data.session.access_token}`,
+    },
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(body?.detail || "request_failed");
+  }
+  return body as T;
+}
+
+export const systemConsoleApi = {
+  async listUsers(): Promise<{ items: SystemUserRow[] }> {
+    return authRequest("/api/system/users");
+  },
+  async listRoles(): Promise<{ profile_roles: unknown[]; store_roles: unknown[] }> {
+    return authRequest("/api/system/roles");
+  },
+};

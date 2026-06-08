@@ -4,6 +4,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
+import { RoleProvider } from "@/contexts/RoleContext";
 import { STORE_ADMIN_ROLES, SYSTEM_CONSOLE_ROLES, useRoleGuard } from "@/lib/guards";
 
 import Landing from "./pages/Landing";
@@ -51,6 +52,7 @@ import SystemUsersPage from "./pages/system/SystemUsers";
 import SystemRolesPage from "./pages/system/SystemRoles";
 import SystemAuditLogsPage from "./pages/system/SystemAuditLogs";
 import SystemHealthPage from "./pages/system/SystemHealth";
+import SystemStoragePage from "./pages/system/SystemStorage";
 
 const queryClient = new QueryClient();
 
@@ -109,6 +111,7 @@ function AppRoutes() {
       <Route path="/system/users" element={<SystemRoute><SystemUsersPage /></SystemRoute>} />
       <Route path="/system/roles" element={<SystemRoute><SystemRolesPage /></SystemRoute>} />
       <Route path="/system/health" element={<SystemRoute><SystemHealthPage /></SystemRoute>} />
+      <Route path="/system/storage" element={<SystemRoute><SystemStoragePage /></SystemRoute>} />
       <Route path="/system/audit-logs" element={<SystemRoute><SystemAuditLogsPage /></SystemRoute>} />
 
       <Route path="/app/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
@@ -147,7 +150,9 @@ export default function App() {
         <Sonner />
         <BrowserRouter>
           <AuthProvider>
-            <AppRoutes />
+            <RoleProvider>
+              <AppRoutes />
+            </RoleProvider>
           </AuthProvider>
         </BrowserRouter>
       </TooltipProvider>

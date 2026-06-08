@@ -219,6 +219,89 @@ export type DashboardSummaryResponse = {
   recent_orders: DashboardRecentOrder[];
 };
 
+export type SalesReportSummary = {
+  order_count: number;
+  total_sales_confirmed: number;
+  pending_revenue: number;
+  total_cost: number;
+  gross_profit: number;
+  gross_margin_percent: number;
+};
+
+export type SalesReportOrderRow = {
+  order_id: string;
+  order_no?: string | null;
+  channel_id?: string | null;
+  channel_name?: string | null;
+  status?: string | null;
+  payment_status?: string | null;
+  sales_amount: number;
+  cost_amount: number;
+  gross_profit: number;
+  created_at?: string | null;
+};
+
+export type SalesReportItemRow = {
+  order_id: string;
+  product_id?: string | null;
+  product_name?: string | null;
+  quantity: number;
+  sales_amount: number;
+  cost_amount: number;
+  gross_profit: number;
+  channel_id?: string | null;
+  channel_name?: string | null;
+};
+
+export type SalesReportChannelRow = {
+  channel_id?: string | null;
+  channel_name?: string | null;
+  orders: number;
+  sales_confirmed: number;
+  pending_revenue: number;
+  gross_profit: number;
+};
+
+export type SalesReportProductRow = {
+  product_id?: string | null;
+  product_name?: string | null;
+  quantity: number;
+  sales_amount: number;
+  cost_amount: number;
+  gross_profit: number;
+};
+
+export type SalesReportFiltersResponse = {
+  channels: { id: string; name: string }[];
+  products: { id: string; name: string }[];
+  applied: {
+    channel_id?: string | null;
+    product_id?: string | null;
+  };
+};
+
+export type SalesReportResponse = {
+  store_id: string;
+  range: {
+    start: string;
+    end: string;
+    timezone: string;
+  };
+  summary: SalesReportSummary;
+  orders: SalesReportOrderRow[];
+  order_items: SalesReportItemRow[];
+  channels: SalesReportChannelRow[];
+  products: SalesReportProductRow[];
+  filters: SalesReportFiltersResponse;
+};
+
+export type SalesReportFiltersPayload = {
+  start_date?: string;
+  end_date?: string;
+  channel_id?: string | null;
+  product_id?: string | null;
+};
+
 export type OrderPayload = {
   customer_id?: string | null;
   channel_id?: string | null;
@@ -368,6 +451,17 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export const storeAdminApi = {
   async getDashboardSummary(): Promise<DashboardSummaryResponse> {
     return request("/api/store-admin/dashboard-summary");
+  },
+
+  async getSalesReport(filters: SalesReportFiltersPayload): Promise<SalesReportResponse> {
+    const params = new URLSearchParams();
+    if (filters.start_date) params.set("start_date", filters.start_date);
+    if (filters.end_date) params.set("end_date", filters.end_date);
+    if (filters.channel_id) params.set("channel_id", filters.channel_id);
+    if (filters.product_id) params.set("product_id", filters.product_id);
+    const search = params.toString();
+    const path = `/api/store-admin/reports/sales${search ? `?${search}` : ""}`;
+    return request(path);
   },
 
   async listSalesChannels(): Promise<ApiSalesChannel[]> {
