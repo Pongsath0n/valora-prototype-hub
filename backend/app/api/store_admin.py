@@ -49,7 +49,10 @@ _DASHBOARD_QUEUE_STATUSES: List[str] = [
     "completed",
     "cancelled",
 ]
-_FINALIZED_ORDER_STATUSES: Set[str] = {"completed", "cancelled"}
+CANCELLED_ORDER_STATUSES: Set[str] = {"cancelled", "voided"}
+CONFIRMED_PAYMENT_STATUSES: Set[str] = {"paid"}
+PENDING_REVIEW_PAYMENT_STATUSES: Set[str] = {"pending_review"}
+_FINALIZED_ORDER_STATUSES: Set[str] = {"completed"} | CANCELLED_ORDER_STATUSES
 _RECENT_ORDERS_LIMIT = 10
 
 _BUSINESS_ROLES: Set[str] = {"owner", "admin", "manager"}
@@ -71,6 +74,51 @@ _MENU_IMAGE_EXTENSION_MAP: Dict[str, str] = {
     "image/png": "png",
     "image/webp": "webp",
 }
+
+
+def normalize_order_status(value: Optional[str]) -> str:
+    status = str(value or "").strip().lower()
+    if status == "void":
+        return "voided"
+    return status
+
+
+def normalize_payment_status(value: Optional[str]) -> str:
+    status = str(value or "").strip().lower()
+    if status == "pending":
+        return "pending_review"
+    return status
+
+
+def _extract_row_payment_status(row: Dict[str, Any]) -> Optional[str]:
+    if not isinstance(row, dict):
+        return None
+    payment_status = row.get("payment_status")
+    latest_payment = row.get("latest_payment")
+    if not payment_status and isinstance(latest_payment, dict):
+        payment_status = latest_payment.get("status")
+    return payment_status
+
+
+def is_cancelled_order(row: Dict[str, Any], *, order_status: Optional[str] = None) -> bool:
+    status_value = order_status if order_status is not None else normalize_order_status((row or {}).get("status") or (row or {}).get("order_status"))
+    return status_value in CANCELLED_ORDER_STATUSES
+
+
+def is_confirmed_sales_order(
+    row: Dict[str, Any], *, order_status: Optional[str] = None, payment_status: Optional[str] = None
+) -> bool:
+    status_value = order_status if order_status is not None else normalize_order_status((row or {}).get("status") or (row or {}).get("order_status"))
+    payment_value = payment_status if payment_status is not None else normalize_payment_status(_extract_row_payment_status(row))
+    return payment_value in CONFIRMED_PAYMENT_STATUSES and status_value not in CANCELLED_ORDER_STATUSES
+
+
+def is_pending_review_order(
+    row: Dict[str, Any], *, order_status: Optional[str] = None, payment_status: Optional[str] = None
+) -> bool:
+    status_value = order_status if order_status is not None else normalize_order_status((row or {}).get("status") or (row or {}).get("order_status"))
+    payment_value = payment_status if payment_status is not None else normalize_payment_status(_extract_row_payment_status(row))
+    return payment_value in PENDING_REVIEW_PAYMENT_STATUSES and status_value not in CANCELLED_ORDER_STATUSES
 
 
 class SalesChannelCreate(BaseModel):
@@ -2521,17 +2569,20 @@ def _build_sales_report_payload(
             cost_total = sum(_line_cost(item) for item in matched_items)
             profit_total = sum(_line_profit(item) for item in matched_items)
 
-        payment_status = str(order.get("payment_status") or "").lower()
-        if payment_status == "pending":
-            payment_status = "pending_review"
+        order_status_value = normalize_order_status(order.get("status") or order.get("order_status"))
+        payment_status_value = normalize_payment_status(order.get("payment_status"))
+        is_confirmed = is_confirmed_sales_order(order, order_status=order_status_value, payment_status=payment_status_value)
+        is_pending_review = is_pending_review_order(order, order_status=order_status_value, payment_status=payment_status_value)
+        include_financials = not is_cancelled_order(order, order_status=order_status_value)
 
-        if payment_status == "paid":
+        if is_confirmed:
             summary["total_sales_confirmed"] += amount_total
-        elif payment_status == "pending_review":
+        elif is_pending_review:
             summary["pending_revenue"] += amount_total
 
-        summary["total_cost"] += cost_total
-        summary["gross_profit"] += profit_total
+        if include_financials:
+            summary["total_cost"] += cost_total
+            summary["gross_profit"] += profit_total
         summary["order_count"] += 1
 
         order_rows.append({
@@ -2540,7 +2591,7 @@ def _build_sales_report_payload(
             "channel_id": order.get("channel_id"),
             "channel_name": order.get("channel_name"),
             "status": order.get("status") or order.get("order_status"),
-            "payment_status": payment_status,
+            "payment_status": payment_status_value,
             "sales_amount": amount_total,
             "cost_amount": cost_total,
             "gross_profit": profit_total,
@@ -2560,11 +2611,12 @@ def _build_sales_report_payload(
             },
         )
         channel_entry["orders"] += 1
-        if payment_status == "paid":
+        if is_confirmed:
             channel_entry["sales_confirmed"] += amount_total
-        elif payment_status == "pending_review":
+        elif is_pending_review:
             channel_entry["pending_revenue"] += amount_total
-        channel_entry["gross_profit"] += profit_total
+        if include_financials:
+            channel_entry["gross_profit"] += profit_total
 
         channel_id_value = order.get("channel_id")
         if channel_id_value is not None:
@@ -2586,22 +2638,23 @@ def _build_sales_report_payload(
                 "channel_name": order.get("channel_name"),
             })
 
-            product_key = str(item.get("product_id") or "unassigned")
-            product_entry = product_totals.setdefault(
-                product_key,
-                {
-                    "product_id": item.get("product_id"),
-                    "product_name": item.get("product_name") or _make_fallback_label("Product", item.get("product_id")),
-                    "quantity": 0,
-                    "sales_amount": 0.0,
-                    "cost_amount": 0.0,
-                    "gross_profit": 0.0,
-                },
-            )
-            product_entry["quantity"] += int(item.get("quantity") or 0)
-            product_entry["sales_amount"] += sales_amount
-            product_entry["cost_amount"] += cost_amount
-            product_entry["gross_profit"] += profit_amount
+            if include_financials:
+                product_key = str(item.get("product_id") or "unassigned")
+                product_entry = product_totals.setdefault(
+                    product_key,
+                    {
+                        "product_id": item.get("product_id"),
+                        "product_name": item.get("product_name") or _make_fallback_label("Product", item.get("product_id")),
+                        "quantity": 0,
+                        "sales_amount": 0.0,
+                        "cost_amount": 0.0,
+                        "gross_profit": 0.0,
+                    },
+                )
+                product_entry["quantity"] += int(item.get("quantity") or 0)
+                product_entry["sales_amount"] += sales_amount
+                product_entry["cost_amount"] += cost_amount
+                product_entry["gross_profit"] += profit_amount
 
             if item.get("product_id") is not None:
                 product_options[str(item.get("product_id"))] = item.get("product_name") or _make_fallback_label("Product", item.get("product_id"))
@@ -2804,8 +2857,8 @@ def _build_dashboard_summary(orders: List[Dict[str, Any]], today_start: datetime
     default_dt = datetime.min.replace(tzinfo=timezone.utc)
 
     for order in orders:
-        status_value = str(order.get("status") or order.get("order_status") or "").strip()
-        payment_status_value = str(order.get("payment_status") or "").strip().lower()
+        status_value = normalize_order_status(order.get("status") or order.get("order_status"))
+        payment_status_value = normalize_payment_status(order.get("payment_status"))
         created_dt = _parse_iso_datetime(order.get("created_at"))
         created_in_tz = created_dt.astimezone(tzinfo) if created_dt else None
         is_today = bool(created_in_tz and today_start <= created_in_tz < today_end)
@@ -2813,15 +2866,15 @@ def _build_dashboard_summary(orders: List[Dict[str, Any]], today_start: datetime
         if is_today:
             today_orders_count += 1
             amount = _parse_float(order.get("total_amount"))
-            if payment_status_value == "paid":
+            if is_confirmed_sales_order(order, order_status=status_value, payment_status=payment_status_value):
                 confirmed_revenue_today += amount
-            elif payment_status_value == "pending_review":
+            elif is_pending_review_order(order, order_status=status_value, payment_status=payment_status_value):
                 pending_revenue_today += amount
 
-        if payment_status_value == "pending_review" or status_value == "waiting_payment_review":
+        if is_pending_review_order(order, order_status=status_value, payment_status=payment_status_value) or status_value == "waiting_payment_review":
             pending_payment_review_count += 1
 
-        if payment_status_value == "paid":
+        if is_confirmed_sales_order(order, order_status=status_value, payment_status=payment_status_value):
             paid_orders_count += 1
 
         if status_value and status_value not in _FINALIZED_ORDER_STATUSES:
