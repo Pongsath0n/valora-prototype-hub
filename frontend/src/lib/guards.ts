@@ -20,24 +20,29 @@ export function useRoleGuard(allowedRoles?: AppRole[]) {
       return;
     }
 
-    supabase
-      .from("profiles")
-      .select("role")
-      .eq("id", user.id)
-      .single()
-      .then(({ data }) => {
+    const fetchRole = async () => {
+      try {
+        const { data } = await supabase
+          .from("profiles")
+          .select("role")
+          .eq("id", user.id)
+          .single();
+
         const profileRole = (data?.role ?? null) as AppRole;
         setRole(profileRole);
 
         if (allowedRoles && !allowedRoles.includes(profileRole)) {
           setAccessDenied(true);
         }
-        setChecking(false);
-      })
-      .catch(() => {
+      } catch (error) {
+        console.error("Failed to fetch role", error);
         setAccessDenied(true);
+      } finally {
         setChecking(false);
-      });
+      }
+    };
+
+    void fetchRole();
   }, [authLoading, user, navigate, allowedRoles]);
 
   return { checking, role, accessDenied };
@@ -48,7 +53,10 @@ export async function adminLogout() {
 }
 
 /** Roles allowed to access store-admin routes (/admin/*). */
-export const STORE_ADMIN_ROLES: AppRole[] = ["owner", "admin", "staff"];
+export const STORE_ADMIN_ROLES: AppRole[] = ["owner", "admin", "manager", "staff"];
+
+/** Roles allowed to access business portal routes (/app/*). */
+export const BUSINESS_PORTAL_ROLES: AppRole[] = ["owner", "admin", "manager"];
 
 /**
  * Roles allowed to access the internal system console (/system/*).
@@ -62,6 +70,11 @@ export const SYSTEM_CONSOLE_ROLES: AppRole[] = ["owner"];
 /** Convenience guard for store-admin routes. */
 export function useAdminGuard() {
   return useRoleGuard(STORE_ADMIN_ROLES);
+}
+
+/** Convenience guard for business portal routes. */
+export function useBusinessGuard() {
+  return useRoleGuard(BUSINESS_PORTAL_ROLES);
 }
 
 /** Convenience guard for the internal system console. */

@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { RoleProvider } from "@/contexts/RoleContext";
-import { STORE_ADMIN_ROLES, SYSTEM_CONSOLE_ROLES, useRoleGuard } from "@/lib/guards";
+import { BUSINESS_PORTAL_ROLES, STORE_ADMIN_ROLES, SYSTEM_CONSOLE_ROLES, useRoleGuard } from "@/lib/guards";
 
 import Landing from "./pages/Landing";
 import Login from "./pages/Login";
@@ -70,6 +70,13 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+function BusinessRoute({ children }: { children: React.ReactNode }) {
+  const { checking, accessDenied } = useRoleGuard(BUSINESS_PORTAL_ROLES);
+  if (checking) return <div className="min-h-screen flex items-center justify-center">กำลังโหลด...</div>;
+  if (accessDenied) return <div className="min-h-screen flex items-center justify-center text-xl font-semibold">Access Denied</div>;
+  return <>{children}</>;
+}
+
 function SystemRoute({ children }: { children: React.ReactNode }) {
   // TODO: introduce a dedicated `internal_system` role; until then, only `owner` can access.
   const { checking, accessDenied } = useRoleGuard(SYSTEM_CONSOLE_ROLES);
@@ -114,11 +121,11 @@ function AppRoutes() {
       <Route path="/system/storage" element={<SystemRoute><SystemStoragePage /></SystemRoute>} />
       <Route path="/system/audit-logs" element={<SystemRoute><SystemAuditLogsPage /></SystemRoute>} />
 
-      <Route path="/app/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+      <Route path="/app/dashboard" element={<ProtectedRoute><BusinessRoute><Dashboard /></BusinessRoute></ProtectedRoute>} />
       <Route path="/app/scenario" element={<ProtectedRoute><Scenario /></ProtectedRoute>} />
       <Route path="/app/promo" element={<ProtectedRoute><Promo /></ProtectedRoute>} />
       <Route path="/app/delivery" element={<ProtectedRoute><Delivery /></ProtectedRoute>} />
-      <Route path="/app/reports" element={<ProtectedRoute><Reports /></ProtectedRoute>} />
+      <Route path="/app/reports" element={<ProtectedRoute><BusinessRoute><Reports /></BusinessRoute></ProtectedRoute>} />
       <Route path="/app/menu" element={<ProtectedRoute><MenuManagement /></ProtectedRoute>} />
       <Route path="/app/ingredients" element={<ProtectedRoute><IngredientsStock /></ProtectedRoute>} />
       <Route path="/app/recipes" element={<ProtectedRoute><RecipeCosting /></ProtectedRoute>} />

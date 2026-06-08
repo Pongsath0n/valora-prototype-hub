@@ -51,6 +51,14 @@ _DASHBOARD_QUEUE_STATUSES: List[str] = [
 _FINALIZED_ORDER_STATUSES: Set[str] = {"completed", "cancelled"}
 _RECENT_ORDERS_LIMIT = 10
 
+_BUSINESS_ROLES: Set[str] = {"owner", "admin", "manager"}
+_MANAGERIAL_ROLES: Set[str] = set(_BUSINESS_ROLES)
+_OPERATOR_ROLES: Set[str] = {"owner", "admin", "manager", "staff"}
+_PAYMENT_REVIEW_ROLES: Set[str] = set(_OPERATOR_ROLES)
+_STAFF_ORDER_STATUS_ALLOWED: Set[str] = {"accepted", "preparing", "ready", "completed"}
+_ORDER_FINANCIAL_FIELDS: Set[str] = {"total_cost", "gross_profit"}
+_ORDER_ITEM_FINANCIAL_FIELDS: Set[str] = {"unit_cost", "line_cost", "line_profit"}
+
 
 class SalesChannelCreate(BaseModel):
     name: str
@@ -315,19 +323,36 @@ def _get_memberships(client: Client, user_id: str) -> List[Dict[str, Any]]:
     return memberships
 
 
+def _normalize_store_role(value: Optional[str]) -> str:
+    return str(value or "").strip().lower()
+
+
 def _resolve_store_id(memberships: List[Dict[str, Any]], store_id: Optional[str]) -> Tuple[str, str]:
     if store_id:
         for m in memberships:
             if str(m.get("store_id")) == str(store_id):
-                return str(m.get("store_id")), str(m.get("role") or "")
+                normalized_role = _normalize_store_role(m.get("role"))
+                return str(m.get("store_id")), normalized_role
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="store_access_denied")
 
     chosen = memberships[0]
-    return str(chosen.get("store_id")), str(chosen.get("role") or "")
+    return str(chosen.get("store_id")), _normalize_store_role(chosen.get("role"))
+
+
+def _is_business_role(role: str) -> bool:
+    return _normalize_store_role(role) in _BUSINESS_ROLES
 
 
 def _is_managerial(role: str) -> bool:
-    return (role or "").lower() in {"owner", "manager", "admin"}
+    return _is_business_role(role)
+
+
+def _is_owner(role: str) -> bool:
+    return _normalize_store_role(role) == "owner"
+
+
+def _is_staff_or_above(role: str) -> bool:
+    return _normalize_store_role(role) in _OPERATOR_ROLES
 
 
 def _require_manager(role: str) -> None:
@@ -335,10 +360,52 @@ def _require_manager(role: str) -> None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="insufficient_role")
 
 
+def _require_business_role(role: str) -> None:
+    if not _is_business_role(role):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="insufficient_role")
+
+
+def _require_staff_or_above(role: str) -> None:
+    if not _is_staff_or_above(role):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="insufficient_role")
+
+
 def _require_owner_profile(profile: Dict[str, Any]) -> None:
-    role_value = str((profile or {}).get("role") or "").lower()
+    role_value = _normalize_store_role((profile or {}).get("role"))
     if role_value != "owner":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="owner_role_required")
+
+
+def _require_owner_store_role(role: str) -> None:
+    if not _is_owner(role):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="owner_role_required")
+
+
+def _ensure_staff_can_manage_payments(role: str) -> None:
+    if _normalize_store_role(role) not in _PAYMENT_REVIEW_ROLES:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="insufficient_role")
+
+
+def _mask_financial_fields(row: Dict[str, Any]) -> Dict[str, Any]:
+    masked = dict(row)
+    for fld in _ORDER_FINANCIAL_FIELDS:
+        if fld in masked:
+            masked[fld] = None
+    latest_payment = masked.get("latest_payment")
+    if isinstance(latest_payment, dict):
+        masked["latest_payment"] = _mask_payment(latest_payment)
+    return masked
+
+
+def _mask_order_item_fields(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    masked: List[Dict[str, Any]] = []
+    for item in items:
+        sanitized = dict(item)
+        for fld in _ORDER_ITEM_FINANCIAL_FIELDS:
+            if fld in sanitized:
+                sanitized[fld] = None
+        masked.append(sanitized)
+    return masked
 
 
 def _get_system_ctx(authorization: Optional[str]) -> Dict[str, Any]:
@@ -2890,7 +2957,9 @@ def _get_order_customer_context(client: Client, store_id: str, order_id: str) ->
 @router.get("/orders")
 def list_orders(authorization: Optional[str] = Header(None), store_id: Optional[str] = None) -> Dict[str, Any]:
     ctx = _get_ctx(authorization)
-    store_id_resolved, _role = _resolve_store_id(ctx["memberships"], store_id)
+    store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
+    _require_staff_or_above(role)
+    is_staff = _normalize_store_role(role) == "staff"
 
     rows = _fetch_store_orders(ctx["client"], store_id_resolved)
     customer_map, channel_map = _load_order_relation_maps(ctx["client"], store_id_resolved, rows)
@@ -2921,6 +2990,14 @@ def list_orders(authorization: Optional[str] = Header(None), store_id: Optional[
         itemized = _map_order(row, customer_map, channel_map, latest_payments.get(oid))
         itemized["items"] = item_map.get(str(row.get("id")), [])
         mapped.append(itemized)
+
+    if is_staff:
+        masked_orders: List[Dict[str, Any]] = []
+        for order in mapped:
+            masked_order = _mask_financial_fields(order)
+            masked_order["items"] = _mask_order_item_fields(order.get("items") or [])
+            masked_orders.append(masked_order)
+        mapped = masked_orders
 
     return {"items": mapped, "store_id": store_id_resolved}
 
@@ -3003,7 +3080,9 @@ def create_order(payload: OrderCreate, authorization: Optional[str] = Header(Non
 @router.get("/orders/{order_id}")
 def get_order(order_id: str, authorization: Optional[str] = Header(None), store_id: Optional[str] = None) -> Dict[str, Any]:
     ctx = _get_ctx(authorization)
-    store_id_resolved, _role = _resolve_store_id(ctx["memberships"], store_id)
+    store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
+    _require_staff_or_above(role)
+    is_staff = _normalize_store_role(role) == "staff"
 
     use_channel_fee = True
     while True:
@@ -3042,7 +3121,12 @@ def get_order(order_id: str, authorization: Optional[str] = Header(None), store_
 
     latest_map = _load_latest_payments(ctx["client"], [str(row.get("id"))])
     mapped = _map_order(row, customer_map, channel_map, latest_map.get(str(row.get("id"))))
-    mapped["items"] = [_map_order_item(i) for i in (getattr(item_resp, "data", None) or [])]
+    raw_items = [_map_order_item(i) for i in (getattr(item_resp, "data", None) or [])]
+    if is_staff:
+        masked_order = _mask_financial_fields(mapped)
+        masked_order["items"] = _mask_order_item_fields(raw_items)
+        return masked_order
+    mapped["items"] = raw_items
     return mapped
 
 
@@ -3130,7 +3214,8 @@ def delete_order(order_id: str, authorization: Optional[str] = Header(None), sto
 def update_order_status(order_id: str, payload: OrderStatusUpdate, authorization: Optional[str] = Header(None), store_id: Optional[str] = None) -> Dict[str, Any]:
     ctx = _get_ctx(authorization)
     store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
-    _require_manager(role)
+    _require_staff_or_above(role)
+    normalized_role = _normalize_store_role(role)
 
     current = _get_order_row(ctx["client"], order_id, store_id_resolved)
     next_status = payload.status
@@ -3139,6 +3224,9 @@ def update_order_status(order_id: str, payload: OrderStatusUpdate, authorization
 
     if not _valid_order_transition(str(current.get("status") or ""), str(next_status)):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid_status_transition")
+
+    if normalized_role == "staff" and str(next_status) not in _STAFF_ORDER_STATUS_ALLOWED:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="insufficient_role_for_status")
 
     resp = ctx["client"].table("orders").update({"status": next_status}).eq("id", order_id).eq("store_id", store_id_resolved).execute()
     if getattr(resp, "error", None):
@@ -3206,7 +3294,9 @@ def cancel_order(order_id: str, payload: OrderCancelPayload, authorization: Opti
 @router.get("/orders/{order_id}/items")
 def list_order_items(order_id: str, authorization: Optional[str] = Header(None), store_id: Optional[str] = None) -> Dict[str, Any]:
     ctx = _get_ctx(authorization)
-    store_id_resolved, _role = _resolve_store_id(ctx["memberships"], store_id)
+    store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
+    _require_staff_or_above(role)
+    is_staff = _normalize_store_role(role) == "staff"
     _get_order_row(ctx["client"], order_id, store_id_resolved)
 
     list_query = (
@@ -3222,7 +3312,10 @@ def list_order_items(order_id: str, authorization: Optional[str] = Header(None),
     if getattr(resp, "error", None):
         raise HTTPException(status_code=500, detail="order_items_query_failed")
     rows = getattr(resp, "data", None) or []
-    return {"items": [_map_order_item(r) for r in rows], "order_id": order_id, "store_id": store_id_resolved}
+    items = [_map_order_item(r) for r in rows]
+    if is_staff:
+        items = _mask_order_item_fields(items)
+    return {"items": items, "order_id": order_id, "store_id": store_id_resolved}
 
 
 @router.post("/orders/{order_id}/items")
@@ -3410,6 +3503,17 @@ def _map_payment(row: Dict[str, Any], order_context: Optional[Dict[str, Any]] = 
     }
 
 
+def _mask_payment(row: Dict[str, Any]) -> Dict[str, Any]:
+    masked = dict(row)
+    masked.pop("slip_url", None)
+    masked.pop("slip_storage_path", None)
+    masked.pop("slip_file_name", None)
+    masked.pop("confirmed_by", None)
+    masked.pop("confirmed_at", None)
+    masked.pop("reject_reason", None)
+    return masked
+
+
 def _write_payment_status_log(
     client: Client,
     payment_id: str,
@@ -3512,7 +3616,8 @@ def _sync_order_payment_status(
 @router.get("/payments/{payment_id}/slip-preview")
 def get_payment_slip_preview(payment_id: str, authorization: Optional[str] = Header(None), store_id: Optional[str] = None) -> Dict[str, Any]:
     ctx = _get_ctx(authorization)
-    store_id_resolved, _role = _resolve_store_id(ctx["memberships"], store_id)
+    store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
+    _ensure_staff_can_manage_payments(role)
 
     payment_row = _get_payment_row(ctx["client"], payment_id, store_id_resolved)
     storage_path = payment_row.get("slip_storage_path")
@@ -3538,7 +3643,9 @@ def get_payment_slip_preview(payment_id: str, authorization: Optional[str] = Hea
 @router.get("/payments")
 def list_payments(authorization: Optional[str] = Header(None), store_id: Optional[str] = None) -> Dict[str, Any]:
     ctx = _get_ctx(authorization)
-    store_id_resolved, _role = _resolve_store_id(ctx["memberships"], store_id)
+    store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
+    _ensure_staff_can_manage_payments(role)
+    is_staff = _normalize_store_role(role) == "staff"
 
     all_orders = _fetch_store_orders(ctx["client"], store_id_resolved)
     if not all_orders:
@@ -3585,6 +3692,8 @@ def list_payments(authorization: Optional[str] = Header(None), store_id: Optiona
         oid = str(row.get("order_id")) if row.get("order_id") else None
         order_ctx = order_map.get(oid) if oid else None
         payment = _map_payment(row, order_ctx)
+        if is_staff:
+            payment = _mask_payment(payment)
         mapped.append(payment)
         order_status = (order_ctx or {}).get("status")
         order_payment_status = (order_ctx or {}).get("payment_status")
@@ -3597,7 +3706,9 @@ def list_payments(authorization: Optional[str] = Header(None), store_id: Optiona
 @router.get("/orders/{order_id}/payments")
 def list_order_payments(order_id: str, authorization: Optional[str] = Header(None), store_id: Optional[str] = None) -> Dict[str, Any]:
     ctx = _get_ctx(authorization)
-    store_id_resolved, _role = _resolve_store_id(ctx["memberships"], store_id)
+    store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
+    _ensure_staff_can_manage_payments(role)
+    is_staff = _normalize_store_role(role) == "staff"
     order_row = _get_order_row(ctx["client"], order_id, store_id_resolved)
 
     select_cols = _payment_select_clause(ctx["client"], include_relations=False, include_slip_fields=True)
@@ -3622,7 +3733,10 @@ def list_order_payments(order_id: str, authorization: Optional[str] = Header(Non
         "status": order_row.get("status"),
         "payment_status": order_row.get("payment_status"),
     }
-    return {"items": [_map_payment(r, order_ctx) for r in rows], "order_id": order_id, "store_id": store_id_resolved}
+    payments = [_map_payment(r, order_ctx) for r in rows]
+    if is_staff:
+        payments = [_mask_payment(p) for p in payments]
+    return {"items": payments, "order_id": order_id, "store_id": store_id_resolved}
 
 
 @router.post("/orders/{order_id}/payments")
@@ -3790,7 +3904,7 @@ def update_payment(payment_id: str, payload: PaymentUpdate, authorization: Optio
 def submit_payment_slip(payment_id: str, payload: PaymentSubmitSlip, authorization: Optional[str] = Header(None), store_id: Optional[str] = None) -> Dict[str, Any]:
     ctx = _get_ctx(authorization)
     store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
-    _require_manager(role)
+    _ensure_staff_can_manage_payments(role)
 
     current = _get_payment_row(ctx["client"], payment_id, store_id_resolved)
     if not _valid_payment_transition(str(current.get("status") or ""), "pending_review"):
@@ -3845,7 +3959,7 @@ def submit_payment_slip(payment_id: str, payload: PaymentSubmitSlip, authorizati
 def approve_payment(payment_id: str, payload: Optional[PaymentApprovePayload] = None, authorization: Optional[str] = Header(None), store_id: Optional[str] = None) -> Dict[str, Any]:
     ctx = _get_ctx(authorization)
     store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
-    _require_manager(role)
+    _ensure_staff_can_manage_payments(role)
 
     current = _get_payment_row(ctx["client"], payment_id, store_id_resolved)
     if not _valid_payment_transition(str(current.get("status") or ""), "paid"):
@@ -3921,7 +4035,7 @@ def approve_payment(payment_id: str, payload: Optional[PaymentApprovePayload] = 
 def reject_payment(payment_id: str, payload: PaymentRejectPayload, authorization: Optional[str] = Header(None), store_id: Optional[str] = None) -> Dict[str, Any]:
     ctx = _get_ctx(authorization)
     store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
-    _require_manager(role)
+    _ensure_staff_can_manage_payments(role)
 
     current = _get_payment_row(ctx["client"], payment_id, store_id_resolved)
     if not _valid_payment_transition(str(current.get("status") or ""), "rejected"):
