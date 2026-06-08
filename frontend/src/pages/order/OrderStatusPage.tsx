@@ -526,10 +526,26 @@ export default function OrderStatusPage() {
           </p>
           <div className="mt-3 space-y-3">
             {statusData.items.map((item, idx) => (
-              <div key={`${item.product_name}-${idx}`} className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-semibold">{item.product_name || "เมนู"}</p>
-                  <p className="text-xs text-muted-foreground">x{item.quantity}</p>
+              <div key={`${item.product_name}-${idx}`} className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="h-12 w-12 overflow-hidden rounded-lg border bg-muted">
+                    {item.image_url ? (
+                      <img
+                        src={item.image_url}
+                        alt={item.product_name || "เมนู"}
+                        className="h-full w-full object-cover"
+                        onError={(e) => {
+                          e.currentTarget.style.display = "none";
+                        }}
+                      />
+                    ) : (
+                      <div className="flex h-full w-full items-center justify-center text-[10px] text-muted-foreground">ไม่มีรูป</div>
+                    )}
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold">{item.product_name || "เมนู"}</p>
+                    <p className="text-xs text-muted-foreground">x{item.quantity}</p>
+                  </div>
                 </div>
                 <p className="text-sm font-semibold">{formatCurrency(item.line_total)}</p>
               </div>

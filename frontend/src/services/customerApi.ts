@@ -36,6 +36,7 @@ export type OrderStatusItem = {
   product_name?: string | null;
   quantity: number;
   line_total: number;
+  image_url?: string | null;
 };
 
 export type OrderStatusPaymentSummary = {

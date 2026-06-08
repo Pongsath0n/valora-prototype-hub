@@ -65,27 +65,45 @@ export default function CustomerMenuPage() {
             to={`/liff/menu/${m.id}`}
             className="group block rounded-2xl border bg-white p-4 shadow-sm transition-all hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md active:scale-[0.99]"
           >
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <p className="font-semibold leading-snug">{m.name}</p>
-                {m.description ? (
-                  <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{m.description}</p>
-                ) : null}
-                {m.category ? (
-                  <span className="mt-2 inline-flex rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">
-                    {m.category}
-                  </span>
-                ) : null}
+            <div className="flex gap-3">
+              <div className="h-16 w-16 shrink-0 overflow-hidden rounded-xl border bg-muted">
+                {m.image_url ? (
+                  <img
+                    src={m.image_url}
+                    alt={m.name}
+                    className="h-full w-full object-cover"
+                    onError={(e) => {
+                      e.currentTarget.style.display = "none";
+                    }}
+                  />
+                ) : (
+                  <div className="flex h-full w-full items-center justify-center text-[11px] text-muted-foreground">ไม่มีรูป</div>
+                )}
               </div>
-              <span className="shrink-0 rounded-full bg-primary/10 px-3 py-1 text-sm font-semibold text-primary">
-                ฿{m.price.toLocaleString()}
-              </span>
-            </div>
-            <div className="mt-3 flex items-center justify-end">
-              <span className="inline-flex items-center gap-1 text-sm font-semibold text-primary">
-                เลือกเมนูนี้
-                <span aria-hidden className="transition-transform group-hover:translate-x-0.5">→</span>
-              </span>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="font-semibold leading-snug">{m.name}</p>
+                    {m.description ? (
+                      <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{m.description}</p>
+                    ) : null}
+                    {m.category ? (
+                      <span className="mt-2 inline-flex rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">
+                        {m.category}
+                      </span>
+                    ) : null}
+                  </div>
+                  <span className="shrink-0 rounded-full bg-primary/10 px-3 py-1 text-sm font-semibold text-primary">
+                    ฿{m.price.toLocaleString()}
+                  </span>
+                </div>
+                <div className="mt-3 flex items-center justify-end">
+                  <span className="inline-flex items-center gap-1 text-sm font-semibold text-primary">
+                    เลือกเมนูนี้
+                    <span aria-hidden className="transition-transform group-hover:translate-x-0.5">→</span>
+                  </span>
+                </div>
+              </div>
             </div>
           </Link>
         ))}

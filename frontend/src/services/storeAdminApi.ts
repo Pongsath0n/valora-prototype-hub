@@ -531,6 +531,25 @@ export const storeAdminApi = {
     return request<{ status: string }>(`/api/store-admin/menus/${id}`, { method: "DELETE" });
   },
 
+  async uploadProductImage(productId: string, file: File): Promise<ApiProduct> {
+    const token = await getAccessToken();
+    const formData = new FormData();
+    formData.append("file", file);
+    const res = await fetch(`${BACKEND_BASE}/api/store-admin/products/${productId}/image`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      body: formData,
+    });
+    const body = await res.json().catch(() => null);
+    if (!res.ok || !body) {
+      const reason = (body as any)?.detail || res.statusText || "upload_failed";
+      throw new Error(typeof reason === "string" ? reason : "upload_failed");
+    }
+    return body.product as ApiProduct;
+  },
+
   // Ingredients
   async listIngredients(): Promise<{ items: ApiIngredient[]; store_id: string }> {
     return request("/api/store-admin/ingredients");

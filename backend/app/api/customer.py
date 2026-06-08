@@ -447,6 +447,7 @@ def _load_order_items(client: Client, order_id: str) -> List[Dict[str, Any]]:
         "quantity",
         "unit_price",
         "total_price",
+        "products(image_url)",
     ]
     while True:
         query = client.table("order_items").select(", ".join(select_cols)).eq("order_id", order_id)
@@ -466,6 +467,10 @@ def _load_order_items(client: Client, order_id: str) -> List[Dict[str, Any]]:
                     or row.get("name")
                     or row.get("product_id")
                 )
+                product_rel = row.get("products") if isinstance(row, dict) else None
+                product_image = None
+                if isinstance(product_rel, dict):
+                    product_image = product_rel.get("image_url")
                 quantity = int(row.get("quantity") or 0)
                 unit_price_value = row.get("unit_price")
                 if unit_price_value is None:
@@ -481,6 +486,7 @@ def _load_order_items(client: Client, order_id: str) -> List[Dict[str, Any]]:
                         "quantity": quantity,
                         "line_total": float(line_total or 0.0),
                         "unit_price": unit_price,
+                        "image_url": product_image,
                     }
                 )
             return items
@@ -647,6 +653,7 @@ def _build_customer_order_status_response(
                 "product_name": item.get("product_name"),
                 "quantity": item.get("quantity"),
                 "line_total": item.get("line_total"),
+                "image_url": item.get("image_url"),
             }
             for item in items
         ],

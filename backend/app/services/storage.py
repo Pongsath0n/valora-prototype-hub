@@ -97,6 +97,67 @@ def upload_payment_slip(bucket: str, path: str, data: bytes, content_type: str) 
     return UploadedFile(path=path, file_name=path.split("/")[-1], public_url=public_url).as_dict()
 
 
+def upload_public_asset(bucket: str, path: str, data: bytes, content_type: str) -> Dict[str, Any]:
+    if not bucket:
+        raise StorageUploadError("menu_image_storage_not_configured")
+    if not path:
+        raise StorageUploadError("menu_image_storage_path_missing")
+
+    _, storage_client = _get_storage_client(bucket)
+    size_bytes = len(data or b"")
+    logger.info(
+        "storage_public_upload_begin bucket=%s key=%s size=%s content_type=%s",
+        bucket,
+        _short_path(path),
+        size_bytes,
+        content_type or "unknown",
+    )
+    try:
+        storage_client.upload(
+            path,
+            data,
+            {
+                "content-type": content_type or "application/octet-stream",
+                "cache-control": "public, max-age=86400",
+                "upsert": "true",
+            },
+        )
+        logger.info(
+            "storage_public_upload_success bucket=%s key=%s",
+            bucket,
+            _short_path(path),
+        )
+    except Exception as exc:  # pragma: no cover
+        logger.error(
+            "storage_public_upload_failed bucket=%s key=%s detail=%s",
+            bucket,
+            _short_path(path),
+            str(exc)[:300],
+        )
+        raise StorageUploadError("menu_image_upload_failed") from exc
+
+    public_url = None
+    try:
+        public_resp = storage_client.get_public_url(path)
+        if isinstance(public_resp, dict):
+            public_url = public_resp.get("publicUrl")
+        elif isinstance(public_resp, str):
+            public_url = public_resp
+    except Exception as exc:  # pragma: no cover
+        logger.warning(
+            "storage_public_url_failed bucket=%s key=%s detail=%s",
+            bucket,
+            _short_path(path),
+            str(exc)[:300],
+        )
+        public_url = None
+
+    if not public_url:
+        raise StorageUploadError("menu_image_public_url_missing")
+
+    return UploadedFile(path=path, file_name=path.split("/")[-1], public_url=public_url).as_dict()
+
+
 def create_signed_slip_url(bucket: str, path: str, expires_in: int = 60) -> Dict[str, Any]:
     """Create a short-lived signed URL for a private payment slip."""
     if not bucket:

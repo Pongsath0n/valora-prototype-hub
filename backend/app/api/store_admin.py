@@ -1,10 +1,11 @@
 import logging
+import os
 import re
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple, Literal, Set
 from uuid import uuid4
 
-from fastapi import APIRouter, Header, HTTPException, status
+from fastapi import APIRouter, File, Header, HTTPException, UploadFile, status
 from pydantic import BaseModel
 from supabase import Client
 
@@ -16,7 +17,7 @@ except Exception:  # pragma: no cover
 from app.core.config import settings
 from app.core.supabase import SupabaseConfigurationError, get_supabase_admin_client
 from app.services.notification_sender import send_line_notification
-from app.services.storage import StorageUploadError, create_signed_slip_url
+from app.services.storage import StorageUploadError, create_signed_slip_url, upload_public_asset
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +59,18 @@ _PAYMENT_REVIEW_ROLES: Set[str] = set(_OPERATOR_ROLES)
 _STAFF_ORDER_STATUS_ALLOWED: Set[str] = {"accepted", "preparing", "ready", "completed"}
 _ORDER_FINANCIAL_FIELDS: Set[str] = {"total_cost", "gross_profit"}
 _ORDER_ITEM_FINANCIAL_FIELDS: Set[str] = {"unit_cost", "line_cost", "line_profit"}
+_MENU_IMAGE_ALLOWED_TYPES: Set[str] = {
+    "image/jpeg",
+    "image/jpg",
+    "image/png",
+    "image/webp",
+}
+_MENU_IMAGE_EXTENSION_MAP: Dict[str, str] = {
+    "image/jpeg": "jpg",
+    "image/jpg": "jpg",
+    "image/png": "png",
+    "image/webp": "webp",
+}
 
 
 class SalesChannelCreate(BaseModel):
@@ -1002,6 +1015,23 @@ def _ensure_product_in_store(client: Client, product_id: str, store_id: str) -> 
     return row
 
 
+def _get_product_row(client: Client, product_id: str, store_id: str) -> Dict[str, Any]:
+    query = client.table("products").select("id, store_id, name, image_url").eq("id", product_id).limit(1)
+    if _order_items_supports_store_scope(client):
+        query = query.eq("store_id", store_id)
+    resp = query.execute()
+    error = getattr(resp, "error", None)
+    if error:
+        raise HTTPException(status_code=500, detail="product_lookup_failed")
+    rows = getattr(resp, "data", None) or []
+    if not rows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="product_not_found")
+    row = rows[0]
+    if str(row.get("store_id")) not in {"", "None", None} and str(row.get("store_id")) != str(store_id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="store_mismatch")
+    return row
+
+
 def _ensure_category_in_store(client: Client, category_id: str, store_id: str) -> None:
     resp = client.table("product_categories").select("id, store_id").eq("id", category_id).limit(1).execute()
     error = getattr(resp, "error", None)
@@ -1084,6 +1114,34 @@ def _map_product(row: Dict[str, Any]) -> Dict[str, Any]:
         "description": row.get("description"),
         "created_at": row.get("created_at"),
     }
+
+
+def _menu_image_limit_bytes() -> int:
+    max_mb = float(settings.menu_image_max_mb or 5.0)
+    return int(max(1.0, max_mb) * 1024 * 1024)
+
+
+def _normalize_mime_type(value: Optional[str]) -> str:
+    return str(value or "").strip().lower()
+
+
+def _resolve_menu_image_extension(filename: Optional[str], content_type: str) -> str:
+    normalized = _normalize_mime_type(content_type)
+    if normalized in _MENU_IMAGE_EXTENSION_MAP:
+        return _MENU_IMAGE_EXTENSION_MAP[normalized]
+    if filename:
+        _, ext = os.path.splitext(filename)
+        ext = ext.replace(".", "").strip().lower()
+        if ext in {"jpg", "jpeg", "png", "webp"}:
+            return "jpg" if ext == "jpeg" else ext
+    return "jpg"
+
+
+def _build_menu_image_path(store_id: str, product_id: str, extension: str) -> str:
+    timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
+    suffix = uuid4().hex[:8]
+    safe_ext = extension.lstrip(".").lower() or "jpg"
+    return f"stores/{store_id}/products/{product_id}/{timestamp}-{suffix}.{safe_ext}"
 
 
 def _map_category(row: Dict[str, Any]) -> Dict[str, Any]:
@@ -1477,6 +1535,68 @@ def create_menu(payload: ProductCreate, authorization: Optional[str] = Header(No
         raise
     except Exception:
         raise HTTPException(status_code=500, detail="product_create_failed")
+
+
+@router.post("/products/{product_id}/image")
+async def upload_product_image(product_id: str, authorization: Optional[str] = Header(None), store_id: Optional[str] = None, file: UploadFile = File(...)) -> Dict[str, Any]:
+    ctx = _get_ctx(authorization)
+    store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
+    _require_business_role(role)
+
+    product_row = _get_product_row(ctx["client"], product_id, store_id_resolved)
+
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="empty_file")
+
+    mime_type = _normalize_mime_type(file.content_type or "")
+    if mime_type not in _MENU_IMAGE_ALLOWED_TYPES:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="file_type_not_allowed")
+
+    if len(content) > _menu_image_limit_bytes():
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="file_too_large")
+
+    extension = _resolve_menu_image_extension(file.filename, mime_type)
+    storage_path = _build_menu_image_path(store_id_resolved, product_id, extension)
+
+    try:
+        upload_result = upload_public_asset(
+            bucket=settings.menu_image_bucket,
+            path=storage_path,
+            data=content,
+            content_type=mime_type or "application/octet-stream",
+        )
+    except StorageUploadError as exc:
+        logger.error(
+            "product_image_upload_failed product=%s store=%s detail=%s",
+            _short_identifier(product_id),
+            _short_identifier(store_id_resolved),
+            _safe_error_detail(exc),
+        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
+
+    public_url = upload_result.get("public_url")
+    if not public_url:
+        raise HTTPException(status_code=500, detail="menu_image_public_url_missing")
+
+    update_resp = (
+        ctx["client"]
+        .table("products")
+        .update({"image_url": public_url})
+        .eq("id", product_id)
+        .eq("store_id", store_id_resolved)
+        .execute()
+    )
+    if getattr(update_resp, "error", None):
+        raise HTTPException(status_code=500, detail="product_image_update_failed")
+
+    refreshed = _get_product_row(ctx["client"], product_id, store_id_resolved) | {"image_url": public_url}
+    return {
+        "product": _map_product(refreshed),
+        "image": {
+            "url": public_url,
+        },
+    }
 
 
 @router.patch("/menus/{product_id}")

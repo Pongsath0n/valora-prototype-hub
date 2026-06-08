@@ -7,6 +7,7 @@ import LoadingState from "@/components/shared/LoadingState";
 import FormField from "@/components/shared/FormField";
 import StatusBadge from "@/components/shared/StatusBadge";
 import { storeAdminApi, type ApiProduct, type ApiCategory, type ProductPayload } from "@/services/storeAdminApi";
+import { useProfileRole } from "@/contexts/RoleContext";
 
 type FormState = {
   id?: string;
@@ -32,6 +33,7 @@ const emptyForm: FormState = {
 };
 
 export default function AdminProductsPage() {
+  const { role, loading: roleLoading } = useProfileRole();
   const [rows, setRows] = useState<ApiProduct[]>([]);
   const [categories, setCategories] = useState<ApiCategory[]>([]);
   const [loading, setLoading] = useState(true);
@@ -39,6 +41,9 @@ export default function AdminProductsPage() {
   const [info, setInfo] = useState("");
   const [refreshing, setRefreshing] = useState(false);
   const [form, setForm] = useState<FormState>(emptyForm);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
 
   const valid = useMemo(() => form.name.trim().length > 1 && Number(form.basePrice) >= 0, [form]);
 
@@ -61,6 +66,37 @@ export default function AdminProductsPage() {
     void refresh();
   }, []);
 
+  function resetFileState() {
+    setSelectedFile(null);
+    setImagePreview(null);
+  }
+
+  function handleFileChange(file: File | null) {
+    setSelectedFile(file);
+    if (file) {
+      const previewUrl = URL.createObjectURL(file);
+      setImagePreview(previewUrl);
+    } else {
+      setImagePreview(null);
+    }
+  }
+
+  async function uploadImage(productId: string) {
+    if (!selectedFile) return;
+    try {
+      setUploading(true);
+      const updated = await storeAdminApi.uploadProductImage(productId, selectedFile);
+      setForm((prev) => ({ ...prev, imageUrl: updated.image_url || "" }));
+      setInfo("อัปโหลดรูปสำเร็จ");
+    } catch (err: any) {
+      setError(err?.message || "อัปโหลดรูปไม่สำเร็จ");
+      throw err;
+    } finally {
+      setUploading(false);
+      resetFileState();
+    }
+  }
+
   async function submit() {
     if (!valid) {
       setError("กรุณากรอกชื่อเมนูและราคาขายให้ถูกต้อง");
@@ -79,14 +115,22 @@ export default function AdminProductsPage() {
     };
 
     try {
-      if (form.id) {
-        await storeAdminApi.updateMenu(form.id, payload);
+      let productId = form.id;
+      if (productId) {
+        await storeAdminApi.updateMenu(productId, payload);
         setInfo("อัปเดตเมนูเรียบร้อย");
       } else {
-        await storeAdminApi.createMenu(payload);
+        const created = await storeAdminApi.createMenu(payload);
+        productId = created.id;
         setInfo("เพิ่มเมนูเรียบร้อย");
       }
+
+      if (productId && selectedFile) {
+        await uploadImage(productId);
+      }
+
       setForm(emptyForm);
+      resetFileState();
       void refresh();
     } catch (err: any) {
       const reason = err?.message || "บันทึกไม่สำเร็จ";
@@ -171,6 +215,34 @@ export default function AdminProductsPage() {
               <option value="no">ไม่ระบุ</option>
               <option value="yes">แนะนำ</option>
             </select>
+          </FormField>
+          <FormField label="อัปโหลดรูปเมนู">
+            <div className="space-y-2">
+              <input
+                type="file"
+                accept="image/jpeg,image/jpg,image/png,image/webp"
+                className="form-input"
+                onChange={(e) => handleFileChange(e.target.files?.[0] ?? null)}
+                disabled={roleLoading || role === "staff"}
+              />
+              {imagePreview ? (
+                <img src={imagePreview} alt="ตัวอย่างรูปเมนู" className="h-24 w-24 rounded object-cover border" />
+              ) : form.imageUrl ? (
+                <img src={form.imageUrl} alt="ตัวอย่างรูปเมนู" className="h-24 w-24 rounded object-cover border" />
+              ) : (
+                <div className="h-24 w-24 rounded border bg-muted flex items-center justify-center text-xs text-muted-foreground">ไม่มีรูป</div>
+              )}
+              {selectedFile && form.id ? (
+                <button
+                  type="button"
+                  className="px-3 py-1 text-sm rounded bg-primary text-primary-foreground disabled:opacity-60"
+                  onClick={() => uploadImage(form.id!)}
+                  disabled={uploading}
+                >
+                  {uploading ? "กำลังอัปโหลด..." : "อัปโหลดรูปใหม่"}
+                </button>
+              ) : null}
+            </div>
           </FormField>
           <FormField label="URL รูปภาพเมนู">
             <input

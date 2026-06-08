@@ -34,6 +34,8 @@ class Settings(BaseSettings):
     payment_note_lines: str = Field(default="", alias="PAYMENT_NOTE_LINES")
     payment_slip_max_mb: float = Field(default=5.0, alias="PAYMENT_SLIP_MAX_MB")
     payment_slip_bucket: str = Field(default="payment-slips", alias="PAYMENT_SLIP_BUCKET")
+    menu_image_bucket: str = Field(default="menu-images", alias="MENU_IMAGE_BUCKET")
+    menu_image_max_mb: float = Field(default=5.0, alias="MENU_IMAGE_MAX_MB")
 
 
 settings = Settings()
