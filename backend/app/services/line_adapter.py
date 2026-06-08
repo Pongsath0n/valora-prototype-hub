@@ -87,6 +87,8 @@ def push_line_message(
     - Builds no network transport
     - Performs no LINE Messaging API call
     - Returns safe disabled result contract
+    # TODO(LINE-Identity-Binding): enable real LINE Messaging API push only
+    # after verified line_user_id is bound to orders via LIFF getProfile.
     """
     recipient = str(to or "").strip() or None
 

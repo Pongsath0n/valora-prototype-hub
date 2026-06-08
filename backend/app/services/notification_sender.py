@@ -159,6 +159,28 @@ def send_line_notification(
     message_type: str,
     message_payload: Dict[str, Any],
 ) -> Dict[str, Any]:
+    # Safety gate: never send (or mock-log) without verified LINE identity.
+    # TODO(LINE-Identity-Binding): enable live push only after LIFF getProfile
+    # binds a real line_user_id to the order/customer.
+    effective_line_uid = str(line_user_id or "").strip() or None
+    if not effective_line_uid:
+        logger.warning(
+            "line notification skipped: no line identity order=%s type=%s",
+            order_id,
+            message_type,
+        )
+        return {
+            "mode": "mock",
+            "configured_mode": normalize_line_send_mode(settings.line_send_mode) or "mock",
+            "effective_mode": "skipped",
+            "real_send_enabled": False,
+            "send_status": "skipped",
+            "message_type": message_type,
+            "line_user_id_masked": None,
+            "notification_message": message_payload.get("message") if isinstance(message_payload, dict) else None,
+            "reason": "no_line_identity",
+        }
+
     configured_mode = normalize_line_send_mode(settings.line_send_mode)
 
     if configured_mode == "real_line":

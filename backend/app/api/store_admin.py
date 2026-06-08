@@ -3086,7 +3086,9 @@ def update_order(order_id: str, payload: OrderUpdate, authorization: Optional[st
         if str(new_status) == "ready":
             mock_message = "เครื่องดื่มของคุณพร้อมแล้ว สามารถมารับได้เลยครับ"
             customer_ctx = _get_order_customer_context(ctx["client"], store_id_resolved, order_id)
-            send_line_notification(
+            # TODO(LINE-Identity-Binding): After LIFF getProfile binds line_user_id
+            # to the order/customer, enable live push only for verified orders.
+            notification_result = send_line_notification(
                 ctx["client"],
                 order_id,
                 customer_ctx.get("customer_id"),
@@ -3094,7 +3096,8 @@ def update_order(order_id: str, payload: OrderUpdate, authorization: Optional[st
                 "order_ready",
                 {"order_id": order_id, "message": mock_message},
             )
-            response["mock_notification"] = mock_message
+            if notification_result.get("send_status") != "skipped":
+                response["mock_notification"] = mock_message
 
     return response
 
@@ -3154,7 +3157,9 @@ def update_order_status(order_id: str, payload: OrderStatusUpdate, authorization
     if str(next_status) == "ready":
         mock_message = "เครื่องดื่มของคุณพร้อมแล้ว สามารถมารับได้เลยครับ"
         customer_ctx = _get_order_customer_context(ctx["client"], store_id_resolved, order_id)
-        send_line_notification(
+        # TODO(LINE-Identity-Binding): After LIFF getProfile binds line_user_id
+        # to the order/customer, enable live push only for verified orders.
+        notification_result = send_line_notification(
             ctx["client"],
             order_id,
             customer_ctx.get("customer_id"),
@@ -3162,7 +3167,8 @@ def update_order_status(order_id: str, payload: OrderStatusUpdate, authorization
             "order_ready",
             {"order_id": order_id, "message": mock_message},
         )
-        response["mock_notification"] = mock_message
+        if notification_result.get("send_status") != "skipped":
+            response["mock_notification"] = mock_message
 
     return response
 
@@ -3889,7 +3895,9 @@ def approve_payment(payment_id: str, payload: Optional[PaymentApprovePayload] = 
 
     mock_message = "ตรวจสอบการชำระเงินสำเร็จแล้ว กำลังเตรียมเครื่องดื่มให้คุณ"
     customer_ctx = _get_order_customer_context(ctx["client"], store_id_resolved, order_id)
-    send_line_notification(
+    # TODO(LINE-Identity-Binding): After LIFF getProfile binds line_user_id
+    # to the order/customer, enable live push only for verified orders.
+    notification_result = send_line_notification(
         ctx["client"],
         order_id,
         customer_ctx.get("customer_id"),
@@ -3897,10 +3905,15 @@ def approve_payment(payment_id: str, payload: Optional[PaymentApprovePayload] = 
         "payment_approved",
         {"payment_id": payment_id, "order_id": order_id, "message": mock_message},
     )
+    if notification_result.get("send_status") != "skipped":
+        return {
+            "id": payment_id,
+            "status": "paid",
+            "mock_notification": mock_message,
+        }
     return {
         "id": payment_id,
         "status": "paid",
-        "mock_notification": mock_message,
     }
 
 
