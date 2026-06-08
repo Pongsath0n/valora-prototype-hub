@@ -1,4 +1,4 @@
-import { supabase } from "@/lib/supabase";
+import { storeAdminApi } from "@/services/storeAdminApi";
 import { shopService } from "@/services/mockStorage";
 
 export type StoreSetup = {
@@ -21,33 +21,18 @@ const DEFAULT: StoreSetup = {
 export const storeSetupService = {
   async get(): Promise<StoreSetup> {
     try {
-      const { data: auth } = await supabase.auth.getUser();
-      const userId = auth.user?.id;
-      if (!userId) return fromMock();
-
-      const { data: membership } = await supabase
-        .from("store_members")
-        .select("store_id")
-        .eq("user_id", userId)
-        .limit(1)
-        .maybeSingle();
-
-      if (!membership?.store_id) return fromMock();
-
-      const { data: store } = await supabase
-        .from("stores")
-        .select("id, name, timezone, currency")
-        .eq("id", membership.store_id)
-        .single();
+      const me = await storeAdminApi.getMe();
+      const storeId = me.store_id;
+      if (!storeId) return fromMock();
 
       const base = fromMock();
       return {
-        id: store.id,
-        name: store.name,
+        id: storeId,
+        name: me.store_name || base.name,
         daysOpen: base.daysOpen,
         targetProfit: base.targetProfit,
-        timezone: store.timezone ?? "Asia/Bangkok",
-        currency: store.currency ?? "THB",
+        timezone: me.store_timezone ?? "Asia/Bangkok",
+        currency: me.store_currency ?? "THB",
       };
     } catch {
       return fromMock();
@@ -63,27 +48,12 @@ export const storeSetupService = {
     });
 
     try {
-      const { data: auth } = await supabase.auth.getUser();
-      const userId = auth.user?.id;
-      if (!userId) return payload;
+      const me = await storeAdminApi.getMe();
+      const storeId = me.store_id;
+      if (!storeId) return payload;
 
-      const { data: membership } = await supabase
-        .from("store_members")
-        .select("store_id")
-        .eq("user_id", userId)
-        .limit(1)
-        .maybeSingle();
-
-      if (!membership?.store_id) return payload;
-
-      const update = {
-        name: payload.name,
-        timezone: payload.timezone ?? "Asia/Bangkok",
-        currency: payload.currency ?? "THB",
-      };
-
-      await supabase.from("stores").update(update).eq("id", membership.store_id);
-      return { ...payload, id: membership.store_id };
+      // No backend endpoint for store settings update; persist only to mock storage
+      return { ...payload, id: storeId };
     } catch {
       return payload;
     }

@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { supabase } from "@/lib/supabase";
+import { storeAdminApi } from "@/services/storeAdminApi";
 import type { AppRole } from "@/lib/guards";
 import { useAuth } from "@/contexts/AuthContext";
 
@@ -29,23 +29,16 @@ export function RoleProvider({ children }: { children: ReactNode }) {
 
       setLoading(true);
       try {
-        const { data, error } = await supabase
-          .from("profiles")
-          .select("role")
-          .eq("id", user.id)
-          .single();
-
+        const me = await storeAdminApi.getMe();
         if (cancelled) return;
-        if (error) {
-          setRole(null);
-        } else {
-          setRole((data?.role ?? null) as AppRole);
-        }
-        setLoading(false);
+        setRole((me.role ?? null) as AppRole);
       } catch (_) {
         if (cancelled) return;
         setRole(null);
-        setLoading(false);
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
       }
     }
 

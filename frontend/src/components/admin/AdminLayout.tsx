@@ -3,14 +3,16 @@ import { ArrowLeft, CreditCard, LayoutDashboard, LogOut, Menu, Settings, Soup, S
 import { useState } from "react";
 import LogoBrand from "@/components/LogoBrand";
 import { useAuth } from "@/contexts/AuthContext";
+import { useProfileRole } from "@/contexts/RoleContext";
+import type { AppRole } from "@/lib/guards";
 
 const storeAdminNav = [
   { title: "แดชบอร์ด", path: "/store-admin", icon: LayoutDashboard, end: true },
   { title: "เมนู", path: "/store-admin/menus", icon: Soup },
   { title: "วัตถุดิบ", path: "/store-admin/ingredients", icon: Store },
-  { title: "สูตรและต้นทุน", path: "/store-admin/recipes", icon: Settings },
+  { title: "สูตรและต้นทุน", path: "/store-admin/recipes", icon: Settings, roles: ["owner", "admin", "manager"] as AppRole[] },
   { title: "ช่องทางขาย", path: "/store-admin/channels", icon: Settings },
-  { title: "ราคาตามช่องทาง", path: "/store-admin/channel-pricing", icon: CreditCard },
+  { title: "ราคาตามช่องทาง", path: "/store-admin/channel-pricing", icon: CreditCard, roles: ["owner", "admin", "manager"] as AppRole[] },
   { title: "POS", path: "/store-admin/pos", icon: CreditCard },
   { title: "ออเดอร์", path: "/store-admin/orders", icon: CreditCard },
   { title: "ลูกค้า", path: "/store-admin/customers", icon: Users },
@@ -63,6 +65,12 @@ export default function AdminLayout({
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const navigate = useNavigate();
   const { signOut } = useAuth();
+  const { role } = useProfileRole();
+
+  const visibleNav = storeAdminNav.filter((item) => {
+    if (!item.roles) return true;
+    return role ? item.roles.includes(role) : false;
+  });
 
   async function handleLogout() {
     await signOut();
@@ -85,7 +93,7 @@ export default function AdminLayout({
           <p className="text-[10px] font-semibold text-sidebar-foreground/40 uppercase tracking-widest px-3 mb-2">
             เมนูร้าน
           </p>
-          {storeAdminNav.map((item) => (
+          {visibleNav.map((item) => (
             <StoreNavItem key={item.path} {...item} />
           ))}
         </nav>
@@ -139,7 +147,7 @@ export default function AdminLayout({
             <p className="text-[10px] font-semibold text-sidebar-foreground/40 uppercase tracking-widest px-3 mb-2">
               เมนูร้าน
             </p>
-            {storeAdminNav.map((item) => (
+            {visibleNav.map((item) => (
               <StoreNavItem key={item.path} {...item} onClick={() => setSidebarOpen(false)} />
             ))}
             <div className="pt-3 mt-3 border-t border-sidebar-border space-y-0.5">

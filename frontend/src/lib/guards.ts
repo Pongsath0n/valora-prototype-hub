@@ -1,49 +1,37 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
+import { useProfileRole } from "@/contexts/RoleContext";
 import { supabase } from "@/lib/supabase";
 
 export type AppRole = "owner" | "admin" | "manager" | "staff" | null;
 
 export function useRoleGuard(allowedRoles?: AppRole[]) {
   const { user, loading: authLoading } = useAuth();
+  const { role, loading: roleLoading } = useProfileRole();
   const navigate = useNavigate();
   const [checking, setChecking] = useState(true);
-  const [role, setRole] = useState<AppRole>(null);
   const [accessDenied, setAccessDenied] = useState(false);
 
   useEffect(() => {
-    if (authLoading) return;
+    if (authLoading || roleLoading) {
+      setChecking(true);
+      return;
+    }
 
     if (!user) {
       navigate("/client-access", { replace: true });
       return;
     }
 
-    const fetchRole = async () => {
-      try {
-        const { data } = await supabase
-          .from("profiles")
-          .select("role")
-          .eq("id", user.id)
-          .single();
+    setChecking(false);
 
-        const profileRole = (data?.role ?? null) as AppRole;
-        setRole(profileRole);
-
-        if (allowedRoles && !allowedRoles.includes(profileRole)) {
-          setAccessDenied(true);
-        }
-      } catch (error) {
-        console.error("Failed to fetch role", error);
-        setAccessDenied(true);
-      } finally {
-        setChecking(false);
-      }
-    };
-
-    void fetchRole();
-  }, [authLoading, user, navigate, allowedRoles]);
+    if (allowedRoles && !allowedRoles.includes(role)) {
+      setAccessDenied(true);
+    } else {
+      setAccessDenied(false);
+    }
+  }, [authLoading, roleLoading, user, navigate, allowedRoles, role]);
 
   return { checking, role, accessDenied };
 }

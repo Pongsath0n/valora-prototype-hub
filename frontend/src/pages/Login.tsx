@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/lib/supabase";
+import { storeAdminApi } from "@/services/storeAdminApi";
 import { AlertCircle, Loader2 } from "lucide-react";
 import LogoBrand from "@/components/LogoBrand";
 
@@ -37,33 +38,27 @@ export default function LoginPage() {
         return;
       }
 
-      const { data: profileData, error: profileError } = await supabase
-        .from("profiles")
-        .select("role")
-        .eq("id", userId)
-        .single();
+      try {
+        const me = await storeAdminApi.getMe();
+        const role = (me.role ?? null) as string | null;
+        if (!role) {
+          setError("บัญชีนี้ยังไม่ได้รับสิทธิ์การใช้งาน");
+          return;
+        }
 
-      if (profileError || !profileData) {
+        const hasOnboarded = localStorage.getItem("valora:onboarded") === "1";
+        if (!hasOnboarded) {
+          navigate("/onboarding", { replace: true });
+          return;
+        }
+
+        if (role === "staff") {
+          navigate("/store-admin", { replace: true });
+        } else {
+          navigate("/app/dashboard", { replace: true });
+        }
+      } catch {
         setError("บัญชีนี้ยังไม่ได้รับสิทธิ์การใช้งาน");
-        return;
-      }
-
-      const role = (profileData.role ?? null) as string | null;
-      if (!role) {
-        setError("บัญชีนี้ยังไม่ได้รับสิทธิ์การใช้งาน");
-        return;
-      }
-
-      const hasOnboarded = localStorage.getItem("valora:onboarded") === "1";
-      if (!hasOnboarded) {
-        navigate("/onboarding", { replace: true });
-        return;
-      }
-
-      if (role === "staff") {
-        navigate("/store-admin", { replace: true });
-      } else {
-        navigate("/app/dashboard", { replace: true });
       }
     } catch {
       setError("เกิดข้อผิดพลาด กรุณาลองใหม่");

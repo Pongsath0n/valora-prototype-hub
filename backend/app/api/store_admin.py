@@ -928,6 +928,48 @@ def _get_ctx(authorization: Optional[str]) -> Dict[str, Any]:
     return {"client": client, "user_id": user_id, "profile": profile, "memberships": memberships}
 
 
+@router.get("/me")
+def get_current_user(authorization: Optional[str] = Header(None)) -> Dict[str, Any]:
+    client = _get_client()
+    token = _extract_token(authorization)
+    user_id = _get_user_id(client, token)
+    profile = _get_profile(client, user_id)
+    role = _normalize_store_role(profile.get("role")) if profile else None
+
+    memberships: List[Dict[str, Any]] = []
+    store_id: Optional[str] = None
+    store_name: Optional[str] = None
+    store_timezone: Optional[str] = None
+    store_currency: Optional[str] = None
+
+    try:
+        memberships = _get_memberships(client, user_id)
+        if memberships:
+            chosen = memberships[0]
+            store_id = str(chosen.get("store_id"))
+            try:
+                resp = client.table("stores").select("name, timezone, currency").eq("id", store_id).limit(1).execute()
+                rows = getattr(resp, "data", []) or []
+                if rows:
+                    store_name = rows[0].get("name")
+                    store_timezone = rows[0].get("timezone")
+                    store_currency = rows[0].get("currency")
+            except Exception:
+                pass
+    except HTTPException:
+        pass
+
+    return {
+        "user_id": user_id,
+        "role": role,
+        "store_id": store_id,
+        "store_name": store_name,
+        "store_timezone": store_timezone,
+        "store_currency": store_currency,
+        "memberships": memberships,
+    }
+
+
 @router.get("/channels")
 def list_channels(authorization: Optional[str] = Header(None), store_id: Optional[str] = None) -> Dict[str, Any]:
     ctx = _get_ctx(authorization)

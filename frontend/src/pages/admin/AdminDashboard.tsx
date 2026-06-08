@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import AdminLayout from "@/components/admin/AdminLayout";
+import { useProfileRole } from "@/contexts/RoleContext";
 import {
   ClipboardList,
   CreditCard,
@@ -38,14 +39,22 @@ const storeCards = [
     desc: "ตั้งราคาและกำไรต่อช่องทางขาย",
     icon: Settings,
     to: "/store-admin/channel-pricing",
+    roles: ["owner", "admin", "manager"] as const,
   },
 ];
 
 export default function AdminDashboardPage() {
+  const { role } = useProfileRole();
+
+  const visibleCards = storeCards.filter((item) => {
+    if (!item.roles) return true;
+    return role ? item.roles.includes(role as any) : false;
+  });
+
   return (
     <AdminLayout>
       <div className="grid md:grid-cols-2 gap-4">
-        {storeCards.map((item) => (
+        {visibleCards.map((item) => (
           <Link
             key={item.title}
             to={item.to}

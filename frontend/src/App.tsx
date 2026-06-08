@@ -99,7 +99,7 @@ function AppRoutes() {
       <Route path="/store-admin/ingredients" element={<AdminRoute><StoreAdminIngredientsPage /></AdminRoute>} />
       <Route path="/store-admin/recipes" element={<AdminRoute><StoreAdminRecipesPage /></AdminRoute>} />
       <Route path="/store-admin/channels" element={<AdminRoute><AdminSalesChannelsPage /></AdminRoute>} />
-      <Route path="/store-admin/channel-pricing" element={<AdminRoute><StoreAdminChannelPricingPage /></AdminRoute>} />
+      <Route path="/store-admin/channel-pricing" element={<BusinessRoute><StoreAdminChannelPricingPage /></BusinessRoute>} />
       <Route path="/store-admin/pos" element={<AdminRoute><StoreAdminPOSPage /></AdminRoute>} />
       <Route path="/store-admin/orders" element={<AdminRoute><AdminOrdersPage /></AdminRoute>} />
       <Route path="/store-admin/orders/:id" element={<AdminRoute><AdminOrderDetailPage /></AdminRoute>} />

@@ -449,6 +449,18 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const storeAdminApi = {
+  async getMe(): Promise<{
+    user_id: string;
+    role: string;
+    store_id?: string | null;
+    store_name?: string | null;
+    store_timezone?: string | null;
+    store_currency?: string | null;
+    memberships?: { store_id: string; role: string }[];
+  }> {
+    return request("/api/store-admin/me");
+  },
+
   async getDashboardSummary(): Promise<DashboardSummaryResponse> {
     return request("/api/store-admin/dashboard-summary");
   },
