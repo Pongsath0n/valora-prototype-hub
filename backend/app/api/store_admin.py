@@ -1359,7 +1359,8 @@ def _ensure_channel_in_store(client: Client, channel_id: str, store_id: str) -> 
 @router.get("/channel-pricing")
 def list_channel_prices(authorization: Optional[str] = Header(None), store_id: Optional[str] = None) -> Dict[str, Any]:
     ctx = _get_ctx(authorization)
-    store_id_resolved, _role = _resolve_store_id(ctx["memberships"], store_id)
+    store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
+    _require_manager(role)
 
     try:
         price_resp = ctx["client"].table("channel_prices").select("id, store_id, product_id, channel_id, price, created_at, products(name), sales_channels(name)").eq("store_id", store_id_resolved).execute()
