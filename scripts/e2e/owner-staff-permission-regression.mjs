@@ -2,22 +2,22 @@
 import process from "node:process";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-
-// ── Load .env.e2e.local via dotenv if available ───────────────────────────
-try {
-  const { default: dotenv } = await import("dotenv");
-  dotenv.config({ path: ".env.e2e.local" });
-} catch {
-  // dotenv not installed; rely on shell env
-}
+import {
+  ENV,
+  maskedEnvSummary,
+  assertLocalFirstUnlessCloud,
+  ensureEnvVars,
+} from "./env.mjs";
 
 // ── Config ────────────────────────────────────────────────────────────────
-const BACKEND_URL = (process.env.BACKEND_URL || process.env.E2E_BACKEND_URL || "").replace(/\/+$/, "");
-const FRONTEND_URL = (process.env.FRONTEND_URL || process.env.E2E_FRONTEND_URL || "").replace(/\/+$/, "");
-const OWNER_TOKEN = process.env.OWNER_TOKEN || "";
-const STAFF_TOKEN = process.env.STAFF_TOKEN || "";
-const STORE_ID = process.env.TEST_STORE_ID || process.env.E2E_STORE_ID || "";
-const PRODUCT_ID = process.env.CUSTOMER_PRODUCT_ID || process.env.E2E_PRODUCT_ID || "";
+const {
+  backendUrl: BACKEND_URL,
+  frontendUrl: FRONTEND_URL,
+  ownerToken: OWNER_TOKEN,
+  staffToken: STAFF_TOKEN,
+  storeId: STORE_ID,
+  productId: PRODUCT_ID,
+} = ENV;
 const REPORT_DATE = new Date().toISOString().slice(0, 10);
 
 // ── Summary structure ─────────────────────────────────────────────────────
@@ -32,12 +32,6 @@ const summary = {
   failures: [],
   recommended_next_action: "",
 };
-
-function maskToken(t) {
-  if (!t) return "missing";
-  if (t.length <= 12) return "***";
-  return t.slice(0, 4) + "..." + t.slice(-4);
-}
 
 function recordFailure(category, message, detail = {}) {
   summary.failures.push({ category, message, detail });
@@ -86,36 +80,15 @@ function withStoreId(path) {
 
 // ── Env validation ───────────────────────────────────────────────────────
 function validateEnv() {
-  const required = [
-    { key: "BACKEND_URL or E2E_BACKEND_URL", value: BACKEND_URL },
-    { key: "FRONTEND_URL or E2E_FRONTEND_URL", value: FRONTEND_URL },
-    { key: "OWNER_TOKEN", value: OWNER_TOKEN },
-    { key: "STAFF_TOKEN", value: STAFF_TOKEN },
-    { key: "TEST_STORE_ID or E2E_STORE_ID", value: STORE_ID },
-    { key: "CUSTOMER_PRODUCT_ID or E2E_PRODUCT_ID", value: PRODUCT_ID },
-  ];
-  const missing = required.filter((r) => !r.value).map((r) => r.key);
-  summary.env = {
-    BACKEND_URL: BACKEND_URL ? "present" : "missing",
-    FRONTEND_URL: FRONTEND_URL ? "present" : "missing",
-    OWNER_TOKEN: OWNER_TOKEN ? `present (${maskToken(OWNER_TOKEN)})` : "missing",
-    STAFF_TOKEN: STAFF_TOKEN ? `present (${maskToken(STAFF_TOKEN)})` : "missing",
-    TEST_STORE_ID: STORE_ID ? "present" : "missing",
-    CUSTOMER_PRODUCT_ID: PRODUCT_ID ? "present" : "missing",
-  };
-  if (missing.length) {
-    const guidance = [
-      "Missing required env values. Populate .env.e2e.local with the missing keys.",
-      "",
-      "To obtain OWNER_TOKEN / STAFF_TOKEN safely:",
-      "1) Open the frontend (e.g. https://valora-system-hub.vercel.app) in a browser.",
-      "2) Log in with the owner or staff account.",
-      "3) Open DevTools > Application/Storage > Local Storage.",
-      "4) Copy the Supabase access_token from the auth token entry.",
-      "5) Paste it into .env.e2e.local as OWNER_TOKEN or STAFF_TOKEN.",
-      "Never commit tokens. .env.e2e.local is already gitignored.",
-    ];
-    fail("missing_env", guidance.join("\n"), { missing });
+  summary.env = maskedEnvSummary();
+  try {
+    ensureEnvVars(["backendUrl", "frontendUrl", "ownerToken", "staffToken", "storeId", "productId"]);
+  } catch (error) {
+    fail(
+      "missing_env",
+      "Missing required env values. Populate .env.e2e.local with BACKEND_URL, FRONTEND_URL, OWNER_TOKEN, STAFF_TOKEN, TEST_STORE_ID, CUSTOMER_PRODUCT_ID.",
+      { summary: summary.env, missing: error.missing }
+    );
   }
 }
 
@@ -272,6 +245,11 @@ function inspectFrontendGuards() {
 
 // ── Main ─────────────────────────────────────────────────────────────────
 async function main() {
+  try {
+    assertLocalFirstUnlessCloud("Phase 4.1 permission regression");
+  } catch (error) {
+    fail("local_first_violation", error.message, error.details || {});
+  }
   inspectFrontendGuards();
   validateEnv();
   await checkBackend();
@@ -312,6 +290,7 @@ async function main() {
       "owner_business_access_blocked",
       "staff_pricing_access_leak",
       "frontend_guard_mismatch",
+      "local_first_violation",
     ].includes(f.category)
   );
 

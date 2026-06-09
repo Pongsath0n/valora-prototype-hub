@@ -9,15 +9,15 @@ Phase 4 regression ensures the Store Admin order/payment flow is repeatable and 
 
 ## Setup
 1) Copy `.env.e2e.example` → `.env.e2e.local` and fill values. Do **not** commit `.env.e2e.local`.
-2) Required env:
-   - E2E_BACKEND_URL (must be http://127.0.0.1:8000)
-   - E2E_SUPABASE_URL
-   - E2E_SUPABASE_ANON_KEY
-   - E2E_EMAIL
-   - E2E_PASSWORD
-   - E2E_PRODUCT_ID (must exist for the E2E user/store via backend store-admin API)
-   - Optional: E2E_PRODUCT_NAME, E2E_UNIT_PRICE (default 60), E2E_UNIT_COST (default 27)
-3) Start backend:
+2) Local-first defaults (all scripts load them through `scripts/e2e/env.mjs`):
+   - `BACKEND_URL=http://127.0.0.1:8000`
+   - `FRONTEND_URL=http://localhost:8080/`
+   - `OWNER_TOKEN`, `STAFF_TOKEN`: Supabase `access_token` copied from browser devtools after local login (owner/staff accounts listed below)
+   - `ADMIN_TOKEN`: optional; falls back to `OWNER_TOKEN`
+   - `TEST_STORE_ID`, `CUSTOMER_PRODUCT_ID`: see known values below
+   - Never store production URLs or tokens in `.env.e2e.local`. For cloud verification, override via shell (e.g. `E2E_ENVIRONMENT=cloud BACKEND_URL=…`).
+3) Legacy E2E variables (`E2E_BACKEND_URL`, `E2E_PRODUCT_ID`, etc.) remain supported but are now fallbacks only.
+4) Start backend:
    ```bash
    cd backend
    uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
@@ -48,6 +48,8 @@ The script outputs a JSON summary with preflight, flow, verification steps, and 
 - VERIFY_*_FAILED — verification failures (orders/payments/logs)
 
 ## Notes
-- Scripts read from `.env.e2e.local` only; no hardcoded secrets.
-- If env or backend is not ready, the combined script fails fast with a clear failure_code.
-- Keep scripts untracked or commit separately as needed; never commit secrets.
+- All scripts share `scripts/e2e/env.mjs`, which enforces local-first URLs unless `E2E_ENVIRONMENT=cloud` or explicit overrides are provided.
+- Shell env always overrides `.env.e2e.local`; nothing uses `override: true`.
+- Token summaries are masked automatically; on `/api/store-admin/me` 401 responses the scripts advise refreshing tokens.
+- If env or backend is not ready, scripts fail fast with descriptive codes (MISSING_ENV, LOCAL_FIRST_VIOLATION, BACKEND_UNREACHABLE, etc.).
+- Keep `.env.e2e.local` gitignored and never commit real secrets.

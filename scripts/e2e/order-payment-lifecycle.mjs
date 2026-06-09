@@ -1,18 +1,26 @@
 #!/usr/bin/env node
-import "dotenv/config";
 import process from "node:process";
 import { randomUUID } from "node:crypto";
+import {
+  ENV,
+  maskedEnvSummary,
+  assertLocalFirstUnlessCloud,
+  ensureEnvVars,
+} from "./env.mjs";
 
-const BACKEND_URL = (process.env.BACKEND_URL || process.env.E2E_BACKEND_URL || "").replace(/\/+$/, "");
-const ADMIN_TOKEN = process.env.OWNER_TOKEN || process.env.STAFF_TOKEN || process.env.ADMIN_TOKEN || process.env.E2E_ADMIN_TOKEN || "";
-const STORE_ID = process.env.TEST_STORE_ID || process.env.E2E_STORE_ID || "";
-const PRODUCT_ID = process.env.CUSTOMER_PRODUCT_ID || process.env.E2E_PRODUCT_ID || "";
+const {
+  backendUrl: BACKEND_URL,
+  adminToken: ADMIN_TOKEN,
+  storeId: STORE_ID,
+  productId: PRODUCT_ID,
+} = ENV;
 
 const summary = {
   result: "pending",
   steps: [],
   orders: {},
   metrics: {},
+  env: maskedEnvSummary(),
 };
 
 function record(step, detail) {
@@ -39,16 +47,11 @@ function assertCondition(condition, step, message, detail) {
   }
 }
 
-if (!BACKEND_URL) {
-  fail("env_check", "missing_backend_url", "Set BACKEND_URL (or E2E_BACKEND_URL) to the FastAPI host, e.g. http://127.0.0.1:8000");
-}
-
-if (!ADMIN_TOKEN) {
-  fail("env_check", "missing_admin_token", "Set OWNER_TOKEN, STAFF_TOKEN, ADMIN_TOKEN, or E2E_ADMIN_TOKEN to a valid bearer token");
-}
-
-if (!PRODUCT_ID) {
-  fail("env_check", "missing_product_id", "Set CUSTOMER_PRODUCT_ID (or E2E_PRODUCT_ID) to a valid product UUID");
+try {
+  assertLocalFirstUnlessCloud("Order/payment lifecycle regression");
+  ensureEnvVars(["backendUrl", "adminToken", "productId"]);
+} catch (error) {
+  fail("env_check", error.code === "LOCAL_FIRST_VIOLATION" ? "local_first_violation" : "missing_env", error.summary || error.details || error.message);
 }
 
 const REPORT_DATE = new Date().toISOString().slice(0, 10);
