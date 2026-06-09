@@ -5,8 +5,11 @@
   "type": "module",
   "scripts": {
     "e2e:store-admin-order-flow": "node scripts/e2e/order-payment-lifecycle.mjs",
+    "e2e:payment-lifecycle": "node scripts/e2e/order-payment-lifecycle.mjs",
     "e2e:permissions": "node scripts/e2e/owner-staff-permission-regression.mjs",
+    "e2e:cost-permissions": "node scripts/e2e/cost-data-permission-regression.mjs",
     "test:phase4": "node scripts/e2e/order-payment-lifecycle.mjs",
-    "test:phase4-1": "node scripts/e2e/owner-staff-permission-regression.mjs"
+    "test:phase4-1": "node scripts/e2e/owner-staff-permission-regression.mjs",
+    "test:phase4-2": "node scripts/e2e/cost-data-permission-regression.mjs"
   }
 }
