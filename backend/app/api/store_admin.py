@@ -1786,7 +1786,8 @@ def _has_ingredient_dependencies(client: Client, store_id: str, ingredient_id: s
 @router.get("/ingredients")
 def list_ingredients(authorization: Optional[str] = Header(None), store_id: Optional[str] = None) -> Dict[str, Any]:
     ctx = _get_ctx(authorization)
-    store_id_resolved, _role = _resolve_store_id(ctx["memberships"], store_id)
+    store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
+    _require_manager(role)
 
     def _query_ingredients(cols: str) -> tuple[Optional[Any], Optional[Any]]:
         try:
@@ -1945,7 +1946,8 @@ def delete_ingredient(ingredient_id: str, authorization: Optional[str] = Header(
 @router.get("/recipes")
 def list_recipes(authorization: Optional[str] = Header(None), store_id: Optional[str] = None) -> Dict[str, Any]:
     ctx = _get_ctx(authorization)
-    store_id_resolved, _role = _resolve_store_id(ctx["memberships"], store_id)
+    store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
+    _require_manager(role)
 
     recipe_resp = ctx["client"].table("recipes").select("id, store_id, product_id, ingredient_id, quantity_used, products(name), ingredients(name, unit, cost_per_unit)").eq("store_id", store_id_resolved).order("product_id", desc=False).execute()
     if getattr(recipe_resp, "error", None):
