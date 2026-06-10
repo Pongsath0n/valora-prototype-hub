@@ -415,11 +415,52 @@ export type LineBindingResponse = {
   line_user_id_masked: string | null;
 };
 
+type CsvDownload = { blob: Blob; filename?: string };
+
 async function getAccessToken(): Promise<string> {
   const { data } = await supabase.auth.getSession();
   const token = data.session?.access_token;
   if (!token) throw new Error("unauthorized");
   return token;
+}
+
+function parseFilename(disposition: string | null): string | undefined {
+  if (!disposition) return undefined;
+  const utfMatch = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+  if (utfMatch?.[1]) {
+    try {
+      return decodeURIComponent(utfMatch[1]);
+    } catch {
+      return utfMatch[1];
+    }
+  }
+  const asciiMatch = disposition.match(/filename="?([^";]+)"?/i);
+  return asciiMatch?.[1];
+}
+
+async function requestCsv(path: string): Promise<CsvDownload> {
+  const token = await getAccessToken();
+  const res = await fetch(`${BACKEND_BASE}${path}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "text/csv",
+    },
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "request_failed");
+    throw new Error(text || "request_failed");
+  }
+  const blob = await res.blob();
+  return { blob, filename: parseFilename(res.headers.get("content-disposition")) };
+}
+
+function buildSalesReportQuery(filters: SalesReportFiltersPayload): string {
+  const params = new URLSearchParams();
+  if (filters.start_date) params.set("start_date", filters.start_date);
+  if (filters.end_date) params.set("end_date", filters.end_date);
+  if (filters.channel_id) params.set("channel_id", filters.channel_id);
+  if (filters.product_id) params.set("product_id", filters.product_id);
+  return params.toString();
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -466,14 +507,15 @@ export const storeAdminApi = {
   },
 
   async getSalesReport(filters: SalesReportFiltersPayload): Promise<SalesReportResponse> {
-    const params = new URLSearchParams();
-    if (filters.start_date) params.set("start_date", filters.start_date);
-    if (filters.end_date) params.set("end_date", filters.end_date);
-    if (filters.channel_id) params.set("channel_id", filters.channel_id);
-    if (filters.product_id) params.set("product_id", filters.product_id);
-    const search = params.toString();
+    const search = buildSalesReportQuery(filters);
     const path = `/api/store-admin/reports/sales${search ? `?${search}` : ""}`;
     return request(path);
+  },
+
+  async exportSalesReportCsv(filters: SalesReportFiltersPayload): Promise<CsvDownload> {
+    const search = buildSalesReportQuery(filters);
+    const path = `/api/store-admin/reports/sales/export${search ? `?${search}` : ""}`;
+    return requestCsv(path);
   },
 
   async listSalesChannels(): Promise<ApiSalesChannel[]> {
@@ -601,6 +643,10 @@ export const storeAdminApi = {
     return request("/api/store-admin/orders");
   },
 
+  async exportOrdersCsv(): Promise<CsvDownload> {
+    return requestCsv("/api/store-admin/orders/export");
+  },
+
   async getOrder(id: string): Promise<ApiOrder> {
     return request<ApiOrder>(`/api/store-admin/orders/${id}`);
   },
@@ -640,6 +686,10 @@ export const storeAdminApi = {
   // Payments
   async listPayments(): Promise<{ items: ApiPayment[]; payment_queue: ApiPayment[]; store_id: string }> {
     return request("/api/store-admin/payments");
+  },
+
+  async exportPaymentsCsv(): Promise<CsvDownload> {
+    return requestCsv("/api/store-admin/payments/export");
   },
 
   async listOrderPayments(orderId: string): Promise<{ items: ApiPayment[]; order_id: string; store_id: string }> {

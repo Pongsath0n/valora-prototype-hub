@@ -1,11 +1,14 @@
+import csv
 import logging
 import os
 import re
 from datetime import date, datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional, Tuple, Literal, Set
+from io import StringIO
+from typing import Any, Callable, Dict, List, Optional, Tuple, Literal, Set, Union
 from uuid import uuid4
 
 from fastapi import APIRouter, File, Header, HTTPException, UploadFile, status
+from fastapi.responses import Response
 from pydantic import BaseModel
 from supabase import Client
 
@@ -74,6 +77,95 @@ _MENU_IMAGE_EXTENSION_MAP: Dict[str, str] = {
     "image/png": "png",
     "image/webp": "webp",
 }
+
+CsvAccessor = Union[str, Callable[[Dict[str, Any]], Any]]
+CsvColumn = Tuple[str, CsvAccessor]
+
+
+def _csv_filename(prefix: str) -> str:
+    timestamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+    return f"{prefix}-{timestamp}.csv"
+
+
+def _serialize_csv_value(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    if isinstance(value, float):
+        return f"{value:.2f}"
+    return str(value)
+
+
+def _resolve_csv_value(row: Dict[str, Any], accessor: CsvAccessor) -> str:
+    try:
+        raw = accessor(row) if callable(accessor) else row.get(accessor)
+    except Exception:  # pragma: no cover
+        raw = None
+    return _serialize_csv_value(raw)
+
+
+def _build_csv_response(filename: str, columns: List[CsvColumn], rows: List[Dict[str, Any]]) -> Response:
+    buffer = StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow([header for header, _ in columns])
+    for row in rows:
+        writer.writerow([_resolve_csv_value(row, accessor) for _, accessor in columns])
+    content = buffer.getvalue()
+    disposition = f'attachment; filename="{filename}"'
+    return Response(content=content, media_type="text/csv; charset=utf-8", headers={"Content-Disposition": disposition})
+
+
+_ORDER_EXPORT_COLUMNS_STAFF: List[CsvColumn] = [
+    ("order_id", "id"),
+    ("order_no", "order_no"),
+    ("created_at", "created_at"),
+    ("channel", "channel_name"),
+    ("status", lambda row: row.get("status") or row.get("order_status")),
+    ("payment_status", "payment_status"),
+    ("total_amount", "total_amount"),
+]
+
+_ORDER_EXPORT_COLUMNS_MANAGER: List[CsvColumn] = _ORDER_EXPORT_COLUMNS_STAFF + [
+    ("subtotal", "subtotal"),
+    ("discount_amount", "discount_amount"),
+    ("channel_fee", "channel_fee"),
+    ("total_cost", "total_cost"),
+    ("gross_profit", "gross_profit"),
+]
+
+_PAYMENT_EXPORT_COLUMNS_STAFF: List[CsvColumn] = [
+    ("payment_id", "id"),
+    ("order_id", "order_id"),
+    ("order_no", "order_no"),
+    ("customer_name", "customer_name"),
+    ("amount", "amount"),
+    ("method", "method"),
+    ("status", "status"),
+    ("submitted_at", "submitted_at"),
+    ("created_at", "created_at"),
+]
+
+_PAYMENT_EXPORT_COLUMNS_MANAGER: List[CsvColumn] = _PAYMENT_EXPORT_COLUMNS_STAFF + [
+    ("order_status", "order_status"),
+    ("order_payment_status", "order_payment_status"),
+    ("confirmed_by", "confirmed_by"),
+    ("confirmed_at", "confirmed_at"),
+    ("reject_reason", "reject_reason"),
+]
+
+_SALES_ORDER_EXPORT_COLUMNS: List[CsvColumn] = [
+    ("order_id", "order_id"),
+    ("order_no", "order_no"),
+    ("channel", "channel_name"),
+    ("status", "status"),
+    ("payment_status", "payment_status"),
+    ("sales_amount", "sales_amount"),
+    ("cost_amount", "cost_amount"),
+    ("gross_profit", "gross_profit"),
+    ("gross_margin_percent", "gross_margin_percent"),
+    ("created_at", "created_at"),
+]
 
 
 def normalize_order_status(value: Optional[str]) -> str:
@@ -2515,17 +2607,12 @@ def _empty_sales_report(store_id: str, range_meta: Dict[str, Any], channel_id: O
     }
 
 
-@router.get("/reports/sales")
-def get_sales_report(
-    filters: SalesReportFilters = SalesReportFilters(),
-    authorization: Optional[str] = Header(None),
-    store_id: Optional[str] = None,
+def _generate_sales_report(
+    ctx: Dict[str, Any],
+    store_id: str,
+    filters: SalesReportFilters,
 ) -> Dict[str, Any]:
-    ctx = _get_ctx(authorization)
-    store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
-    _require_manager(role)
-
-    store_timezone = _get_store_timezone(ctx["client"], store_id_resolved)
+    store_timezone = _get_store_timezone(ctx["client"], store_id)
     normalized_channel = _normalize_filter_value(filters.channel_id)
     normalized_product = _normalize_filter_value(filters.product_id)
     range_meta = _compute_report_range(store_timezone, filters.start_date, filters.end_date)
@@ -2540,7 +2627,7 @@ def get_sales_report(
         query = (
             ctx["client"].table("orders")
             .select(select_cols)
-            .eq("store_id", store_id_resolved)
+            .eq("store_id", store_id)
             .gte("created_at", start_iso)
             .lt("created_at", end_iso)
             .order("created_at", desc=True)
@@ -2560,9 +2647,9 @@ def get_sales_report(
         raise HTTPException(status_code=500, detail="order_query_failed")
 
     if not orders_rows:
-        return _empty_sales_report(store_id_resolved, range_meta, normalized_channel, normalized_product)
+        return _empty_sales_report(store_id, range_meta, normalized_channel, normalized_product)
 
-    customer_map, channel_map = _load_order_relation_maps(ctx["client"], store_id_resolved, orders_rows)
+    customer_map, channel_map = _load_order_relation_maps(ctx["client"], store_id, orders_rows)
     order_ids = [str(row.get("id")) for row in orders_rows if row.get("id")]
     items_map = _load_order_items_map(ctx["client"], order_ids)
     mapped_orders = [_map_order(row, customer_map, channel_map) for row in orders_rows]
@@ -2570,11 +2657,65 @@ def get_sales_report(
     return _build_sales_report_payload(
         mapped_orders,
         items_map,
-        store_id_resolved,
+        store_id,
         range_meta,
         normalized_channel,
         normalized_product,
     )
+
+
+@router.get("/reports/sales")
+def get_sales_report(
+    filters: SalesReportFilters = SalesReportFilters(),
+    authorization: Optional[str] = Header(None),
+    store_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    ctx = _get_ctx(authorization)
+    store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
+    _require_manager(role)
+
+    return _generate_sales_report(ctx, store_id_resolved, filters)
+
+
+@router.get("/reports/sales/export")
+def export_sales_report_csv(
+    filters: SalesReportFilters = SalesReportFilters(),
+    authorization: Optional[str] = Header(None),
+    store_id: Optional[str] = None,
+) -> Response:
+    ctx = _get_ctx(authorization)
+    store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
+    _require_manager(role)
+
+    report = _generate_sales_report(ctx, store_id_resolved, filters)
+    orders = report.get("orders", [])
+    summary = report.get("summary", {}) or {}
+
+    prepared_rows: List[Dict[str, Any]] = []
+    for row in orders:
+        sales_amount = _parse_float(row.get("sales_amount"))
+        gross_profit = _parse_float(row.get("gross_profit"))
+        margin = (gross_profit / sales_amount * 100) if sales_amount > 0 else 0.0
+        prepared_rows.append({**row, "gross_margin_percent": margin})
+
+    if summary:
+        prepared_rows.append(
+            {
+                "order_id": "SUMMARY",
+                "order_no": "",
+                "channel_name": "",
+                "status": "",
+                "payment_status": "",
+                "sales_amount": summary.get("total_sales_confirmed", 0),
+                "cost_amount": summary.get("total_cost", 0),
+                "gross_profit": summary.get("gross_profit", 0),
+                "gross_margin_percent": summary.get("gross_margin_percent", 0),
+                "created_at": "",
+            }
+        )
+
+    filename = _csv_filename("sales-report")
+    return _build_csv_response(filename, _SALES_ORDER_EXPORT_COLUMNS, prepared_rows)
 
 
 def _build_sales_report_payload(
@@ -2868,6 +3009,22 @@ def _load_orders_for_dashboard(client: Client, store_id: str) -> List[Dict[str, 
         oid = str(row.get("id")) if row.get("id") else None
         mapped.append(_map_order(row, customer_map, channel_map, latest_payments.get(oid) if oid else None))
     return mapped
+
+
+def _prepare_orders_for_export(client: Client, store_id: str, is_staff: bool) -> List[Dict[str, Any]]:
+    orders = _load_orders_for_dashboard(client, store_id)
+    if not orders:
+        return []
+
+    if not is_staff:
+        return orders
+
+    masked: List[Dict[str, Any]] = []
+    for order in orders:
+        sanitized = _mask_financial_fields(order)
+        sanitized.pop("latest_payment", None)
+        masked.append(sanitized)
+    return masked
 
 
 def _map_recent_order(order: Dict[str, Any]) -> Dict[str, Any]:
@@ -3218,6 +3375,19 @@ def list_orders(authorization: Optional[str] = Header(None), store_id: Optional[
         mapped = masked_orders
 
     return {"items": mapped, "store_id": store_id_resolved}
+
+
+@router.get("/orders/export")
+def export_orders_csv(authorization: Optional[str] = Header(None), store_id: Optional[str] = None) -> Response:
+    ctx = _get_ctx(authorization)
+    store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
+    _require_staff_or_above(role)
+    is_staff = _normalize_store_role(role) == "staff"
+
+    orders = _prepare_orders_for_export(ctx["client"], store_id_resolved, is_staff)
+    columns = _ORDER_EXPORT_COLUMNS_STAFF if is_staff else _ORDER_EXPORT_COLUMNS_MANAGER
+    filename = _csv_filename("orders")
+    return _build_csv_response(filename, columns, orders)
 
 
 @router.post("/orders")
@@ -3721,6 +3891,55 @@ def _map_payment(row: Dict[str, Any], order_context: Optional[Dict[str, Any]] = 
     }
 
 
+def _prepare_payments_for_export(client: Client, store_id: str, is_staff: bool) -> List[Dict[str, Any]]:
+    all_orders = _fetch_store_orders(client, store_id)
+    if not all_orders:
+        return []
+
+    customer_map, channel_map = _load_order_relation_maps(client, store_id, all_orders)
+    order_map: Dict[str, Dict[str, Any]] = {}
+    for row in all_orders:
+        mapped_order = _map_order(row, customer_map, channel_map)
+        order_map[mapped_order["id"]] = mapped_order
+
+    order_ids = list(order_map.keys())
+    if not order_ids:
+        return []
+
+    select_cols = _payment_select_clause(client, include_relations=False, include_slip_fields=True)
+    payments_query = (
+        client
+        .table("payments")
+        .select(select_cols)
+        .in_("order_id", order_ids)
+        .order("created_at", desc=True)
+    )
+    resp = payments_query.execute()
+    err = getattr(resp, "error", None)
+    if err and _is_missing_column(err, "slip_url"):
+        fallback_cols = _payment_select_clause(client, include_relations=False, include_slip_fields=False)
+        resp = (
+            client
+            .table("payments")
+            .select(fallback_cols)
+            .in_("order_id", order_ids)
+            .order("created_at", desc=True)
+        ).execute()
+        err = getattr(resp, "error", None)
+    if err:
+        raise HTTPException(status_code=500, detail="payment_query_failed")
+
+    payments: List[Dict[str, Any]] = []
+    for row in getattr(resp, "data", None) or []:
+        oid = str(row.get("order_id")) if row.get("order_id") else None
+        order_ctx = order_map.get(oid) if oid else None
+        payment = _map_payment(row, order_ctx)
+        if is_staff:
+            payment = _mask_payment(payment)
+        payments.append(payment)
+    return payments
+
+
 def _mask_payment(row: Dict[str, Any]) -> Dict[str, Any]:
     masked = dict(row)
     masked.pop("slip_url", None)
@@ -3919,6 +4138,19 @@ def list_payments(authorization: Optional[str] = Header(None), store_id: Optiona
             queue.append(payment)
 
     return {"items": mapped, "payment_queue": queue, "store_id": store_id_resolved}
+
+
+@router.get("/payments/export")
+def export_payments_csv(authorization: Optional[str] = Header(None), store_id: Optional[str] = None) -> Response:
+    ctx = _get_ctx(authorization)
+    store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
+    _ensure_staff_can_manage_payments(role)
+    is_staff = _normalize_store_role(role) == "staff"
+
+    payments = _prepare_payments_for_export(ctx["client"], store_id_resolved, is_staff)
+    columns = _PAYMENT_EXPORT_COLUMNS_STAFF if is_staff else _PAYMENT_EXPORT_COLUMNS_MANAGER
+    filename = _csv_filename("payments")
+    return _build_csv_response(filename, columns, payments)
 
 
 @router.get("/orders/{order_id}/payments")

@@ -78,12 +78,6 @@ export const dashboardReportService = {
 
     return { orders: filtered, totals: { ...totals, grossMarginPercent }, menus: await menuCatalogService.list(), channels: orderService.listChannels() };
   },
-
-  exportReportCsv(orders: Order[]) {
-    const header = ["order_id", "date", "channel", "status", "payment_status", "total_amount", "total_cost", "total_channel_fee", "gross_profit"];
-    const rows = orders.map((o) => [o.id, o.createdAt, o.channelName, o.status, o.paymentStatus, o.totalAmount.toFixed(2), o.totalCost.toFixed(2), o.totalChannelFee.toFixed(2), o.grossProfit.toFixed(2)]);
-    return [header, ...rows].map((r) => r.join(",")).join("\n");
-  },
 };
 
 function sumOrders(orders: Order[]) {

@@ -3,13 +3,14 @@ import { Link } from "react-router-dom";
 import AdminLayout from "@/components/admin/AdminLayout";
 import DataTable from "@/components/shared/DataTable";
 import StatusBadge from "@/components/shared/StatusBadge";
-import { Search } from "lucide-react";
+import { Download, Search } from "lucide-react";
 import {
   storeAdminApi,
   type ApiOrder,
   type ApiPayment,
   type OrderPayload,
 } from "@/services/storeAdminApi";
+import { saveBlobAsFile } from "@/lib/download";
 import { PaymentSlipPreviewModal } from "@/components/admin/PaymentSlipPreviewModal";
 
 type TabKey =
@@ -85,6 +86,8 @@ export default function AdminOrdersPage() {
   const [previewOpen, setPreviewOpen] = useState(false);
   const [activePayment, setActivePayment] = useState<ApiPayment | null>(null);
   const [modalRejectReason, setModalRejectReason] = useState("");
+  const [exportingOrders, setExportingOrders] = useState(false);
+  const [exportingPayments, setExportingPayments] = useState(false);
 
   const refresh = async () => {
     setRefreshing(true);
@@ -101,6 +104,30 @@ export default function AdminOrdersPage() {
     } finally {
       setLoading(false);
       setRefreshing(false);
+    }
+  };
+
+  const handleExportOrders = async () => {
+    setExportingOrders(true);
+    try {
+      const { blob, filename } = await storeAdminApi.exportOrdersCsv();
+      saveBlobAsFile(blob, filename ?? "orders.csv");
+    } catch (err: any) {
+      setError(err?.message || "ส่งออกออเดอร์ไม่สำเร็จ");
+    } finally {
+      setExportingOrders(false);
+    }
+  };
+
+  const handleExportPayments = async () => {
+    setExportingPayments(true);
+    try {
+      const { blob, filename } = await storeAdminApi.exportPaymentsCsv();
+      saveBlobAsFile(blob, filename ?? "payments.csv");
+    } catch (err: any) {
+      setError(err?.message || "ส่งออกการชำระเงินไม่สำเร็จ");
+    } finally {
+      setExportingPayments(false);
     }
   };
 
@@ -268,6 +295,26 @@ export default function AdminOrdersPage() {
           </button>
         ))}
         {refreshing ? <span className="text-xs text-muted-foreground self-center">กำลังโหลด...</span> : null}
+        <div className="flex gap-2 ml-auto">
+          <button
+            type="button"
+            className="inline-flex items-center gap-1 rounded border px-3 py-1.5 text-xs"
+            onClick={handleExportOrders}
+            disabled={exportingOrders}
+          >
+            <Download className="w-3 h-3" />
+            {exportingOrders ? "กำลังส่งออก..." : "Export Orders"}
+          </button>
+          <button
+            type="button"
+            className="inline-flex items-center gap-1 rounded border px-3 py-1.5 text-xs"
+            onClick={handleExportPayments}
+            disabled={exportingPayments}
+          >
+            <Download className="w-3 h-3" />
+            {exportingPayments ? "กำลังส่งออก..." : "Export Payments"}
+          </button>
+        </div>
         <div className="ml-auto flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs text-muted-foreground bg-background">
           <Search className="w-3.5 h-3.5" />
           <input

@@ -5,7 +5,10 @@ import LoadingState from "@/components/shared/LoadingState";
 import EmptyState from "@/components/shared/EmptyState";
 import { useSalesReport } from "@/hooks/useSalesReport";
 import type { Column } from "@/components/shared/DataTable";
-import type { SalesReportItemRow, SalesReportOrderRow } from "@/services/storeAdminApi";
+import { storeAdminApi, type SalesReportItemRow, type SalesReportOrderRow } from "@/services/storeAdminApi";
+import { saveBlobAsFile } from "@/lib/download";
+import { useProfileRole } from "@/contexts/RoleContext";
+import { Download } from "lucide-react";
 
 const currency = new Intl.NumberFormat("th-TH", { style: "currency", currency: "THB" });
 
@@ -27,6 +30,8 @@ export default function ReportsPage() {
     channel_id: "",
     product_id: "",
   });
+  const { role } = useProfileRole();
+  const [exporting, setExporting] = useState(false);
 
   const { data, isLoading, isError } = useSalesReport(filters);
 
@@ -68,6 +73,21 @@ export default function ReportsPage() {
 
   const summary = data?.summary;
 
+  const canExport = role && ["owner", "admin", "manager"].includes(role);
+
+  const handleExport = async () => {
+    if (!canExport) return;
+    setExporting(true);
+    try {
+      const { blob, filename } = await storeAdminApi.exportSalesReportCsv(filters);
+      saveBlobAsFile(blob, filename ?? "sales-report.csv");
+    } catch (err: any) {
+      console.error(err);
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
     <AppLayout>
       <div className="space-y-6">
@@ -76,13 +96,26 @@ export default function ReportsPage() {
             <h1 className="page-title">รายงานยอดขาย</h1>
             <p className="page-subtitle">ข้อมูลจริงจาก Store Admin Orders & Payments</p>
           </div>
-          <button
-            type="button"
-            className="rounded-lg border px-3 py-2 text-sm font-medium"
-            onClick={() => setFilters({ ...filters })}
-          >
-            รีเฟรชข้อมูล
-          </button>
+          <div className="flex gap-2">
+            {canExport ? (
+              <button
+                type="button"
+                className="rounded-lg border px-3 py-2 text-sm font-medium inline-flex items-center gap-1"
+                onClick={handleExport}
+                disabled={exporting}
+              >
+                <Download className="w-4 h-4" />
+                {exporting ? "กำลังส่งออก..." : "Export CSV"}
+              </button>
+            ) : null}
+            <button
+              type="button"
+              className="rounded-lg border px-3 py-2 text-sm font-medium"
+              onClick={() => setFilters({ ...filters })}
+            >
+              รีเฟรชข้อมูล
+            </button>
+          </div>
         </div>
 
         <div className="stat-card grid gap-3 md:grid-cols-5">
