@@ -12,6 +12,7 @@ export type HealthSummary = {
   auth: EndpointState;
   database: EndpointState;
   lineReady: EndpointState;
+  storage: EndpointState;
   baseUrl: string;
 };
 
@@ -30,12 +31,13 @@ async function fetchEndpoint(path: string): Promise<EndpointState> {
 }
 
 export async function loadBackendHealth(): Promise<HealthSummary> {
-  const [backend, environment, auth, database, lineReady] = await Promise.all([
+  const [backend, environment, auth, database, lineReady, storage] = await Promise.all([
     fetchEndpoint("/health"),
     fetchEndpoint("/health/env"),
     fetchEndpoint("/health/auth"),
     fetchEndpoint("/health/db"),
     fetchEndpoint("/health/line-ready"),
+    fetchEndpoint("/health/storage"),
   ]);
 
   return {
@@ -44,6 +46,7 @@ export async function loadBackendHealth(): Promise<HealthSummary> {
     auth,
     database,
     lineReady,
+    storage,
     baseUrl: BACKEND_BASE,
   };
 }

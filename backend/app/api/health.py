@@ -9,12 +9,66 @@ from app.core.supabase import SupabaseConfigurationError, get_supabase_admin_cli
 
 
 SAFE_HEALTH_TABLES = ("profiles", "stores")
+STORAGE_BUCKETS = (
+    {
+        "key": "payment_slips",
+        "label": "Payment Slip Bucket",
+        "attr": "payment_slip_bucket",
+        "mode": "private",
+        "required": True,
+        "notes": "ใช้สำหรับสลิปการชำระเงินของลูกค้า",
+    },
+    {
+        "key": "menu_images",
+        "label": "Menu Image Bucket",
+        "attr": "menu_image_bucket",
+        "mode": "public",
+        "required": True,
+        "notes": "รูปเมนูและสินทรัพย์ร้านค้าสาธารณะ",
+    },
+)
 
 router = APIRouter()
 
 
 def _mask_status(value: str) -> str:
     return "configured" if value else "missing"
+
+
+def _app_env_detail(value: str) -> Dict[str, Any]:
+    normalized = (value or "").strip()
+    if not normalized:
+        status = "warning"
+    elif normalized.lower() in {"production", "development"}:
+        status = "ok"
+    else:
+        status = "info"
+
+    return {
+        "status": status,
+        "value": normalized or "unset",
+        "recommended": {
+            "local": "development",
+            "railway": "production",
+        },
+        "notes": "ตั้งค่า APP_ENV=development ในเครื่อง และ APP_ENV=production บน Railway เพื่อบอก context ชัดเจน",
+    }
+
+
+def _probe_storage_bucket(client: Any, bucket_name: str) -> tuple[str, str | None]:
+    try:
+        storage_client = client.storage.from_(bucket_name)
+    except Exception:
+        return "error", "bucket_not_accessible"
+
+    try:
+        storage_client.list(path="", options={"limit": 1})
+    except AttributeError:
+        return "manual", "list_not_supported"
+    except Exception:
+        return "error", "list_failed"
+
+    return "ok", None
 
 
 @router.get("/health")
@@ -126,9 +180,24 @@ def health_env() -> Dict[str, Any]:
     configured_count = list(environment_status.values()).count("configured")
     overall_status = "ok" if configured_count == len(environment_status) else ("partial" if configured_count else "not_configured")
 
+    app_env_detail = _app_env_detail(settings.app_env)
+    if app_env_detail["status"] != "ok" and overall_status == "ok":
+        overall_status = "warning"
+
     return {
         "status": overall_status,
         "environment": environment_status,
+        "details": {
+            "matrix": [
+                {
+                    "key": key,
+                    "status": environment_status[key],
+                    "required": True,
+                }
+                for key in required_envs
+            ],
+            "app_env": app_env_detail,
+        },
     }
 
 
@@ -180,10 +249,10 @@ def health_line_ready() -> Dict[str, Any]:
     def group_status(masked: Dict[str, str]) -> str:
         vals = list(masked.values())
         configured = vals.count("configured")
-        if configured == 0:
-            return "not_configured"
+        if not vals or configured == 0:
+            return "not_enabled"
         if configured == len(masked):
-            return "ready_candidate"
+            return "configured"
         return "partial"
 
     messaging_masked = mask_group(messaging_required)
@@ -210,17 +279,124 @@ def health_line_ready() -> Dict[str, Any]:
         },
     }
 
-    overall_vals = [g["status"] for g in groups.values()]
-    if all(v == "not_configured" for v in overall_vals):
-        overall_status = "not_configured"
-    elif any(v == "partial" for v in overall_vals):
-        overall_status = "partial"
+    send_mode = (settings.line_send_mode or "mock").strip() or "mock"
+    send_mode_status = "mock" if send_mode.lower() != "real" else "configured"
+
+    line_checks = {
+        "send_mode": {
+            "status": send_mode_status,
+            "mode": send_mode,
+            "notes": "mock = ปิดการส่ง LINE push จริง (ปลอดภัยก่อน Soft Launch)",
+        },
+        "messaging_api": {
+            "status": groups["messaging_api"]["status"],
+            "variables": messaging_masked,
+            "notes": "ต้องมีทั้ง channel access token และ channel secret",
+        },
+        "webhook": {
+            "status": groups["webhook"]["status"],
+            "variables": webhook_masked,
+            "notes": "ต้องระบุ LINE_WEBHOOK_URL และ channel secret เพื่อ verify",
+        },
+        "rich_menu": {
+            "status": "manual",
+            "notes": "Rich Menu ถูกตั้งค่าด้วยมือ (ลิงก์ /order และ /order/status)",
+        },
+        "liff": {
+            "status": "not_enabled",
+            "variables": liff_masked,
+            "notes": "LIFF ถูกเลื่อนออกจาก Phase H2-B",
+        },
+    }
+
+    messaging_status = groups["messaging_api"]["status"]
+    webhook_status = groups["webhook"]["status"]
+    liff_status = groups["liff"]["status"]
+
+    if all(status == "not_enabled" for status in (messaging_status, webhook_status, liff_status)):
+        overall_status = "not_enabled"
+    elif messaging_status == "configured" and webhook_status in {"configured", "partial"}:
+        overall_status = "configured"
     else:
-        overall_status = "ready_candidate"
+        overall_status = "partial"
 
     return {
         "status": overall_status,
-        "mode": settings.line_send_mode or "mock",
+        "mode": send_mode,
         "real_send_enabled": False,
+        "checks": line_checks,
         "groups": groups,
+    }
+
+
+@router.get("/health/storage")
+def health_storage() -> Dict[str, Any]:
+    supabase_configured = bool(settings.supabase_url and settings.supabase_service_role_key)
+    client = None
+    if supabase_configured:
+        try:
+            client = get_supabase_admin_client()
+        except SupabaseConfigurationError:
+            supabase_configured = False
+
+    buckets: list[Dict[str, Any]] = []
+    missing_required = False
+    probe_failures = False
+
+    for bucket_cfg in STORAGE_BUCKETS:
+        bucket_name = getattr(settings, bucket_cfg["attr"], "")
+        configured = bool(bucket_name)
+        entry = {
+            "key": bucket_cfg["key"],
+            "label": bucket_cfg["label"],
+            "bucket": bucket_name,
+            "mode": bucket_cfg["mode"],
+            "required": bucket_cfg["required"],
+            "notes": bucket_cfg.get("notes"),
+            "configured": configured,
+            "probe": "not_checked",
+            "status": "action_required" if bucket_cfg["required"] else "not_enabled",
+            "reason": None,
+        }
+
+        if not configured:
+            entry["reason"] = "bucket_env_missing"
+            missing_required = missing_required or bucket_cfg["required"]
+        elif not supabase_configured or client is None:
+            entry["status"] = "configured"
+            entry["reason"] = "supabase_not_ready"
+        else:
+            probe_status, probe_reason = _probe_storage_bucket(client, bucket_name)
+            entry["probe"] = probe_status
+            entry["reason"] = probe_reason
+            if probe_status == "ok":
+                entry["status"] = "ok"
+            elif probe_status == "manual":
+                entry["status"] = "manual"
+            else:
+                entry["status"] = "action_required"
+                probe_failures = True
+
+        buckets.append(entry)
+
+    if missing_required:
+        overall_status = "action_required"
+    elif not supabase_configured:
+        overall_status = "manual"
+    elif probe_failures:
+        overall_status = "warning"
+    else:
+        overall_status = "ok"
+
+    return {
+        "status": overall_status,
+        "storage": {
+            "supabase_configured": supabase_configured,
+            "probe_mode": "list" if supabase_configured else "manual",
+            "buckets": buckets,
+            "notes": [
+                "อ่าน bucket แบบ list limit=1 เท่านั้น (ไม่ลบ/เขียนไฟล์)",
+                "หากต้องการตรวจสอบเชิงลึกต้องทำ manual audit เพิ่มเติม",
+            ],
+        },
     }

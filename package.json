@@ -9,6 +9,7 @@
     "e2e:permissions": "node scripts/e2e/owner-staff-permission-regression.mjs",
     "e2e:cost-permissions": "node scripts/e2e/cost-data-permission-regression.mjs",
     "e2e:export-permissions": "node scripts/e2e/export-permission-regression.mjs",
+    "e2e:health-readiness": "node scripts/e2e/health-readiness.mjs",
     "test:phase4": "node scripts/e2e/order-payment-lifecycle.mjs",
     "test:phase4-1": "node scripts/e2e/owner-staff-permission-regression.mjs",
     "test:phase4-2": "node scripts/e2e/cost-data-permission-regression.mjs"
