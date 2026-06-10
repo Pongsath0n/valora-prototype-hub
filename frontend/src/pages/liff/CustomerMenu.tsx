@@ -120,6 +120,29 @@ export default function CustomerMenuPage() {
         </p>
       </div>
 
+      <div className="rounded-2xl border bg-white/80 p-4 text-sm text-muted-foreground space-y-2">
+        <div>
+          <p className="text-sm font-semibold text-foreground">การใช้ข้อมูลส่วนตัว</p>
+          <p>ร้านจะใช้ข้อมูลเฉพาะที่จำเป็นสำหรับ:</p>
+          <ul className="mt-1 list-disc space-y-1 pl-5">
+            <li>รับและจัดเตรียมคำสั่งซื้อ</li>
+            <li>ตรวจสอบการชำระเงินและหลักฐานการโอน</li>
+            <li>แจ้งเตือนความคืบหน้าและสถานะคำสั่งซื้อ</li>
+            <li>นัดหมายเวลารับสินค้า</li>
+            <li>ประสานงานบริการหลังการขาย</li>
+          </ul>
+        </div>
+        <p className="text-xs">
+          ข้อมูลที่เกี่ยวข้อง ได้แก่ ชื่อ เบอร์โทร รายการสั่งซื้อ เวลารับสินค้า และหลักฐานการชำระเงิน เพื่อให้บริการตามรายการที่ลูกค้าร้องขอเท่านั้น
+        </p>
+        <p className="text-xs">
+          อ่านรายละเอียดเพิ่มเติมได้ที่{" "}
+          <Link to="/privacy" className="font-semibold text-primary underline">
+            นโยบายความเป็นส่วนตัว
+          </Link>
+        </p>
+      </div>
+
       <div className="flex gap-2">
         <Link
           to="/liff/cart"

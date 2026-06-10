@@ -649,6 +649,9 @@ export default function OrderStatusPage() {
                         ? "อัปโหลดสลิปใหม่อีกครั้ง"
                         : "ส่งหลักฐานการโอน"}
                   </button>
+                  <p className="text-xs text-muted-foreground">
+                    หลักฐานการชำระเงินจะถูกใช้เพื่อการตรวจสอบยอดโอนและยืนยันคำสั่งซื้อเท่านั้น
+                  </p>
                 </form>
               ) : (
                 <p className="mt-2 rounded-xl bg-muted/30 px-4 py-2 text-sm text-muted-foreground">

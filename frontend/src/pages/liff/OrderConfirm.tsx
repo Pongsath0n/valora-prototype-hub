@@ -54,6 +54,7 @@ export default function OrderConfirmPage() {
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [cartItems] = useState<CartItem[]>(() => readCart());
+  const [pdpaAccepted, setPdpaAccepted] = useState(false);
 
   useEffect(() => {
     getCustomerIdentity()
@@ -63,7 +64,7 @@ export default function OrderConfirmPage() {
 
   const summary = useMemo(() => buildCartSummary(cartItems), [cartItems]);
   const disableSubmit =
-    submitting || !phone.trim() || !pickupTime || cartItems.length === 0;
+    submitting || !phone.trim() || !pickupTime || cartItems.length === 0 || !pdpaAccepted;
 
   async function confirm() {
     if (cartItems.length === 0) {
@@ -74,6 +75,10 @@ export default function OrderConfirmPage() {
     try {
       setSubmitting(true);
       setFormError(null);
+
+      if (!pdpaAccepted) {
+        throw new Error("โปรดยืนยันการใช้ข้อมูลตามนโยบายความเป็นส่วนตัวก่อนส่งคำสั่งซื้อ");
+      }
 
       if (!phone.trim()) {
         throw new Error("กรุณากรอกเบอร์โทรศัพท์สำหรับติดต่อ");
@@ -245,6 +250,29 @@ export default function OrderConfirmPage() {
             onChange={(event) => setOrderNote(event.target.value)}
           />
         </div>
+      </section>
+
+      <section className="space-y-3 rounded-2xl border border-primary/30 bg-primary/5 p-4 text-sm text-muted-foreground">
+        <p>
+          ร้านจะใช้ข้อมูลที่ระบุ รวมถึงชื่อ เบอร์โทร รายการสั่งซื้อ เวลารับสินค้า และหลักฐานการชำระเงิน เพื่อรับออเดอร์ ตรวจสอบการชำระเงิน แจ้งสถานะ นัดหมายเวลารับ และให้บริการหลังการขายเท่านั้น
+        </p>
+        <label className="flex items-start gap-3 text-sm font-medium text-foreground">
+          <input
+            type="checkbox"
+            className="mt-0.5 h-4 w-4 rounded border-primary text-primary focus:ring-primary"
+            checked={pdpaAccepted}
+            onChange={(event) => setPdpaAccepted(event.target.checked)}
+          />
+          <span>
+            ข้าพเจ้ารับทราบว่าร้านจะใช้ข้อมูลชื่อ เบอร์โทร รายการสั่งซื้อ เวลารับสินค้า และหลักฐานการชำระเงิน เพื่อดำเนินการรับออเดอร์ ตรวจสอบการชำระเงิน แจ้งสถานะคำสั่งซื้อ และให้บริการหลังการขาย
+          </span>
+        </label>
+        <p className="text-xs">
+          อ่านรายละเอียดฉบับเต็มได้ที่{" "}
+          <Link to="/privacy" className="font-semibold text-primary underline">
+            นโยบายความเป็นส่วนตัว
+          </Link>
+        </p>
       </section>
 
       {formError ? (

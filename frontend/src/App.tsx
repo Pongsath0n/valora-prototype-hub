@@ -34,6 +34,7 @@ import CartPage from "./pages/liff/Cart";
 import OrderConfirmPage from "./pages/liff/OrderConfirm";
 import OrderSuccessPage from "./pages/liff/OrderSuccess";
 import OrderStatusPage from "./pages/order/OrderStatusPage";
+import PrivacyNoticePage from "./pages/PrivacyNotice";
 
 import AdminDashboardPage from "./pages/admin/AdminDashboard";
 import AdminOrdersPage from "./pages/admin/AdminOrders";
@@ -138,6 +139,7 @@ function AppRoutes() {
 
       <Route path="/order" element={<CustomerMenuPage />} />
       <Route path="/order/status" element={<OrderStatusPage />} />
+      <Route path="/privacy" element={<PrivacyNoticePage />} />
       <Route path="/liff/menu" element={<CustomerMenuPage />} />
       <Route path="/liff/menu/:id" element={<MenuDetailPage />} />
       <Route path="/liff/cart" element={<CartPage />} />
