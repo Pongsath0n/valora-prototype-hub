@@ -76,7 +76,7 @@ export const SYSTEM_PORTAL_NAV: PortalNavItem[] = [
   },
   {
     title: "Storage Check",
-    path: "/system/storage",
+    path: "/system/health#storage",
     icon: HardDrive,
     roles: ["owner"],
   },

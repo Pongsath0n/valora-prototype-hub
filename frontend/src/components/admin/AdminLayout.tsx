@@ -51,6 +51,9 @@ const storeNavSections: { title: string; items: StoreNavItem[] }[] = [
   },
 ];
 
+const PLACEHOLDER_PATHS = new Set(["/store-admin/pos", "/store-admin/reports"]);
+const shouldHidePlaceholderNav = () => !import.meta.env.DEV;
+
 function StoreNavItem({
   path,
   icon: Icon,
@@ -87,27 +90,38 @@ interface AdminLayoutProps {
   title?: string;
   subtitle?: string;
   children: React.ReactNode;
+  forceHidePlaceholderNav?: boolean;
 }
 
 export default function AdminLayout({
   title = "Valora Store Admin",
   subtitle = "จัดการออเดอร์ การชำระเงิน เมนู และการตั้งค่าร้าน",
   children,
+  forceHidePlaceholderNav,
 }: AdminLayoutProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const navigate = useNavigate();
   const { signOut } = useAuth();
   const { role } = useProfileRole();
 
+  const hidePlaceholders = forceHidePlaceholderNav ?? shouldHidePlaceholderNav();
+
   const visibleSections = storeNavSections
     .map((section) => ({
       title: section.title,
       items: section.items.filter((item) => {
+        if (hidePlaceholders && PLACEHOLDER_PATHS.has(item.path)) {
+          return false;
+        }
         if (!item.roles) return true;
         return role ? item.roles.includes(role) : false;
       }),
     }))
     .filter((section) => section.items.length > 0);
+
+  const canAccessBusinessPortal = role ? MANAGER_NAV_ROLES.includes(role) : false;
+  const backLinkPath = canAccessBusinessPortal ? "/app/dashboard" : "/store-admin";
+  const backLinkLabel = canAccessBusinessPortal ? "กลับไปหน้าร้าน" : "กลับไปแดชบอร์ดร้าน";
 
   async function handleLogout() {
     await signOut();
@@ -144,11 +158,11 @@ export default function AdminLayout({
             บัญชี
           </p>
           <NavLink
-            to="/app/dashboard"
+            to={backLinkPath}
             className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-sidebar-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground transition-colors cursor-pointer"
           >
             <ArrowLeft className="w-4 h-4 flex-shrink-0" />
-            <span>กลับไปหน้าร้าน</span>
+            <span>{backLinkLabel}</span>
           </NavLink>
           <button
             type="button"
@@ -200,12 +214,12 @@ export default function AdminLayout({
             ))}
             <div className="pt-3 mt-3 border-t border-sidebar-border space-y-0.5">
               <NavLink
-                to="/app/dashboard"
+                to={backLinkPath}
                 onClick={() => setSidebarOpen(false)}
                 className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-sidebar-foreground hover:bg-sidebar-accent/60 transition-colors"
               >
                 <ArrowLeft className="w-4 h-4" />
-                กลับไปหน้าร้าน
+                {backLinkLabel}
               </NavLink>
               <button
                 type="button"

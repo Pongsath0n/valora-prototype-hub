@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import SystemLayout from "@/components/system/SystemLayout";
 import DataTable from "@/components/shared/DataTable";
 import LoadingState from "@/components/shared/LoadingState";
@@ -22,26 +22,45 @@ export default function SystemAuditLogsPage() {
     line_notifications: [],
   });
   const [status, setStatus] = useState<"ok" | "partial" | "unavailable" | "empty">("empty");
+  const [lastChecked, setLastChecked] = useState<Date | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  useEffect(() => {
-    loadAuditBuckets()
-      .then((res) => {
-        setBuckets(res.buckets as Record<BucketKey, AuditLogRow[]>);
-        if (res.status === "ok" && Object.values(res.buckets).some((rows) => rows.length)) {
-          setStatus("ok");
-        } else if (res.status === "unavailable") {
-          setStatus("unavailable");
-        } else if (Object.values(res.buckets).some((rows) => rows.length)) {
-          setStatus("partial");
-        } else {
-          setStatus("empty");
-        }
-      })
-      .catch(() => setStatus("unavailable"))
-      .finally(() => setLoading(false));
+  const refreshBuckets = useCallback(async () => {
+    setLoading(true);
+    setErrorMessage(null);
+    try {
+      const res = await loadAuditBuckets();
+      setBuckets(res.buckets as Record<BucketKey, AuditLogRow[]>);
+      const hasRows = Object.values(res.buckets).some((rows) => rows.length);
+      if (res.status === "ok" && hasRows) {
+        setStatus("ok");
+      } else if (res.status === "unavailable") {
+        setStatus("unavailable");
+        setErrorMessage("Supabase audit tables ไม่พร้อมใช้งานขณะนี้");
+      } else if (hasRows) {
+        setStatus("partial");
+      } else {
+        setStatus("empty");
+      }
+    } catch (error) {
+      void error;
+      setStatus("unavailable");
+      setErrorMessage("ไม่สามารถเชื่อมต่อกับระบบ audit logs");
+    } finally {
+      setLoading(false);
+      setLastChecked(new Date());
+    }
   }, []);
 
-  const hasRows = Object.values(buckets).some((rows) => rows.length);
+  useEffect(() => {
+    void refreshBuckets();
+  }, [refreshBuckets]);
+
+  const hasRows = useMemo(() => Object.values(buckets).some((rows) => rows.length), [buckets]);
+  const lastCheckedDisplay = lastChecked ? lastChecked.toLocaleString("th-TH") : "ยังไม่เคยตรวจสอบ";
+  const emptyStateDescription = status === "unavailable"
+    ? (errorMessage ? `${errorMessage} (ตรวจสอบล่าสุด ${lastCheckedDisplay})` : `ไม่สามารถโหลดบันทึกได้ (ตรวจสอบล่าสุด ${lastCheckedDisplay})`)
+    : `ยังไม่มี global activity_logs ในระบบปัจจุบัน ตรวจสอบล่าสุด ${lastCheckedDisplay}`;
 
   return (
     <SystemLayout
@@ -50,10 +69,22 @@ export default function SystemAuditLogsPage() {
     >
       {loading ? <LoadingState label="กำลังโหลด audit logs..." /> : null}
 
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+        <p className="text-xs text-muted-foreground">ตรวจสอบล่าสุด: {lastCheckedDisplay}</p>
+        <button
+          type="button"
+          onClick={() => void refreshBuckets()}
+          className="inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-semibold"
+          disabled={loading}
+        >
+          โหลดข้อมูลล่าสุด
+        </button>
+      </div>
+
       {!loading && status !== "ok" && !hasRows ? (
         <EmptyState
-          title="ยังไม่มีข้อมูลบันทึกเหตุการณ์"
-          description="ยังไม่มี global activity_logs ในระบบปัจจุบัน โดยระบบสามารถเริ่มตรวจสอบจาก order_status_logs, payment_status_logs และ line_notification_logs ได้"
+          title={status === "unavailable" ? "ไม่สามารถโหลดบันทึกเหตุการณ์" : "ยังไม่มีข้อมูลบันทึกเหตุการณ์"}
+          description={emptyStateDescription}
         />
       ) : null}
 

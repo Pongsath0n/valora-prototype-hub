@@ -85,7 +85,9 @@ export default function AdminSalesChannelsPage() {
     }
   };
 
-  const handleDeleteOrDeactivate = async (id: string) => {
+  const handleDeleteChannel = async (id: string) => {
+    const confirmed = window.confirm("การลบช่องทางจะลบประวัติช่องทางนี้ คุณต้องการดำเนินการต่อหรือไม่?");
+    if (!confirmed) return;
     setError("");
     try {
       const result = await storeAdminApi.deleteSalesChannel(id);
@@ -287,9 +289,9 @@ export default function AdminSalesChannelsPage() {
                   <button
                     type="button"
                     className="inline-flex items-center gap-1 px-2 py-1 rounded border border-destructive text-destructive hover:bg-destructive/10"
-                    onClick={() => handleDeleteOrDeactivate(r.id)}
+                    onClick={() => handleDeleteChannel(r.id)}
                   >
-                    <Trash2 className="w-4 h-4" /> ลบ/ปิด
+                    <Trash2 className="w-4 h-4" /> ลบถาวร
                   </button>
                 </div>
               ),

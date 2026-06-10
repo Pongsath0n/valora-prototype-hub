@@ -2,7 +2,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { RoleProvider } from "@/contexts/RoleContext";
 import { BUSINESS_PORTAL_ROLES, STORE_ADMIN_ROLES, SYSTEM_CONSOLE_ROLES, STORE_MANAGER_ROLES, useRoleGuard } from "@/lib/guards";
@@ -53,9 +53,9 @@ import SystemUsersPage from "./pages/system/SystemUsers";
 import SystemRolesPage from "./pages/system/SystemRoles";
 import SystemAuditLogsPage from "./pages/system/SystemAuditLogs";
 import SystemHealthPage from "./pages/system/SystemHealth";
-import SystemStoragePage from "./pages/system/SystemStorage";
 
 const queryClient = new QueryClient();
+const shouldRedirectStoreReports = !import.meta.env.DEV;
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -93,6 +93,14 @@ function SystemRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+export function AdminLegacyRedirect() {
+  const location = useLocation();
+  const legacyMatch = location.pathname.match(/^\/admin(.*)$/);
+  const suffix = legacyMatch?.[1] ?? "";
+  const targetPath = `/store-admin${suffix}` || "/store-admin";
+  return <Navigate to={{ pathname: targetPath, search: location.search, hash: location.hash }} replace />;
+}
+
 function AppRoutes() {
   return (
     <Routes>
@@ -112,21 +120,29 @@ function AppRoutes() {
       <Route path="/store-admin/orders" element={<AdminRoute><AdminOrdersPage /></AdminRoute>} />
       <Route path="/store-admin/orders/:id" element={<AdminRoute><AdminOrderDetailPage /></AdminRoute>} />
       <Route path="/store-admin/customers" element={<AdminRoute><CustomersPage /></AdminRoute>} />
-      <Route path="/store-admin/reports" element={<ManagerRoute><StoreAdminReportsPage /></ManagerRoute>} />
+      <Route
+        path="/store-admin/reports"
+        element={
+          shouldRedirectStoreReports ? (
+            <ManagerRoute>
+              <Navigate to="/app/reports" replace />
+            </ManagerRoute>
+          ) : (
+            <ManagerRoute>
+              <StoreAdminReportsPage />
+            </ManagerRoute>
+          )
+        }
+      />
 
-      <Route path="/admin" element={<AdminRoute><AdminDashboardPage /></AdminRoute>} />
-      <Route path="/admin/orders" element={<AdminRoute><AdminOrdersPage /></AdminRoute>} />
-      <Route path="/admin/orders/:id" element={<AdminRoute><AdminOrderDetailPage /></AdminRoute>} />
-      <Route path="/admin/products" element={<AdminRoute><AdminProductsPage /></AdminRoute>} />
-      <Route path="/admin/store" element={<AdminRoute><AdminStoreSettingsPage /></AdminRoute>} />
-      <Route path="/admin/sales-channels" element={<AdminRoute><AdminSalesChannelsPage /></AdminRoute>} />
+      <Route path="/admin/*" element={<AdminLegacyRedirect />} />
 
       {/* Internal System Console */}
       <Route path="/system" element={<SystemRoute><SystemOverviewPage /></SystemRoute>} />
       <Route path="/system/users" element={<SystemRoute><SystemUsersPage /></SystemRoute>} />
       <Route path="/system/roles" element={<SystemRoute><SystemRolesPage /></SystemRoute>} />
       <Route path="/system/health" element={<SystemRoute><SystemHealthPage /></SystemRoute>} />
-      <Route path="/system/storage" element={<SystemRoute><SystemStoragePage /></SystemRoute>} />
+      <Route path="/system/storage" element={<Navigate to="/system/health#storage" replace />} />
       <Route path="/system/audit-logs" element={<SystemRoute><SystemAuditLogsPage /></SystemRoute>} />
 
       <Route path="/app/dashboard" element={<ProtectedRoute><BusinessRoute><Dashboard /></BusinessRoute></ProtectedRoute>} />

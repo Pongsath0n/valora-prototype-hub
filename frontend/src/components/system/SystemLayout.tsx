@@ -101,11 +101,11 @@ export default function SystemLayout({
             บัญชี
           </p>
           <NavLink
-            to="/admin"
+            to="/store-admin"
             className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-sidebar-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground transition-colors cursor-pointer"
           >
             <ArrowLeft className="w-4 h-4 flex-shrink-0" />
-            <span>กลับไปหน้า Admin</span>
+            <span>กลับไป Store Admin</span>
           </NavLink>
           <button
             type="button"
@@ -148,12 +148,12 @@ export default function SystemLayout({
             ))}
             <div className="pt-3 mt-3 border-t border-sidebar-border space-y-0.5">
               <NavLink
-                to="/admin"
+                to="/store-admin"
                 onClick={() => setSidebarOpen(false)}
                 className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-sidebar-foreground hover:bg-sidebar-accent/60 transition-colors"
               >
                 <ArrowLeft className="w-4 h-4" />
-                กลับไปหน้า Admin
+                กลับไป Store Admin
               </NavLink>
               <button
                 type="button"

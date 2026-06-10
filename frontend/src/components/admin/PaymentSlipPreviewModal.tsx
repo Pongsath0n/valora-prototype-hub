@@ -32,6 +32,19 @@ export function PaymentSlipPreviewModal({
   const [actionLoading, setActionLoading] = useState<null | "approve" | "reject">(null);
 
   useEffect(() => {
+    if (!isOpen) return;
+
+    function handleKey(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    }
+
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [isOpen, onClose]);
+
+  useEffect(() => {
     let ignore = false;
     if (!isOpen || !payment) {
       setPreview(null);
@@ -90,8 +103,8 @@ export function PaymentSlipPreviewModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4 py-6">
-      <div className="relative w-full max-w-3xl rounded-2xl bg-white p-6 shadow-2xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4 py-6" onClick={onClose} data-testid="payment-slip-modal">
+      <div className="relative w-full max-w-3xl rounded-2xl bg-white p-6 shadow-2xl" onClick={(event) => event.stopPropagation()}>
         <button
           type="button"
           aria-label="ปิด"

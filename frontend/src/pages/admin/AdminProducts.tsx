@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Plus, RefreshCw, Trash2 } from "lucide-react";
+import { Plus, RefreshCw } from "lucide-react";
 import AdminLayout from "@/components/admin/AdminLayout";
 import DataTable from "@/components/shared/DataTable";
 import EmptyState from "@/components/shared/EmptyState";
@@ -142,6 +142,8 @@ export default function AdminProductsPage() {
   }
 
   async function handleDelete(id: string) {
+    const confirmed = window.confirm("การลบเมนูนี้จะลบข้อมูลถาวรและประวัติที่เกี่ยวข้อง คุณแน่ใจหรือไม่?");
+    if (!confirmed) return;
     setError("");
     try {
       const res = await storeAdminApi.deleteMenu(id);
@@ -151,6 +153,17 @@ export default function AdminProductsPage() {
       const msg = err?.message || "ลบไม่สำเร็จ";
       if (msg === "product_has_history") setInfo("ไม่สามารถลบได้ มีประวัติการใช้งาน");
       else setError(msg);
+    }
+    void refresh();
+  }
+
+  async function handleToggleActive(id: string, nextActive: boolean) {
+    setError("");
+    try {
+      await storeAdminApi.updateMenu(id, { is_active: nextActive });
+      setInfo(nextActive ? "เปิดใช้งานเมนูแล้ว" : "ปิดใช้งานเมนูแล้ว");
+    } catch (err: any) {
+      setError(err?.message || "อัปเดตสถานะเมนูไม่สำเร็จ");
     }
     void refresh();
   }
@@ -319,9 +332,20 @@ export default function AdminProductsPage() {
               key: "actions",
               header: "จัดการ",
               render: (r) => (
-                <div className="flex gap-2 text-sm">
-                  <button type="button" className="underline" onClick={() => handleDelete(r.id)}>
-                    ลบ/ปิดใช้งาน
+                <div className="flex flex-wrap gap-2 text-xs">
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1 rounded border px-2 py-1 hover:bg-muted"
+                    onClick={() => handleToggleActive(r.id, !(r.is_active ?? true))}
+                  >
+                    {(r.is_active ?? true) ? "ปิดใช้งาน" : "เปิดใช้งาน"}
+                  </button>
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1 rounded border border-destructive px-2 py-1 text-destructive hover:bg-destructive/10"
+                    onClick={() => handleDelete(r.id)}
+                  >
+                    ลบถาวร
                   </button>
                 </div>
               ),
