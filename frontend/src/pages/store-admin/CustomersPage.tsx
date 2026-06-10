@@ -21,6 +21,7 @@ import {
   storeAdminApi,
   type ApiCustomer,
 } from "@/services/storeAdminApi";
+import { featureFlags } from "@/config/featureFlags";
 
 function friendlyError(message: string): string {
   if (message === "missing_token" || message === "invalid_token" || message === "unauthorized") {
@@ -57,6 +58,7 @@ export default function CustomersPage() {
   const [selectedCustomer, setSelectedCustomer] = useState<ApiCustomer | null>(null);
   const [lineUserIdInput, setLineUserIdInput] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const manualBindingEnabled = featureFlags.enableManualLineBinding;
 
   const refresh = async () => {
     setLoading(true);
@@ -76,6 +78,7 @@ export default function CustomersPage() {
   }, []);
 
   const openBindDialog = (customer: ApiCustomer) => {
+    if (!manualBindingEnabled) return;
     setSelectedCustomer(customer);
     setLineUserIdInput("");
     setDialogOpen(true);
@@ -127,6 +130,11 @@ export default function CustomersPage() {
   return (
     <AdminLayout title="ลูกค้า" subtitle="จัดการข้อมูลลูกค้าและการผูก LINE">
       <div className="space-y-3">
+        {!manualBindingEnabled ? (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            การผูก LINE อัตโนมัติจะพร้อมใช้งานหลังจากเปิด flow จับคู่ลูกค้าผ่าน LINE OA / LINE Login ในระยะถัดไป
+          </div>
+        ) : null}
         {error && (
           <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
             {error}
@@ -173,10 +181,12 @@ export default function CustomersPage() {
                         <Button size="sm" variant="outline" onClick={() => handleUnbind(row)}>
                           ปลดผูก
                         </Button>
-                      ) : (
+                      ) : manualBindingEnabled ? (
                         <Button size="sm" onClick={() => openBindDialog(row)}>
-                          ผูก LINE
+                          ผูก LINE (Testing)
                         </Button>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">รอ flow จับคู่ LINE</span>
                       )}
                     </TableCell>
                   </TableRow>
@@ -187,10 +197,10 @@ export default function CustomersPage() {
         </div>
       </div>
 
-      <Dialog open={dialogOpen} onOpenChange={(open) => { if (!open) closeDialog(); }}>
+      <Dialog open={dialogOpen && manualBindingEnabled} onOpenChange={(open) => { if (!open) closeDialog(); }}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>ผูก LINE User ID</DialogTitle>
+            <DialogTitle>Testing only: manual LINE User ID binding</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             <p className="text-sm text-gray-600">

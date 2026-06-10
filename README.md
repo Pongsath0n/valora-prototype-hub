@@ -49,6 +49,8 @@ npm install
 # VITE_LIFF_ID=your_liff_id
 # VITE_LINE_CHANNEL_ACCESS_TOKEN=your_line_channel_access_token
 # VITE_ALLOW_DEMO_DATA_RESET=false  # เปิดเป็น true เฉพาะ dev/QA ที่ต้องรีเซ็ต local demo data
+# VITE_SHOW_E2E_HINTS=false         # เปิด banner เตือน flow ทดสอบเฉพาะ QA/Dev
+# VITE_ENABLE_MANUAL_LINE_BINDING=false # เปิดปุ่มผูก LINE แบบ manual สำหรับการทดสอบเท่านั้น
 
 npm run dev  # http://localhost:8080
 ```

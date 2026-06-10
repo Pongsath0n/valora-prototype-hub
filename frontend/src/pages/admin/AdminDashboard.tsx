@@ -2,7 +2,7 @@ import { Link } from "react-router-dom";
 import AdminLayout from "@/components/admin/AdminLayout";
 import { useProfileRole } from "@/contexts/RoleContext";
 import { ClipboardList, CreditCard, Settings, Soup, Store, Users } from "lucide-react";
-import { formatOrderStatus } from "@/lib/format";
+import { featureFlags } from "@/config/featureFlags";
 
 const dailyOpsCards = [
   {
@@ -89,12 +89,14 @@ export default function AdminDashboardPage() {
         </section>
       ) : null}
 
-      <section className="stat-card">
-        <h2 className="section-title mb-2">พร้อมสำหรับ E2E ทดสอบ</h2>
-        <p className="text-sm text-muted-foreground">
-          เส้นทางหลักของ Phase 1: Payment Queue → Approve Slip → Order Queue → Mark Ready
-        </p>
-      </section>
+      {featureFlags.showE2EHints ? (
+        <section className="stat-card border-amber-300 bg-amber-50 text-amber-900">
+          <h2 className="section-title mb-2 text-amber-900">พร้อมสำหรับ E2E ทดสอบ</h2>
+          <p className="text-sm">
+            เส้นทางหลักของ Phase 1: Payment Queue → Approve Slip → Order Queue → Mark Ready
+          </p>
+        </section>
+      ) : null}
     </AdminLayout>
   );
 }

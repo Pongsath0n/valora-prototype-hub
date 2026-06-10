@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Database, HardDrive, PlugZap, Server, ShieldCheck, WifiOff } from "lucide-react";
+import { AlertTriangle, Database, HardDrive, Info, PlugZap, Server, ShieldCheck, WifiOff } from "lucide-react";
 import SystemLayout from "@/components/system/SystemLayout";
 import StatusBadge, { type BadgeTone } from "@/components/shared/StatusBadge";
 import LoadingState from "@/components/shared/LoadingState";
@@ -42,7 +42,67 @@ export default function SystemHealthPage() {
       .finally(() => setLoading(false));
   }, []);
 
-  const cards: CardItem[] = useMemo(() => {
+  const summaryCards = useMemo(() => {
+    if (!health) return [];
+
+    const envData = (health.environment.data as any) ?? {};
+    const appEnvDetail = envData?.details?.app_env;
+    const lineData = (health.lineReady.data as any) ?? {};
+    const lineChecks = (lineData.checks as Record<string, any>) ?? {};
+    const storage = (health.storage.data as any)?.storage;
+
+    const sendMode = lineChecks.send_mode?.mode ?? lineData.mode ?? "mock";
+    const liffStatus = lineChecks.liff?.status ?? "not_enabled";
+    const storageBucketSummary = Array.isArray(storage?.buckets)
+      ? `${storage.buckets.filter((b: any) => (b.status || "").toLowerCase() === "ok").length}/${storage.buckets.length} buckets ready`
+      : "—";
+
+    return [
+      {
+        title: "Backend API",
+        status: health.backend.status,
+        tone: toneFromStatus(health.backend.status),
+        note: health.baseUrl,
+      },
+      {
+        title: "Environment",
+        status: health.environment.status,
+        tone: toneFromStatus(health.environment.status),
+        note: appEnvDetail
+          ? `APP_ENV=${appEnvDetail.value || "unset"} • Local=development • Railway=production`
+          : "กำลังดึงค่า APP_ENV",
+      },
+      {
+        title: "LINE Messaging",
+        status: lineData.status ?? lineChecks.messaging_api?.status ?? "not_enabled",
+        tone: toneFromStatus(lineData.status ?? lineChecks.messaging_api?.status ?? "info"),
+        note:
+          sendMode.toLowerCase() === "mock"
+            ? "Mock send mode (expected ก่อน Soft Launch)"
+            : `Send mode: ${sendMode}`,
+      },
+      {
+        title: "Customer binding",
+        status: "pending",
+        tone: "warning" as BadgeTone,
+        note: "Flow รอ LINE Login/LIFF • Manual binding ใช้ได้เฉพาะ testing flag",
+      },
+      {
+        title: "LIFF / Login",
+        status: liffStatus === "not_enabled" ? "deferred" : liffStatus,
+        tone: liffStatus === "not_enabled" ? "info" : toneFromStatus(liffStatus),
+        note: "เลื่อน Phase นี้ ไม่ถือเป็นความผิดพลาด",
+      },
+      {
+        title: "Storage",
+        status: health.storage.status,
+        tone: toneFromStatus(health.storage.status),
+        note: storageBucketSummary,
+      },
+    ];
+  }, [health]);
+
+  const detailCards: CardItem[] = useMemo(() => {
     if (!health) return [];
 
     const envData = (health.environment.data as any) ?? {};
@@ -255,20 +315,50 @@ export default function SystemHealthPage() {
         </div>
       ) : null}
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-        {cards.map((card) => (
-          <section key={card.title} id={card.id} className="stat-card space-y-3">
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <card.icon className="w-4 h-4 text-muted-foreground" />
-                <h2 className="section-title mb-0">{card.title}</h2>
+      {summaryCards.length ? (
+        <div className="grid gap-4 md:grid-cols-2">
+          {summaryCards.map((card) => (
+            <section key={card.title} className="stat-card space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Info className="w-4 h-4 text-muted-foreground" />
+                  <h2 className="section-title mb-0">{card.title}</h2>
+                </div>
+                <StatusBadge label={card.status} tone={card.tone} />
               </div>
-              <StatusBadge label={card.status} tone={card.tone} />
-            </div>
-            {card.body}
-          </section>
-        ))}
-      </div>
+              <p className="text-sm text-muted-foreground">{card.note}</p>
+            </section>
+          ))}
+        </div>
+      ) : null}
+
+      <section className="stat-card space-y-4 mt-4">
+        <div className="flex items-center justify-between">
+          <h2 className="section-title mb-0">รายละเอียดขั้นสูง</h2>
+          <p className="text-xs text-muted-foreground">คลิกเพื่อดู matrix / ตัวแปรรายจุด</p>
+        </div>
+        <div className="space-y-3">
+          {detailCards.map((card) => (
+            <details key={card.title} id={card.id} className="rounded-xl border border-border/60 p-3">
+              <summary className="flex items-center justify-between gap-2 cursor-pointer">
+                <div className="flex items-center gap-2">
+                  <card.icon className="w-4 h-4 text-muted-foreground" />
+                  <span className="font-semibold text-sm">{card.title}</span>
+                </div>
+                <StatusBadge label={card.status} tone={card.tone} />
+              </summary>
+              <div className="mt-3 text-sm space-y-2">
+                {card.title === "LINE Readiness" ? (
+                  <p className="text-xs text-muted-foreground">
+                    Send mode mock = คาดหวังสำหรับ QA • LIFF = Deferred/Not required ในระยะนี้ • Customer binding = pending flow
+                  </p>
+                ) : null}
+                {card.body}
+              </div>
+            </details>
+          ))}
+        </div>
+      </section>
     </SystemLayout>
   );
 }

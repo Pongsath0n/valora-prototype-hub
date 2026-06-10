@@ -202,7 +202,6 @@ export default function DashboardPage() {
                 <li key={row.key} className="flex items-center justify-between">
                   <div>
                     <p className="text-sm font-medium text-foreground">{row.label}</p>
-                    <p className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground">{row.key}</p>
                   </div>
                   <span className="text-lg font-semibold text-foreground">{row.count}</span>
                 </li>

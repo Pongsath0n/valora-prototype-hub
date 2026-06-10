@@ -1,40 +1,82 @@
 import { NavLink } from "react-router-dom";
 import {
-  LayoutDashboard,
-  Workflow,
-  Megaphone,
-  Truck,
-  Soup,
-  Package,
-  BookOpenCheck,
-  Store,
-  Calculator,
-  ShoppingCart,
-  ClipboardList,
+  Activity,
   BarChart3,
-  Settings,
+  BookOpenCheck,
+  ClipboardList,
+  LayoutDashboard,
   LogOut,
   Menu,
+  Settings,
+  ShoppingCart,
+  Soup,
+  Store,
+  Users,
   X,
 } from "lucide-react";
 import { useState } from "react";
 import LogoBrand from "@/components/LogoBrand";
 import { PortalSwitcher } from "@/components/navigation/PortalSwitcher";
 import { useProfileRole } from "@/contexts/RoleContext";
+import type { AppRole } from "@/lib/guards";
 
-const mainNav = [
-  { title: "แดชบอร์ด", path: "/app/dashboard", icon: LayoutDashboard },
-  { title: "แผนการขาย", path: "/app/scenario", icon: Workflow },
-  { title: "โปรโมชัน", path: "/app/promo", icon: Megaphone },
-  { title: "เดลิเวอรี", path: "/app/delivery", icon: Truck },
-  { title: "เมนู", path: "/app/menu", icon: Soup },
-  { title: "วัตถุดิบ", path: "/app/ingredients", icon: Package },
-  { title: "สูตรและต้นทุน", path: "/app/recipes", icon: BookOpenCheck },
-  { title: "ช่องทางขาย", path: "/app/channels", icon: Store },
-  { title: "ราคาตามช่องทาง", path: "/app/channel-pricing", icon: Calculator },
-  { title: "POS", path: "/app/pos", icon: ShoppingCart },
-  { title: "ออเดอร์", path: "/app/orders", icon: ClipboardList },
-  { title: "รายงาน", path: "/app/reports", icon: BarChart3 },
+type OwnerNavItem = {
+  title: string;
+  path: string;
+  icon: React.ElementType;
+  roles?: AppRole[];
+};
+
+type OwnerNavSection = {
+  title: string;
+  items: OwnerNavItem[];
+};
+
+const OWNER_NAV_SECTIONS: OwnerNavSection[] = [
+  {
+    title: "ภาพรวม",
+    items: [
+      { title: "แดชบอร์ดธุรกิจ", path: "/app/dashboard", icon: LayoutDashboard },
+      { title: "รายงานสรุป", path: "/app/reports", icon: BarChart3 },
+    ],
+  },
+  {
+    title: "การดำเนินงาน",
+    items: [
+      { title: "Store Admin", path: "/store-admin", icon: ClipboardList },
+      { title: "ออเดอร์ (Owner)", path: "/app/orders", icon: ClipboardList },
+      { title: "POS", path: "/app/pos", icon: ShoppingCart },
+      { title: "ลูกค้า", path: "/store-admin/customers", icon: Users },
+    ],
+  },
+  {
+    title: "การตั้งค่าธุรกิจ",
+    items: [
+      { title: "เมนูและหมวดหมู่", path: "/app/menu", icon: Soup },
+      { title: "ช่องทางขาย", path: "/app/channels", icon: Store },
+      { title: "ราคาตามช่องทาง", path: "/app/channel-pricing", icon: Store },
+    ],
+  },
+  {
+    title: "ต้นทุนและสต็อก",
+    items: [
+      { title: "วัตถุดิบ", path: "/app/ingredients", icon: Soup },
+      { title: "สูตรและต้นทุน", path: "/app/recipes", icon: BookOpenCheck },
+    ],
+  },
+  {
+    title: "ระบบ",
+    items: [
+      { title: "ตั้งค่าระบบ", path: "/app/settings", icon: Settings },
+      { title: "System Health", path: "/system/health", icon: Activity, roles: ["owner"] },
+    ],
+  },
+  {
+    title: "ขั้นสูง / ทดสอบ",
+    items: [
+      { title: "System Console", path: "/system", icon: Activity, roles: ["owner"] },
+    ],
+  },
 ];
 
 const utilityNav = [
@@ -42,8 +84,8 @@ const utilityNav = [
 ];
 
 const mobileNav = [
-  { title: "หน้าหลัก", path: "/app/dashboard", icon: LayoutDashboard },
-  { title: "เมนู", path: "/app/menu", icon: Soup },
+  { title: "ภาพรวม", path: "/app/dashboard", icon: LayoutDashboard },
+  { title: "Store Admin", path: "/store-admin", icon: ClipboardList },
   { title: "POS", path: "/app/pos", icon: ShoppingCart },
   { title: "ออเดอร์", path: "/app/orders", icon: ClipboardList },
   { title: "ตั้งค่า", path: "/app/settings", icon: Settings },
@@ -70,6 +112,14 @@ function NavItem({ path, icon: Icon, title }: { path: string; icon: React.Elemen
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const { role, loading } = useProfileRole();
+  const resolvedSections = OWNER_NAV_SECTIONS.map((section) => ({
+    title: section.title,
+    items: section.items.filter((item) => {
+      if (!item.roles?.length) return true;
+      if (!role) return false;
+      return item.roles.includes(role as AppRole);
+    }),
+  })).filter((section) => section.items.length);
 
   return (
     <div className="min-h-screen flex w-full bg-background">
@@ -85,13 +135,19 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         </div>
 
         {/* Main nav */}
-        <nav className="flex-1 py-4 px-3 space-y-0.5 overflow-y-auto">
-          <p className="text-[10px] font-semibold text-sidebar-foreground/40 uppercase tracking-widest px-3 mb-2">
-            เมนูหลัก
-          </p>
-          {mainNav.map((item) => (
-            <NavItem key={item.path} {...item} />
-          ))}
+        <nav className="flex-1 py-4 px-3 space-y-5 overflow-y-auto">
+          {!loading && role
+            ? resolvedSections.map((section) => (
+                <div key={section.title} className="space-y-1">
+                  <p className="text-[10px] font-semibold text-sidebar-foreground/40 uppercase tracking-widest px-3">
+                    {section.title}
+                  </p>
+                  {section.items.map((item) => (
+                    <NavItem key={`${section.title}-${item.path}`} {...item} />
+                  ))}
+                </div>
+              ))
+            : null}
           <div className="mt-6 px-3">
             {!loading && role ? <PortalSwitcher variant="stack" /> : null}
           </div>
@@ -133,26 +189,30 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             className="absolute inset-0 bg-foreground/30 backdrop-blur-sm"
             onClick={() => setSidebarOpen(false)}
           />
-          <aside className="absolute left-0 top-14 bottom-0 w-64 bg-sidebar text-sidebar-foreground px-3 py-4 space-y-0.5 overflow-y-auto shadow-xl">
-            <p className="text-[10px] font-semibold text-sidebar-foreground/40 uppercase tracking-widest px-3 mb-2">
-              เมนูหลัก
-            </p>
-            {mainNav.map((item) => (
-              <NavLink
-                key={item.path}
-                to={item.path}
-                onClick={() => setSidebarOpen(false)}
-                className={({ isActive }) =>
-                  `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
-                    isActive
-                      ? "bg-sidebar-accent text-sidebar-accent-foreground font-semibold"
-                      : "text-sidebar-foreground hover:bg-sidebar-accent/60"
-                  }`
-                }
-              >
-                <item.icon className="w-4 h-4" />
-                {item.title}
-              </NavLink>
+          <aside className="absolute left-0 top-14 bottom-0 w-64 bg-sidebar text-sidebar-foreground px-3 py-4 space-y-4 overflow-y-auto shadow-xl">
+            {resolvedSections.map((section) => (
+              <div key={`mobile-${section.title}`} className="space-y-1">
+                <p className="text-[10px] font-semibold text-sidebar-foreground/40 uppercase tracking-widest px-3">
+                  {section.title}
+                </p>
+                {section.items.map((item) => (
+                  <NavLink
+                    key={`mobile-${section.title}-${item.path}`}
+                    to={item.path}
+                    onClick={() => setSidebarOpen(false)}
+                    className={({ isActive }) =>
+                      `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
+                        isActive
+                          ? "bg-sidebar-accent text-sidebar-accent-foreground font-semibold"
+                          : "text-sidebar-foreground hover:bg-sidebar-accent/60"
+                      }`
+                    }
+                  >
+                    <item.icon className="w-4 h-4" />
+                    {item.title}
+                  </NavLink>
+                ))}
+              </div>
             ))}
             <div className="pt-3 mt-3 border-t border-sidebar-border space-y-0.5">
               {utilityNav.map((item) => (

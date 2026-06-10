@@ -54,6 +54,15 @@ const statusTabs: { key: TabKey; label: string; filter: string[] }[] = [
   { key: "rejected", label: "ถูกปฏิเสธ", filter: ["rejected"] },
 ];
 
+const normalizeStatus = (value: string | null | undefined): string => (value ?? "").toLowerCase();
+
+const doesTabContainStatus = (tabKey: TabKey, status: string | null | undefined): boolean => {
+  const tab = statusTabs.find((t) => t.key === tabKey);
+  if (!tab) return false;
+  const normalized = normalizeStatus(status);
+  return tab.filter.some((value) => value === normalized);
+};
+
 const nextStatusByCurrent: Record<string, string[]> = {
   pending_payment: ["waiting_payment_review", "cancelled"],
   waiting_payment_review: ["accepted", "cancelled"],
@@ -96,6 +105,16 @@ export default function AdminOrdersPage() {
   const [modalRejectReason, setModalRejectReason] = useState("");
   const [exportingOrders, setExportingOrders] = useState(false);
   const [exportingPayments, setExportingPayments] = useState(false);
+
+  const applyOrderStatusOptimistic = (orderId: string, nextStatus: string) => {
+    setRows((prev) =>
+      prev.map((order) => (order.id === orderId ? { ...order, status: nextStatus } : order)),
+    );
+  };
+
+  const removePaymentFromQueue = (paymentId: string) => {
+    setPaymentQueue((prev) => prev.filter((payment) => payment.id !== paymentId));
+  };
 
   const refresh = async () => {
     setRefreshing(true);
@@ -175,6 +194,7 @@ export default function AdminOrdersPage() {
     try {
       const res = await storeAdminApi.updateOrderStatus(order.id, { status: nextStatus });
       if (res.mock_notification) setInfo(res.mock_notification);
+      applyOrderStatusOptimistic(order.id, nextStatus);
       await refresh();
     } catch (err: any) {
       setError(friendlyError(err?.message || "อัปเดตสถานะไม่สำเร็จ"));
@@ -186,6 +206,7 @@ export default function AdminOrdersPage() {
     try {
       const res = await storeAdminApi.approvePayment(paymentId, {});
       if (res.mock_notification) setInfo(res.mock_notification);
+      removePaymentFromQueue(paymentId);
       await refresh();
     } catch (err: any) {
       setError(friendlyError(err?.message || "อนุมัติการชำระเงินไม่สำเร็จ"));
@@ -198,6 +219,7 @@ export default function AdminOrdersPage() {
       const reason = providedReason?.trim() || "rejected_by_admin";
       const res = await storeAdminApi.rejectPayment(paymentId, { reason });
       if (res.message) setInfo(res.message);
+      removePaymentFromQueue(paymentId);
       await refresh();
     } catch (err: any) {
       setError(friendlyError(err?.message || "ปฏิเสธการชำระเงินไม่สำเร็จ"));

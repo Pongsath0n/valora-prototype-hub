@@ -19,6 +19,26 @@ function assertCondition(condition, message, detail = {}) {
 
 // ── Check A: Staff navigation visibility ─────────────────────────────────────
 const adminLayout = read("frontend/src/components/admin/AdminLayout.tsx");
+const adminDashboard = read("frontend/src/pages/admin/AdminDashboard.tsx");
+const customersPage = read("frontend/src/pages/store-admin/CustomersPage.tsx");
+
+assertCondition(
+  /featureFlags\.showE2EHints/.test(adminDashboard),
+  "Store Admin dashboard E2E banner must be gated by feature flag",
+  {},
+);
+
+assertCondition(
+  /featureFlags\.enableManualLineBinding/.test(customersPage),
+  "Manual LINE binding UI must be gated by testing flag",
+  {},
+);
+
+assertCondition(
+  /Testing only: manual LINE User ID binding/.test(customersPage),
+  "Manual LINE binding dialog must be labelled testing-only",
+  {},
+);
 const navItemRegex = /\{\s*title:\s*"([^"]+)"[\s\S]*?path:\s*"([^"]+)"[\s\S]*?\}/g;
 const staffForbiddenKeywords = [
   "ingredients",
