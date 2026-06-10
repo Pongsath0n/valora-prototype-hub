@@ -1,15 +1,10 @@
 import { Link } from "react-router-dom";
 import AdminLayout from "@/components/admin/AdminLayout";
 import { useProfileRole } from "@/contexts/RoleContext";
-import {
-  ClipboardList,
-  CreditCard,
-  Settings,
-  Soup,
-  Store,
-} from "lucide-react";
+import { ClipboardList, CreditCard, Settings, Soup, Store, Users } from "lucide-react";
+import { formatOrderStatus } from "@/lib/format";
 
-const storeCards = [
+const dailyOpsCards = [
   {
     title: "ออเดอร์",
     desc: "คิวออเดอร์ ชำระเงิน เตรียม และพร้อมรับ",
@@ -22,6 +17,15 @@ const storeCards = [
     icon: CreditCard,
     to: "/store-admin/pos",
   },
+  {
+    title: "ลูกค้า",
+    desc: "ค้นหาและอัปเดตข้อมูลลูกค้า",
+    icon: Users,
+    to: "/store-admin/customers",
+  },
+];
+
+const managementCards = [
   {
     title: "เมนู",
     desc: "เพิ่ม/แก้ไขเมนู หมวดหมู่ ราคา และสถานะ",
@@ -39,37 +43,51 @@ const storeCards = [
     desc: "ตั้งราคาและกำไรต่อช่องทางขาย",
     icon: Settings,
     to: "/store-admin/channel-pricing",
-    roles: ["owner", "admin", "manager"] as const,
   },
 ];
 
 export default function AdminDashboardPage() {
   const { role } = useProfileRole();
 
-  const visibleCards = storeCards.filter((item) => {
-    if (!item.roles) return true;
-    return role ? item.roles.includes(role as any) : false;
-  });
+  const canManage = role ? ["owner", "admin", "manager"].includes(role) : false;
 
   return (
     <AdminLayout>
-      <div className="grid md:grid-cols-2 gap-4">
-        {visibleCards.map((item) => (
-          <Link
-            key={item.title}
-            to={item.to}
-            className="stat-card hover:border-accent/40 transition-colors cursor-pointer"
-          >
-            <div className="flex items-center gap-3 mb-3">
-              <div className="w-9 h-9 rounded-lg bg-accent/10 flex items-center justify-center">
-                <item.icon className="w-5 h-5 text-accent" />
+      <section className="space-y-4">
+        <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-widest">งานประจำวัน</h2>
+        <div className="grid md:grid-cols-3 gap-4">
+          {dailyOpsCards.map((item) => (
+            <Link key={item.title} to={item.to} className="stat-card hover:border-accent/40 transition-colors cursor-pointer">
+              <div className="flex items-center gap-3 mb-3">
+                <div className="w-9 h-9 rounded-lg bg-accent/10 flex items-center justify-center">
+                  <item.icon className="w-5 h-5 text-accent" />
+                </div>
+                <h2 className="font-semibold text-foreground">{item.title}</h2>
               </div>
-              <h2 className="font-semibold text-foreground">{item.title}</h2>
-            </div>
-            <p className="text-sm text-muted-foreground">{item.desc}</p>
-          </Link>
-        ))}
-      </div>
+              <p className="text-sm text-muted-foreground">{item.desc}</p>
+            </Link>
+          ))}
+        </div>
+      </section>
+
+      {canManage ? (
+        <section className="space-y-4">
+          <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-widest">การจัดการร้าน (ผู้จัดการขึ้นไป)</h2>
+          <div className="grid md:grid-cols-3 gap-4">
+            {managementCards.map((item) => (
+              <Link key={item.title} to={item.to} className="stat-card hover:border-accent/40 transition-colors cursor-pointer">
+                <div className="flex items-center gap-3 mb-3">
+                  <div className="w-9 h-9 rounded-lg bg-accent/10 flex items-center justify-center">
+                    <item.icon className="w-5 h-5 text-accent" />
+                  </div>
+                  <h2 className="font-semibold text-foreground">{item.title}</h2>
+                </div>
+                <p className="text-sm text-muted-foreground">{item.desc}</p>
+              </Link>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       <section className="stat-card">
         <h2 className="section-title mb-2">พร้อมสำหรับ E2E ทดสอบ</h2>

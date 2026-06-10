@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { RoleProvider } from "@/contexts/RoleContext";
-import { BUSINESS_PORTAL_ROLES, STORE_ADMIN_ROLES, SYSTEM_CONSOLE_ROLES, useRoleGuard } from "@/lib/guards";
+import { BUSINESS_PORTAL_ROLES, STORE_ADMIN_ROLES, SYSTEM_CONSOLE_ROLES, STORE_MANAGER_ROLES, useRoleGuard } from "@/lib/guards";
 
 import Landing from "./pages/Landing";
 import Login from "./pages/Login";
@@ -78,6 +78,13 @@ function BusinessRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+function ManagerRoute({ children }: { children: React.ReactNode }) {
+  const { checking, accessDenied } = useRoleGuard(STORE_MANAGER_ROLES);
+  if (checking) return <div className="min-h-screen flex items-center justify-center">กำลังโหลด...</div>;
+  if (accessDenied) return <div className="min-h-screen flex items-center justify-center text-xl font-semibold">Access Denied</div>;
+  return <>{children}</>;
+}
+
 function SystemRoute({ children }: { children: React.ReactNode }) {
   // TODO: introduce a dedicated `internal_system` role; until then, only `owner` can access.
   const { checking, accessDenied } = useRoleGuard(SYSTEM_CONSOLE_ROLES);
@@ -96,16 +103,16 @@ function AppRoutes() {
       <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
       {/* Store Admin Dashboard */}
       <Route path="/store-admin" element={<AdminRoute><AdminDashboardPage /></AdminRoute>} />
-      <Route path="/store-admin/menus" element={<AdminRoute><AdminProductsPage /></AdminRoute>} />
-      <Route path="/store-admin/ingredients" element={<AdminRoute><StoreAdminIngredientsPage /></AdminRoute>} />
-      <Route path="/store-admin/recipes" element={<AdminRoute><StoreAdminRecipesPage /></AdminRoute>} />
-      <Route path="/store-admin/channels" element={<AdminRoute><AdminSalesChannelsPage /></AdminRoute>} />
-      <Route path="/store-admin/channel-pricing" element={<BusinessRoute><StoreAdminChannelPricingPage /></BusinessRoute>} />
+      <Route path="/store-admin/menus" element={<ManagerRoute><AdminProductsPage /></ManagerRoute>} />
+      <Route path="/store-admin/ingredients" element={<ManagerRoute><StoreAdminIngredientsPage /></ManagerRoute>} />
+      <Route path="/store-admin/recipes" element={<ManagerRoute><StoreAdminRecipesPage /></ManagerRoute>} />
+      <Route path="/store-admin/channels" element={<ManagerRoute><AdminSalesChannelsPage /></ManagerRoute>} />
+      <Route path="/store-admin/channel-pricing" element={<ManagerRoute><StoreAdminChannelPricingPage /></ManagerRoute>} />
       <Route path="/store-admin/pos" element={<AdminRoute><StoreAdminPOSPage /></AdminRoute>} />
       <Route path="/store-admin/orders" element={<AdminRoute><AdminOrdersPage /></AdminRoute>} />
       <Route path="/store-admin/orders/:id" element={<AdminRoute><AdminOrderDetailPage /></AdminRoute>} />
       <Route path="/store-admin/customers" element={<AdminRoute><CustomersPage /></AdminRoute>} />
-      <Route path="/store-admin/reports" element={<AdminRoute><StoreAdminReportsPage /></AdminRoute>} />
+      <Route path="/store-admin/reports" element={<ManagerRoute><StoreAdminReportsPage /></ManagerRoute>} />
 
       <Route path="/admin" element={<AdminRoute><AdminDashboardPage /></AdminRoute>} />
       <Route path="/admin/orders" element={<AdminRoute><AdminOrdersPage /></AdminRoute>} />
@@ -123,19 +130,19 @@ function AppRoutes() {
       <Route path="/system/audit-logs" element={<SystemRoute><SystemAuditLogsPage /></SystemRoute>} />
 
       <Route path="/app/dashboard" element={<ProtectedRoute><BusinessRoute><Dashboard /></BusinessRoute></ProtectedRoute>} />
-      <Route path="/app/scenario" element={<ProtectedRoute><Scenario /></ProtectedRoute>} />
-      <Route path="/app/promo" element={<ProtectedRoute><Promo /></ProtectedRoute>} />
-      <Route path="/app/delivery" element={<ProtectedRoute><Delivery /></ProtectedRoute>} />
+      <Route path="/app/scenario" element={<ProtectedRoute><BusinessRoute><Scenario /></BusinessRoute></ProtectedRoute>} />
+      <Route path="/app/promo" element={<ProtectedRoute><BusinessRoute><Promo /></BusinessRoute></ProtectedRoute>} />
+      <Route path="/app/delivery" element={<ProtectedRoute><BusinessRoute><Delivery /></BusinessRoute></ProtectedRoute>} />
       <Route path="/app/reports" element={<ProtectedRoute><BusinessRoute><Reports /></BusinessRoute></ProtectedRoute>} />
-      <Route path="/app/menu" element={<ProtectedRoute><MenuManagement /></ProtectedRoute>} />
-      <Route path="/app/ingredients" element={<ProtectedRoute><IngredientsStock /></ProtectedRoute>} />
-      <Route path="/app/recipes" element={<ProtectedRoute><RecipeCosting /></ProtectedRoute>} />
-      <Route path="/app/channels" element={<ProtectedRoute><SalesChannels /></ProtectedRoute>} />
-      <Route path="/app/channel-pricing" element={<ProtectedRoute><ChannelPricing /></ProtectedRoute>} />
-      <Route path="/app/pos" element={<ProtectedRoute><POSManualOrder /></ProtectedRoute>} />
-      <Route path="/app/orders" element={<ProtectedRoute><OrdersPage /></ProtectedRoute>} />
-      <Route path="/app/orders/:id" element={<ProtectedRoute><OrderDetailPage /></ProtectedRoute>} />
-      <Route path="/app/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
+      <Route path="/app/menu" element={<ProtectedRoute><BusinessRoute><MenuManagement /></BusinessRoute></ProtectedRoute>} />
+      <Route path="/app/ingredients" element={<ProtectedRoute><BusinessRoute><IngredientsStock /></BusinessRoute></ProtectedRoute>} />
+      <Route path="/app/recipes" element={<ProtectedRoute><BusinessRoute><RecipeCosting /></BusinessRoute></ProtectedRoute>} />
+      <Route path="/app/channels" element={<ProtectedRoute><BusinessRoute><SalesChannels /></BusinessRoute></ProtectedRoute>} />
+      <Route path="/app/channel-pricing" element={<ProtectedRoute><BusinessRoute><ChannelPricing /></BusinessRoute></ProtectedRoute>} />
+      <Route path="/app/pos" element={<ProtectedRoute><BusinessRoute><POSManualOrder /></BusinessRoute></ProtectedRoute>} />
+      <Route path="/app/orders" element={<ProtectedRoute><BusinessRoute><OrdersPage /></BusinessRoute></ProtectedRoute>} />
+      <Route path="/app/orders/:id" element={<ProtectedRoute><BusinessRoute><OrderDetailPage /></BusinessRoute></ProtectedRoute>} />
+      <Route path="/app/settings" element={<ProtectedRoute><BusinessRoute><Settings /></BusinessRoute></ProtectedRoute>} />
 
       <Route path="/order" element={<CustomerMenuPage />} />
       <Route path="/order/status" element={<OrderStatusPage />} />

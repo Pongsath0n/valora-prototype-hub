@@ -6,6 +6,7 @@ import StatusBadge from "@/components/shared/StatusBadge";
 import DataTable from "@/components/shared/DataTable";
 import { storeAdminApi, type ApiOrder, type ApiPayment } from "@/services/storeAdminApi";
 import { PaymentSlipPreviewModal } from "@/components/admin/PaymentSlipPreviewModal";
+import { formatOrderStatus, orderStatusTone, formatPaymentStatus, paymentStatusTone, formatTHB } from "@/lib/format";
 
 const nextStatusActions: { label: string; next: string }[] = [
   { label: "Mark Waiting Payment Review", next: "waiting_payment_review" },
@@ -144,16 +145,13 @@ export default function AdminOrderDetailPage() {
     <AdminLayout title="รายละเอียดออเดอร์" subtitle={`Order ${order.order_no || `#${order.id}`}`}>
       <div className="stat-card space-y-2">
         <div className="flex flex-wrap items-center gap-3">
-          <StatusBadge label={order.status} tone="info" />
-          <span className="text-sm text-muted-foreground">
-            Payment: {order.payment_status}
-          </span>
+          <StatusBadge label={formatOrderStatus(order.status)} tone={orderStatusTone(order.status)} />
+          <StatusBadge label={formatPaymentStatus(order.payment_status)} tone={paymentStatusTone(order.payment_status)} />
         </div>
         {error ? <p className="text-sm text-destructive">{error}</p> : null}
         {info ? <p className="text-sm text-muted-foreground">{info}</p> : null}
         <p className="text-sm">
-          ยอดขาย ฿{Number(order.total_amount || 0).toFixed(2)} | ต้นทุน ฿{Number(order.total_cost || 0).toFixed(2)} | ค่าช่องทาง ฿
-          {Number(order.channel_fee || 0).toFixed(2)} | กำไร ฿{Number(order.gross_profit || 0).toFixed(2)}
+          ยอดขาย {formatTHB(order.total_amount || 0)} | ต้นทุน {formatTHB(order.total_cost || 0)} | ค่าช่องทาง {formatTHB(order.channel_fee || 0)} | กำไร {formatTHB(order.gross_profit || 0)}
         </p>
         <p className="text-sm text-muted-foreground">
           ลูกค้า: {order.customer_name || "-"} ({order.customer_phone || "-"})
@@ -187,9 +185,9 @@ export default function AdminOrderDetailPage() {
         columns={[
           { key: "product_name", header: "เมนู" },
           { key: "quantity", header: "จำนวน" },
-          { key: "unit_price", header: "ราคา/หน่วย", render: (r) => `฿${Number(r.unit_price || 0).toFixed(2)}` },
-          { key: "unit_cost", header: "ต้นทุน/หน่วย", render: (r) => `฿${Number(r.unit_cost || 0).toFixed(2)}` },
-          { key: "line_profit", header: "กำไร", render: (r) => `฿${Number(r.line_profit || 0).toFixed(2)}` },
+          { key: "unit_price", header: "ราคา/หน่วย", render: (r) => formatTHB(r.unit_price || 0) },
+          { key: "unit_cost", header: "ต้นทุน/หน่วย", render: (r) => formatTHB(r.unit_cost || 0) },
+          { key: "line_profit", header: "กำไร", render: (r) => formatTHB(r.line_profit || 0) },
         ]}
         rows={order.items || []}
       />
@@ -199,7 +197,7 @@ export default function AdminOrderDetailPage() {
         <DataTable
           columns={[
             { key: "id", header: "Payment ID" },
-            { key: "amount", header: "จำนวนเงิน", render: (r) => `฿${Number(r.amount || 0).toFixed(2)}` },
+            { key: "amount", header: "จำนวนเงิน", render: (r) => formatTHB(r.amount || 0) },
             { key: "method", header: "วิธีชำระ" },
             {
               key: "slip",
@@ -215,7 +213,11 @@ export default function AdminOrderDetailPage() {
                 </button>
               ),
             },
-            { key: "status", header: "สถานะ", render: (r) => <StatusBadge label={r.status} tone="info" /> },
+            {
+              key: "status",
+              header: "สถานะ",
+              render: (r) => <StatusBadge label={formatPaymentStatus(r.status)} tone={paymentStatusTone(r.status)} />,
+            },
             {
               key: "actions",
               header: "จัดการ",

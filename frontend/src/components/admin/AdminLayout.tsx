@@ -1,22 +1,54 @@
 import { NavLink, useNavigate } from "react-router-dom";
-import { ArrowLeft, CreditCard, LayoutDashboard, LogOut, Menu, Settings, Soup, Store, Users, X } from "lucide-react";
+import {
+  ArrowLeft,
+  ClipboardList,
+  CreditCard,
+  LayoutDashboard,
+  LogOut,
+  Menu,
+  Settings,
+  Soup,
+  Store,
+  Users,
+  X,
+} from "lucide-react";
 import { useState } from "react";
 import LogoBrand from "@/components/LogoBrand";
 import { useAuth } from "@/contexts/AuthContext";
 import { useProfileRole } from "@/contexts/RoleContext";
 import type { AppRole } from "@/lib/guards";
 
-const storeAdminNav = [
-  { title: "แดชบอร์ด", path: "/store-admin", icon: LayoutDashboard, end: true },
-  { title: "เมนู", path: "/store-admin/menus", icon: Soup },
-  { title: "วัตถุดิบ", path: "/store-admin/ingredients", icon: Store },
-  { title: "สูตรและต้นทุน", path: "/store-admin/recipes", icon: Settings, roles: ["owner", "admin", "manager"] as AppRole[] },
-  { title: "ช่องทางขาย", path: "/store-admin/channels", icon: Settings },
-  { title: "ราคาตามช่องทาง", path: "/store-admin/channel-pricing", icon: CreditCard, roles: ["owner", "admin", "manager"] as AppRole[] },
-  { title: "POS", path: "/store-admin/pos", icon: CreditCard },
-  { title: "ออเดอร์", path: "/store-admin/orders", icon: CreditCard },
-  { title: "ลูกค้า", path: "/store-admin/customers", icon: Users },
-  { title: "รายงาน", path: "/store-admin/reports", icon: LayoutDashboard },
+const MANAGER_NAV_ROLES: AppRole[] = ["owner", "admin", "manager"];
+
+type StoreNavItem = {
+  title: string;
+  path: string;
+  icon: React.ElementType;
+  end?: boolean;
+  roles?: AppRole[];
+};
+
+const storeNavSections: { title: string; items: StoreNavItem[] }[] = [
+  {
+    title: "งานประจำวัน",
+    items: [
+      { title: "แดชบอร์ด", path: "/store-admin", icon: LayoutDashboard, end: true },
+      { title: "POS", path: "/store-admin/pos", icon: CreditCard },
+      { title: "ออเดอร์", path: "/store-admin/orders", icon: ClipboardList },
+      { title: "ลูกค้า", path: "/store-admin/customers", icon: Users },
+    ],
+  },
+  {
+    title: "การจัดการร้าน",
+    items: [
+      { title: "เมนู", path: "/store-admin/menus", icon: Soup, roles: MANAGER_NAV_ROLES },
+      { title: "ช่องทางขาย", path: "/store-admin/channels", icon: Store, roles: MANAGER_NAV_ROLES },
+      { title: "ราคาตามช่องทาง", path: "/store-admin/channel-pricing", icon: CreditCard, roles: MANAGER_NAV_ROLES },
+      { title: "วัตถุดิบ", path: "/store-admin/ingredients", icon: Settings, roles: MANAGER_NAV_ROLES },
+      { title: "สูตรและต้นทุน", path: "/store-admin/recipes", icon: Settings, roles: MANAGER_NAV_ROLES },
+      { title: "รายงาน", path: "/store-admin/reports", icon: LayoutDashboard, roles: MANAGER_NAV_ROLES },
+    ],
+  },
 ];
 
 function StoreNavItem({
@@ -67,10 +99,15 @@ export default function AdminLayout({
   const { signOut } = useAuth();
   const { role } = useProfileRole();
 
-  const visibleNav = storeAdminNav.filter((item) => {
-    if (!item.roles) return true;
-    return role ? item.roles.includes(role) : false;
-  });
+  const visibleSections = storeNavSections
+    .map((section) => ({
+      title: section.title,
+      items: section.items.filter((item) => {
+        if (!item.roles) return true;
+        return role ? item.roles.includes(role) : false;
+      }),
+    }))
+    .filter((section) => section.items.length > 0);
 
   async function handleLogout() {
     await signOut();
@@ -89,12 +126,16 @@ export default function AdminLayout({
           </div>
         </div>
 
-        <nav className="flex-1 py-4 px-3 space-y-0.5 overflow-y-auto">
-          <p className="text-[10px] font-semibold text-sidebar-foreground/40 uppercase tracking-widest px-3 mb-2">
-            เมนูร้าน
-          </p>
-          {visibleNav.map((item) => (
-            <StoreNavItem key={item.path} {...item} />
+        <nav className="flex-1 py-4 px-3 space-y-4 overflow-y-auto">
+          {visibleSections.map((section) => (
+            <div key={section.title} className="space-y-0.5">
+              <p className="text-[10px] font-semibold text-sidebar-foreground/40 uppercase tracking-widest px-3 mb-2">
+                {section.title}
+              </p>
+              {section.items.map((item) => (
+                <StoreNavItem key={item.path} {...item} />
+              ))}
+            </div>
           ))}
         </nav>
 
@@ -147,8 +188,15 @@ export default function AdminLayout({
             <p className="text-[10px] font-semibold text-sidebar-foreground/40 uppercase tracking-widest px-3 mb-2">
               เมนูร้าน
             </p>
-            {visibleNav.map((item) => (
-              <StoreNavItem key={item.path} {...item} onClick={() => setSidebarOpen(false)} />
+            {visibleSections.map((section) => (
+              <div key={section.title} className="space-y-0.5">
+                <p className="text-[10px] font-semibold text-sidebar-foreground/40 uppercase tracking-widest px-3 mb-2">
+                  {section.title}
+                </p>
+                {section.items.map((item) => (
+                  <StoreNavItem key={item.path} {...item} onClick={() => setSidebarOpen(false)} />
+                ))}
+              </div>
             ))}
             <div className="pt-3 mt-3 border-t border-sidebar-border space-y-0.5">
               <NavLink

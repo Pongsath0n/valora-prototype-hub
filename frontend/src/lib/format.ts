@@ -72,6 +72,99 @@ export function daysRemaining(activeUntil: string | null): string {
   return `เหลือ ${diff} วัน`;
 }
 
+// ─── Status Tone Helpers ───────────────────────────────────────────────────────
+
+export type StatusTone = "neutral" | "success" | "warning" | "danger" | "info";
+
+export type StatusDisplay = {
+  label: string;
+  tone: StatusTone;
+};
+
+type StatusMap = Record<string, StatusDisplay>;
+
+function normalizeStatus(value: string | null | undefined): string {
+  return (value ?? "").toString().toLowerCase();
+}
+
+function fallbackStatusDisplay(value: string | null | undefined): StatusDisplay {
+  const raw = (value ?? "").toString().trim();
+  if (!raw) {
+    return { label: "ไม่ทราบสถานะ", tone: "neutral" };
+  }
+  return { label: `ไม่ทราบสถานะ (${raw})`, tone: "neutral" };
+}
+
+const ORDER_STATUS_MAP: StatusMap = {
+  pending_payment: { label: "รอชำระเงิน", tone: "warning" },
+  waiting_payment_review: { label: "รอตรวจสอบสลิป", tone: "warning" },
+  pending_review: { label: "รอตรวจสอบสลิป", tone: "warning" },
+  payment_uploaded: { label: "รอตรวจสอบสลิป", tone: "warning" },
+  payment_submitted: { label: "รอตรวจสอบสลิป", tone: "warning" },
+  pending: { label: "รอดำเนินการ", tone: "warning" },
+  accepted: { label: "ร้านยืนยันแล้ว", tone: "info" },
+  preparing: { label: "กำลังเตรียม", tone: "info" },
+  ready: { label: "พร้อมรับ", tone: "info" },
+  ready_for_pickup: { label: "พร้อมรับ (Legacy)", tone: "info" },
+  completed: { label: "เสร็จสิ้น", tone: "success" },
+  paid: { label: "ชำระเงินแล้ว", tone: "success" },
+  fulfilled: { label: "จัดส่งแล้ว", tone: "success" },
+  cancelled: { label: "ยกเลิกแล้ว", tone: "danger" },
+  rejected: { label: "ถูกปฏิเสธ", tone: "danger" },
+  draft: { label: "ฉบับร่าง", tone: "neutral" },
+};
+
+const PAYMENT_STATUS_MAP: StatusMap = {
+  pending_payment: { label: "รอชำระเงิน", tone: "warning" },
+  pending: { label: "รอชำระเงิน", tone: "warning" },
+  unpaid: { label: "ยังไม่ชำระ", tone: "warning" },
+  waiting_payment_review: { label: "รอตรวจสอบสลิป", tone: "warning" },
+  pending_review: { label: "รอตรวจสอบสลิป", tone: "warning" },
+  payment_uploaded: { label: "รอตรวจสอบสลิป", tone: "warning" },
+  payment_submitted: { label: "รอตรวจสอบสลิป", tone: "warning" },
+  paid: { label: "ชำระเงินแล้ว", tone: "success" },
+  approved: { label: "ยืนยันการชำระแล้ว", tone: "success" },
+  completed: { label: "ชำระเสร็จสิ้น", tone: "success" },
+  rejected: { label: "สลิปไม่ผ่าน ต้องอัปโหลดใหม่", tone: "danger" },
+  cancelled: { label: "ยกเลิกรายการชำระ", tone: "danger" },
+  refunded: { label: "คืนเงินแล้ว", tone: "info" },
+};
+
+function resolveStatusDisplay(map: StatusMap, value: string | null | undefined): StatusDisplay {
+  const key = normalizeStatus(value);
+  if (!key) return fallbackStatusDisplay(value);
+  return map[key] ?? fallbackStatusDisplay(value);
+}
+
+export function getOrderStatusDisplay(status: string | null | undefined): StatusDisplay {
+  return resolveStatusDisplay(ORDER_STATUS_MAP, status);
+}
+
+export function formatOrderStatus(status: string | null | undefined): string {
+  return getOrderStatusDisplay(status).label;
+}
+
+export function orderStatusTone(status: string | null | undefined): StatusTone {
+  return getOrderStatusDisplay(status).tone;
+}
+
+export function getPaymentStatusDisplay(status: string | null | undefined): StatusDisplay {
+  return resolveStatusDisplay(PAYMENT_STATUS_MAP, status);
+}
+
+export function formatPaymentStatus(status: string | null | undefined): string {
+  return getPaymentStatusDisplay(status).label;
+}
+
+export function paymentStatusTone(status: string | null | undefined): StatusTone {
+  return getPaymentStatusDisplay(status).tone;
+}
+
+export function formatBooleanStatus(value: boolean | null | undefined, options?: { trueLabel?: string; falseLabel?: string }): string {
+  const { trueLabel = "ใช้งาน", falseLabel = "ปิดใช้งาน" } = options ?? {};
+  return value ? trueLabel : falseLabel;
+}
+
 // ─── Status Labels ────────────────────────────────────────────────────────────
 
 const SUBMISSION_STATUS_LABELS: Record<string, string> = {

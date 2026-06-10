@@ -41,10 +41,14 @@ export async function adminLogout() {
 }
 
 /** Roles allowed to access store-admin routes (/admin/*). */
-export const STORE_ADMIN_ROLES: AppRole[] = ["owner", "admin", "manager", "staff"];
+const MANAGER_ROLES: AppRole[] = ["owner", "admin", "manager"];
+
+export const STORE_MANAGER_ROLES = MANAGER_ROLES;
+
+export const STORE_ADMIN_ROLES: AppRole[] = [...MANAGER_ROLES, "staff"];
 
 /** Roles allowed to access business portal routes (/app/*). */
-export const BUSINESS_PORTAL_ROLES: AppRole[] = ["owner", "admin", "manager"];
+export const BUSINESS_PORTAL_ROLES = MANAGER_ROLES;
 
 /**
  * Roles allowed to access the internal system console (/system/*).
@@ -58,6 +62,11 @@ export const SYSTEM_CONSOLE_ROLES: AppRole[] = ["owner"];
 /** Convenience guard for store-admin routes. */
 export function useAdminGuard() {
   return useRoleGuard(STORE_ADMIN_ROLES);
+}
+
+/** Convenience guard for store management-only routes. */
+export function useManagerGuard() {
+  return useRoleGuard(STORE_MANAGER_ROLES);
 }
 
 /** Convenience guard for business portal routes. */

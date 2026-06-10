@@ -8,6 +8,7 @@ import FormField from "@/components/shared/FormField";
 import StatusBadge from "@/components/shared/StatusBadge";
 import { storeAdminApi, type ApiProduct, type ApiCategory, type ProductPayload } from "@/services/storeAdminApi";
 import { useProfileRole } from "@/contexts/RoleContext";
+import { formatBooleanStatus, formatTHB } from "@/lib/format";
 
 type FormState = {
   id?: string;

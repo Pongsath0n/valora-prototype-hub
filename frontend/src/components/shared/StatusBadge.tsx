@@ -1,6 +1,7 @@
 import { cn } from "@/lib/utils";
+import type { StatusTone } from "@/lib/format";
 
-export type BadgeTone = "neutral" | "success" | "warning" | "danger" | "info";
+export type BadgeTone = StatusTone;
 
 const toneClasses: Record<BadgeTone, string> = {
   neutral: "bg-muted text-muted-foreground",

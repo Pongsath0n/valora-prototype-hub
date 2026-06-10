@@ -198,26 +198,36 @@ function inspectFrontendGuards() {
       checks.push({ file: f.name, readable: true, length: content.length });
 
       if (f.name === "App.tsx") {
-        const hasBusinessRoute = content.includes('element={<BusinessRoute><StoreAdminChannelPricingPage');
-        checks.push({ file: f.name, guard: "BusinessRoute on /store-admin/channel-pricing", found: hasBusinessRoute });
+        const managerRoutePattern = /path="\/store-admin\/channel-pricing"\s+element={<ManagerRoute>/;
+        const hasManagerRoute = managerRoutePattern.test(content);
+        checks.push({ file: f.name, guard: "ManagerRoute on /store-admin/channel-pricing", found: hasManagerRoute });
       }
 
       if (f.name === "AdminLayout.tsx") {
-        const hasRecipeRoleGuard = /roles:\s*\[[^\]]*"owner"[^\]]*"admin"[^\]]*"manager"[^\]]*\]/.test(content);
-        const hasPricingRoleGuard = /channel-pricing.*roles:\s*\[[^\]]*"owner"[^\]]*"admin"[^\]]*"manager"[^\]]*\]/.test(content);
+        const managerNavRolesPattern = /MANAGER_NAV_ROLES[^=]*=\s*\[[^\]]*"owner"[^\]]*"admin"[^\]]*"manager"[^\]]*\]/;
+        const itemGuard = (pathLabel) =>
+          new RegExp(`title:\\s*"${pathLabel}"[\\s\\S]*?path:\\s*"/store-admin/[^"\\n]+"[\\s\\S]*?roles\\s*:\\s*(MANAGER_NAV_ROLES|\\[[^\\]]*"owner"[^\\]]*"admin"[^\\]]*"manager"[^\\]]*\\])`);
+        const hasRecipeRoleGuard = itemGuard("สูตรและต้นทุน").test(content);
+        const hasPricingRoleGuard = itemGuard("ราคาตามช่องทาง").test(content);
+        const filtersByRole = /items\.filter\(\(item\) => {[^}]*item\.roles\.includes\(role\)/.test(content);
+        checks.push({ file: f.name, guard: "manager nav roles constant", found: managerNavRolesPattern.test(content) });
         checks.push({ file: f.name, guard: "recipe nav roles restriction", found: hasRecipeRoleGuard });
         checks.push({ file: f.name, guard: "channel-pricing nav roles restriction", found: hasPricingRoleGuard });
+        checks.push({ file: f.name, guard: "nav filters by role", found: filtersByRole });
       }
 
       if (f.name === "AdminDashboard.tsx") {
-        const hasCardRoleGuard = /ราคาตามช่องทาง[\s\S]*?roles:\s*\[[^\]]*"owner"[^\]]*"admin"[^\]]*"manager"[^\]]*\]/.test(content);
-        checks.push({ file: f.name, guard: "channel-pricing card roles restriction", found: hasCardRoleGuard });
+        const canManageCheck = /const\s+canManage\s*=\s*role\s*\?\s*\[(?:"|')owner(?:"|')[^\]]*(?:"|')admin(?:"|')[^\]]*(?:"|')manager(?:"|')[^\]]*\]\.includes\(role\)/.test(content);
+        const hasConditionalSection = /{canManage\s*\?\s*\(/.test(content);
+        checks.push({ file: f.name, guard: "management cards gated by canManage", found: canManageCheck && hasConditionalSection });
       }
 
       if (f.name === "guards.ts") {
-        const businessRoles = /BUSINESS_PORTAL_ROLES[^=]*=\s*\[[^\]]*"owner"[^\]]*"admin"[^\]]*"manager"[^\]]*\]/.test(content);
+        const managerRolesLiteral = /MANAGER_ROLES[^=]*=\s*\[[^\]]*"owner"[^\]]*"admin"[^\]]*"manager"[^\]]*\]/.test(content);
+        const businessRoles = /BUSINESS_PORTAL_ROLES[^=]*=\s*(MANAGER_ROLES|\[[^\]]*"owner"[^\]]*"admin"[^\]]*"manager"[^\]]*\])/.test(content);
         const storeAdminRoles = /STORE_ADMIN_ROLES[^=]*=\s*\[[^\]]*"staff"[^\]]*\]/.test(content);
-        checks.push({ file: f.name, guard: "BUSINESS_PORTAL_ROLES contains owner/admin/manager", found: businessRoles });
+        checks.push({ file: f.name, guard: "MANAGER_ROLES defines owner/admin/manager", found: managerRolesLiteral });
+        checks.push({ file: f.name, guard: "BUSINESS_PORTAL_ROLES derives from manager roles", found: businessRoles });
         checks.push({ file: f.name, guard: "STORE_ADMIN_ROLES contains staff", found: storeAdminRoles });
       }
     } catch (e) {
@@ -228,18 +238,18 @@ function inspectFrontendGuards() {
   summary.frontend_guard_checks = checks;
 
   // Validate no contradictions
-  const appGuard = checks.find((c) => c.guard === "BusinessRoute on /store-admin/channel-pricing");
+  const appGuard = checks.find((c) => c.guard === "ManagerRoute on /store-admin/channel-pricing");
   const layoutGuard = checks.find((c) => c.guard === "channel-pricing nav roles restriction");
-  const cardGuard = checks.find((c) => c.guard === "channel-pricing card roles restriction");
+  const cardGuard = checks.find((c) => c.guard === "management cards gated by canManage");
 
   if (appGuard && !appGuard.found) {
-    recordFailure("frontend_guard_mismatch", "App.tsx missing BusinessRoute on /store-admin/channel-pricing", {});
+    recordFailure("frontend_guard_mismatch", "App.tsx missing ManagerRoute on /store-admin/channel-pricing", {});
   }
   if (layoutGuard && !layoutGuard.found) {
     recordFailure("frontend_guard_mismatch", "AdminLayout.tsx missing roles restriction on channel-pricing nav", {});
   }
   if (cardGuard && !cardGuard.found) {
-    recordFailure("frontend_guard_mismatch", "AdminDashboard.tsx missing roles restriction on channel-pricing card", {});
+    recordFailure("frontend_guard_mismatch", "AdminDashboard.tsx missing management-only gating on sensitive cards", {});
   }
 }
 

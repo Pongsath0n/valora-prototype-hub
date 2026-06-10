@@ -12,6 +12,14 @@ import {
 } from "@/services/storeAdminApi";
 import { saveBlobAsFile } from "@/lib/download";
 import { PaymentSlipPreviewModal } from "@/components/admin/PaymentSlipPreviewModal";
+import {
+  formatOrderStatus,
+  orderStatusTone,
+  formatPaymentStatus,
+  paymentStatusTone,
+  formatTHB,
+  formatDateTime,
+} from "@/lib/format";
 
 type TabKey =
   | "queue"
@@ -369,7 +377,7 @@ export default function AdminOrdersPage() {
                 </div>
               ),
             },
-            { key: "amount", header: "ยอดชำระ", render: (r) => `฿${Number(r.amount || 0).toFixed(2)}` },
+            { key: "amount", header: "ยอดชำระ", render: (r) => formatTHB(r.amount || 0) },
             { key: "method", header: "วิธีชำระ" },
             {
               key: "slip",
@@ -388,19 +396,24 @@ export default function AdminOrdersPage() {
             {
               key: "submitted_at",
               header: "ส่งเมื่อ",
-              render: (r) => r.submitted_at || (r.slip_submitted ? "แนบแล้ว" : "-"),
+              render: (r) =>
+                r.submitted_at
+                  ? formatDateTime(r.submitted_at)
+                  : r.slip_submitted
+                    ? "แนบแล้ว"
+                    : "-",
             },
             {
               key: "status",
               header: "สถานะชำระเงิน",
               render: (r) => (
                 <div className="flex flex-col gap-1">
-                  <StatusBadge label={r.status} tone="info" />
+                  <StatusBadge label={formatPaymentStatus(r.status)} tone={paymentStatusTone(r.status)} />
                   {r.order_status ? (
-                    <StatusBadge label={`ออเดอร์: ${r.order_status}`} tone="neutral" />
+                    <StatusBadge label={`ออเดอร์: ${formatOrderStatus(r.order_status)}`} tone={orderStatusTone(r.order_status)} />
                   ) : null}
                   {r.order_payment_status ? (
-                    <StatusBadge label={`ชำระ: ${r.order_payment_status}`} tone="warning" />
+                    <StatusBadge label={`ชำระ: ${formatPaymentStatus(r.order_payment_status)}`} tone={paymentStatusTone(r.order_payment_status)} />
                   ) : null}
                 </div>
               ),
@@ -439,10 +452,18 @@ export default function AdminOrdersPage() {
                 </div>
               ),
             },
-            { key: "pickup_time", header: "เวลารับ", render: (r) => r.pickup_time || "-" },
+            { key: "pickup_time", header: "เวลารับ", render: (r) => (r.pickup_time ? formatDateTime(r.pickup_time) : "-") },
             { key: "channel_name", header: "ช่องทาง", render: (r) => r.channel_name || "-" },
-            { key: "payment_status", header: "สถานะชำระเงิน", render: (r) => <StatusBadge label={r.payment_status} tone="warning" /> },
-            { key: "status", header: "สถานะออเดอร์", render: (r) => <StatusBadge label={r.status} tone="info" /> },
+            {
+              key: "payment_status",
+              header: "สถานะชำระเงิน",
+              render: (r) => <StatusBadge label={formatPaymentStatus(r.payment_status)} tone={paymentStatusTone(r.payment_status)} />,
+            },
+            {
+              key: "status",
+              header: "สถานะออเดอร์",
+              render: (r) => <StatusBadge label={formatOrderStatus(r.status)} tone={orderStatusTone(r.status)} />,
+            },
             {
               key: "latest_payment",
               header: "ชำระล่าสุด",
@@ -451,10 +472,10 @@ export default function AdminOrdersPage() {
                 if (!latest) {
                   return <span className="text-xs text-muted-foreground">-</span>;
                 }
-                const amount = typeof latest.amount === "number" ? `฿${Number(latest.amount).toFixed(2)}` : "-";
+                const amount = typeof latest.amount === "number" ? formatTHB(latest.amount) : "-";
                 return (
                   <div className="flex flex-col text-xs">
-                    <span>สถานะ: {latest.status || "-"}</span>
+                    <span>สถานะ: {formatPaymentStatus(latest.status)}</span>
                     <span>ยอด: {amount}</span>
                     <span className={latest.slip_submitted ? "text-emerald-600" : "text-muted-foreground"}>
                       {latest.slip_submitted ? "มีสลิป" : "ยังไม่แนบสลิป"}
@@ -463,7 +484,7 @@ export default function AdminOrdersPage() {
                 );
               },
             },
-            { key: "total_amount", header: "ยอดรวม", render: (r) => `฿${Number(r.total_amount || 0).toFixed(2)}` },
+            { key: "total_amount", header: "ยอดรวม", render: (r) => formatTHB(r.total_amount || 0) },
             {
               key: "actions",
               header: "จัดการ",
