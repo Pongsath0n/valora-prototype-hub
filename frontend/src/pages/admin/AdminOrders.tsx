@@ -37,10 +37,7 @@ type TabKey =
   | "payments"
   | "preparing"
   | "ready"
-  | "ready_for_pickup"
-  | "completed"
-  | "cancelled"
-  | "rejected";
+  | "completed";
 
 const statusTabs: { key: TabKey; label: string; filter: string[] }[] = [
   {
@@ -56,13 +53,10 @@ const statusTabs: { key: TabKey; label: string; filter: string[] }[] = [
       "ready_for_pickup",
     ],
   },
-  { key: "payments", label: "รายการรอตรวจสลิป", filter: ["waiting_payment_review", "pending_review"] },
+  { key: "payments", label: "รอตรวจสลิป", filter: ["waiting_payment_review", "pending_review"] },
   { key: "preparing", label: "กำลังเตรียม", filter: ["preparing", "accepted"] },
-  { key: "ready", label: "พร้อมรับ (Ready)", filter: ["ready"] },
-  { key: "ready_for_pickup", label: "พร้อมรับ (Legacy)", filter: ["ready_for_pickup"] },
+  { key: "ready", label: "พร้อมรับ", filter: ["ready", "ready_for_pickup"] },
   { key: "completed", label: "เสร็จสิ้น", filter: ["completed", "paid"] },
-  { key: "cancelled", label: "ยกเลิกแล้ว", filter: ["cancelled"] },
-  { key: "rejected", label: "ถูกปฏิเสธ", filter: ["rejected"] },
 ];
 
 const normalizeStatus = (value: string | null | undefined): string => (value ?? "").toLowerCase();
@@ -190,7 +184,7 @@ export default function AdminOrdersPage() {
         })
       : base;
 
-    if (["queue", "preparing", "ready", "ready_for_pickup"].includes(activeTab)) {
+    if (["queue", "preparing", "ready"].includes(activeTab)) {
       return [...searched].sort((a, b) => {
         const aTs = a.pickup_time ? new Date(a.pickup_time).getTime() : Number.MAX_SAFE_INTEGER;
         const bTs = b.pickup_time ? new Date(b.pickup_time).getTime() : Number.MAX_SAFE_INTEGER;

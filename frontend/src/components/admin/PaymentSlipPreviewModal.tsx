@@ -45,6 +45,15 @@ export function PaymentSlipPreviewModal({
   }, [isOpen, onClose]);
 
   useEffect(() => {
+    if (!isOpen) return;
+    const original = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = original;
+    };
+  }, [isOpen]);
+
+  useEffect(() => {
     let ignore = false;
     if (!isOpen || !payment) {
       setPreview(null);
@@ -104,16 +113,16 @@ export function PaymentSlipPreviewModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4 py-6" onClick={onClose} data-testid="payment-slip-modal">
-      <div className="relative w-full max-w-3xl rounded-2xl bg-white p-6 shadow-2xl" onClick={(event) => event.stopPropagation()}>
+      <div className="relative flex flex-col w-full max-w-3xl max-h-[90vh] rounded-2xl bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
         <button
           type="button"
           aria-label="ปิด"
-          className="absolute right-4 top-4 text-muted-foreground hover:text-foreground"
+          className="absolute right-4 top-4 z-10 rounded-full bg-white/95 p-1 text-muted-foreground shadow-sm backdrop-blur hover:text-foreground"
           onClick={onClose}
         >
           <X className="h-5 w-5" />
         </button>
-        <div className="space-y-4">
+        <div className="flex-1 overflow-y-auto px-6 pb-6 pt-12 space-y-4">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <p className="text-xs uppercase tracking-wide text-muted-foreground">Payment</p>
@@ -223,7 +232,7 @@ export function PaymentSlipPreviewModal({
                 <img
                   src={preview.signed_url}
                   alt="หลักฐานการโอน"
-                  className="max-h-[480px] w-full rounded-xl object-contain"
+                  className="max-h-[55vh] w-full rounded-xl object-contain"
                 />
                 <p className="text-xs text-muted-foreground">
                   ลิงก์หมดอายุภายใน {preview.expires_in ?? 0} วินาที
