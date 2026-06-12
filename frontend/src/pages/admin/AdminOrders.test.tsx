@@ -109,4 +109,69 @@ describe("AdminOrdersPage filter tabs", () => {
     expect(screen.queryByText("X001")).not.toBeInTheDocument();
     expect(screen.queryByText("R001")).not.toBeInTheDocument();
   });
+
+  it("queue tab sorts most recently updated order first", async () => {
+    mockedListOrders.mockResolvedValue({
+      items: [
+        { id: "ord_old", status: "pending_payment", payment_status: "pending", order_no: "OLD01", total_amount: 100, subtotal: 100, discount_amount: 0, channel_fee: 0, total_cost: 0, gross_profit: 0, updated_at: "2024-01-01T00:00:00Z", created_at: "2024-01-01T00:00:00Z" },
+        { id: "ord_new", status: "accepted", payment_status: "waiting_payment_review", order_no: "NEW01", total_amount: 200, subtotal: 200, discount_amount: 0, channel_fee: 0, total_cost: 0, gross_profit: 0, updated_at: "2024-01-02T00:00:00Z", created_at: "2024-01-02T00:00:00Z" },
+      ],
+    });
+    mockedListPayments.mockResolvedValue({ payment_queue: [] });
+    renderPage();
+
+    await waitFor(() => expect(screen.getByText("NEW01")).toBeInTheDocument());
+    const rows = screen.getAllByRole("row");
+    expect(rows[1].textContent).toContain("NEW01");
+    expect(rows[2].textContent).toContain("OLD01");
+  });
+
+  it("queue tab places newer payment-review order before older pending orders", async () => {
+    mockedListOrders.mockResolvedValue({
+      items: [
+        { id: "ord_old", status: "pending_payment", payment_status: "pending", order_no: "OLD01", total_amount: 100, subtotal: 100, discount_amount: 0, channel_fee: 0, total_cost: 0, gross_profit: 0, created_at: "2024-01-01T00:00:00Z", updated_at: "2024-01-01T00:00:00Z" },
+      ],
+    });
+    mockedListPayments.mockResolvedValue({
+      payment_queue: [
+        { id: "pay_1", order_id: "ord_new", order_no: "NEW01", amount: 120, status: "pending_review", customer_name: "New", created_at: "2024-01-02T00:00:00Z", store_id: "store_1" },
+      ],
+    });
+    renderPage();
+
+    await waitFor(() => expect(screen.getByText("NEW01")).toBeInTheDocument());
+    const rows = screen.getAllByRole("row");
+    expect(rows[1].textContent).toContain("NEW01");
+    expect(rows[2].textContent).toContain("OLD01");
+  });
+
+  it("does not duplicate rows when order exists in both orders and paymentQueue", async () => {
+    mockedListOrders.mockResolvedValue({
+      items: [
+        { id: "ord_1", status: "accepted", payment_status: "pending_review", order_no: "A001", total_amount: 100, subtotal: 100, discount_amount: 0, channel_fee: 0, total_cost: 0, gross_profit: 0, created_at: "2024-01-01T00:00:00Z", updated_at: "2024-01-01T00:00:00Z" },
+      ],
+    });
+    mockedListPayments.mockResolvedValue({
+      payment_queue: [
+        { id: "pay_1", order_id: "ord_1", order_no: "A001", amount: 100, status: "pending_review", customer_name: "Test", created_at: "2024-01-01T00:00:00Z", store_id: "store_1" },
+      ],
+    });
+    renderPage();
+
+    await waitFor(() => expect(screen.getByText("A001")).toBeInTheDocument());
+    const rows = screen.getAllByRole("row");
+    expect(rows.length).toBe(2);
+  });
+
+  it("queue tab includes synthetic order from paymentQueue when missing from orders", async () => {
+    mockedListOrders.mockResolvedValue({ items: [] });
+    mockedListPayments.mockResolvedValue({
+      payment_queue: [
+        { id: "pay_1", order_id: "ord_new", order_no: "SYN01", amount: 150, status: "pending_review", customer_name: "Synth", created_at: "2024-01-02T00:00:00Z", store_id: "store_1" },
+      ],
+    });
+    renderPage();
+
+    await waitFor(() => expect(screen.getByText("SYN01")).toBeInTheDocument());
+  });
 });

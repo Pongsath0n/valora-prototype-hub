@@ -129,8 +129,52 @@ export default function AdminOrdersPage() {
         storeAdminApi.listOrders(),
         storeAdminApi.listPayments(),
       ]);
-      setRows(ordersData.items ?? []);
-      setPaymentQueue(paymentsData.payment_queue ?? []);
+      const orders = ordersData.items ?? [];
+      const payments = paymentsData.payment_queue ?? [];
+
+      const orderIds = new Set(orders.map((o) => o.id));
+      const syntheticOrders: ApiOrder[] = payments
+        .filter((p) => p.order_id && !orderIds.has(p.order_id))
+        .map((p) => ({
+          id: p.order_id!,
+          store_id: p.store_id,
+          order_no: p.order_no ?? null,
+          status: p.order_status || "pending_payment",
+          payment_status: p.order_payment_status || p.status,
+          customer_name: p.customer_name ?? null,
+          customer_phone: p.customer_phone ?? null,
+          channel_id: null,
+          channel_name: null,
+          order_type: null,
+          pickup_type: null,
+          pickup_time: null,
+          subtotal: p.amount,
+          discount_amount: 0,
+          channel_fee: 0,
+          total_amount: p.amount,
+          total_cost: 0,
+          gross_profit: 0,
+          note: null,
+          cancelled_reason: null,
+          cancelled_at: null,
+          created_at: p.created_at ?? null,
+          updated_at: p.created_at ?? null,
+          latest_payment: {
+            id: p.id,
+            payment_id: p.id,
+            status: p.status,
+            method: p.method,
+            amount: p.amount,
+            slip_submitted: p.slip_submitted ?? null,
+            slip_file_name: p.slip_file_name ?? null,
+            slip_storage_path: p.slip_storage_path ?? null,
+            submitted_at: p.submitted_at ?? null,
+            reject_reason: p.reject_reason ?? null,
+          },
+        }));
+
+      setRows([...orders, ...syntheticOrders]);
+      setPaymentQueue(payments);
     } catch (err: any) {
       setError(friendlyError(err?.message || "โหลดข้อมูลไม่สำเร็จ"));
     } finally {
@@ -194,7 +238,27 @@ export default function AdminOrdersPage() {
         })
       : base;
 
-    if (["queue", "preparing", "ready"].includes(activeTab)) {
+    if (activeTab === "queue") {
+      return [...searched].sort((a, b) => {
+        const aUpdated = a.updated_at ? new Date(a.updated_at).getTime() : 0;
+        const bUpdated = b.updated_at ? new Date(b.updated_at).getTime() : 0;
+        if (aUpdated !== bUpdated) return bUpdated - aUpdated;
+
+        const aSubmitted = a.latest_payment?.submitted_at ? new Date(a.latest_payment.submitted_at).getTime() : 0;
+        const bSubmitted = b.latest_payment?.submitted_at ? new Date(b.latest_payment.submitted_at).getTime() : 0;
+        if (aSubmitted !== bSubmitted) return bSubmitted - aSubmitted;
+
+        const aCreated = a.created_at ? new Date(a.created_at).getTime() : 0;
+        const bCreated = b.created_at ? new Date(b.created_at).getTime() : 0;
+        if (aCreated !== bCreated) return bCreated - aCreated;
+
+        const aPickup = a.pickup_time ? new Date(a.pickup_time).getTime() : 0;
+        const bPickup = b.pickup_time ? new Date(b.pickup_time).getTime() : 0;
+        return bPickup - aPickup;
+      });
+    }
+
+    if (["preparing", "ready"].includes(activeTab)) {
       return [...searched].sort((a, b) => {
         const aTs = a.pickup_time ? new Date(a.pickup_time).getTime() : Number.MAX_SAFE_INTEGER;
         const bTs = b.pickup_time ? new Date(b.pickup_time).getTime() : Number.MAX_SAFE_INTEGER;
