@@ -4,10 +4,10 @@ import {
   BarChart3,
   ClipboardList,
   FileText,
-  HardDrive,
   LayoutDashboard,
   ShieldCheck,
   Stethoscope,
+  TrendingUp,
   Users,
 } from "lucide-react";
 import type { AppRole } from "@/lib/guards";
@@ -28,6 +28,13 @@ export const BUSINESS_PORTAL_NAV: PortalNavItem[] = [
     path: "/app/dashboard",
     icon: LayoutDashboard,
     roles: ["owner", "admin", "manager"],
+  },
+  {
+    title: "วางแผนกำไร",
+    path: "/app/planning",
+    icon: TrendingUp,
+    roles: ["owner", "admin", "manager"],
+    description: "เครื่องมือหลักของ Valora — จำลองสถานการณ์กำไรและจุดคุ้มทุน",
   },
   {
     title: "รายงาน",
@@ -74,10 +81,6 @@ export const SYSTEM_PORTAL_NAV: PortalNavItem[] = [
     icon: FileText,
     roles: ["owner"],
   },
-  {
-    title: "Storage Check",
-    path: "/system/health#storage",
-    icon: HardDrive,
-    roles: ["owner"],
-  },
+  // "Storage Check" duplicate removed — canonical access is the Health Check page
+  // (/system/health#storage). The legacy /system/storage redirect is preserved in App.tsx.
 ];

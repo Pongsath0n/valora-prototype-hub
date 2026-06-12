@@ -35,6 +35,9 @@ export default function POSManualOrder() {
   }
 
   return <AppLayout><div className="space-y-4 max-w-4xl"><h1 className="page-title">POS / รับออเดอร์หน้าร้าน</h1>
+    <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+      เครื่องมือต้นแบบ (เฉพาะโหมดพัฒนา) — ข้อมูลถูกเก็บในเครื่องนี้เท่านั้น ไม่ซิงก์เข้าออเดอร์จริง รายงาน หรือการชำระเงิน
+    </div>
     <div className="stat-card grid md:grid-cols-4 gap-3">
       <FormField label="ช่องทาง"><select className="form-input" value={channelId} onChange={(e)=>setChannelId(e.target.value)}>{channels.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></FormField>
       <FormField label="เมนู"><select className="form-input" value={menuId} onChange={(e)=>setMenuId(e.target.value)}>{menus.map(m=><option key={m.id} value={m.id}>{m.name}</option>)}</select></FormField>

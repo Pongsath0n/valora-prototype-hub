@@ -22,6 +22,7 @@ export default function SystemAuditLogsPage() {
     line_notifications: [],
   });
   const [status, setStatus] = useState<"ok" | "partial" | "unavailable" | "empty">("empty");
+  const [bucketErrors, setBucketErrors] = useState<Partial<Record<BucketKey, string>>>({});
   const [lastChecked, setLastChecked] = useState<Date | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -31,6 +32,7 @@ export default function SystemAuditLogsPage() {
     try {
       const res = await loadAuditBuckets();
       setBuckets(res.buckets as Record<BucketKey, AuditLogRow[]>);
+      setBucketErrors((res.errors ?? {}) as Partial<Record<BucketKey, string>>);
       const hasRows = Object.values(res.buckets).some((rows) => rows.length);
       if (res.status === "ok" && hasRows) {
         setStatus("ok");
@@ -58,9 +60,12 @@ export default function SystemAuditLogsPage() {
 
   const hasRows = useMemo(() => Object.values(buckets).some((rows) => rows.length), [buckets]);
   const lastCheckedDisplay = lastChecked ? lastChecked.toLocaleString("th-TH") : "ยังไม่เคยตรวจสอบ";
+  const hasBucketErrors = Object.keys(bucketErrors).length > 0;
   const emptyStateDescription = status === "unavailable"
     ? (errorMessage ? `${errorMessage} (ตรวจสอบล่าสุด ${lastCheckedDisplay})` : `ไม่สามารถโหลดบันทึกได้ (ตรวจสอบล่าสุด ${lastCheckedDisplay})`)
-    : `ยังไม่มี global activity_logs ในระบบปัจจุบัน ตรวจสอบล่าสุด ${lastCheckedDisplay}`;
+    : hasBucketErrors
+      ? `อ่านตารางบันทึกบางส่วนไม่สำเร็จ (อาจยังไม่มีตารางหรือไม่มีสิทธิ์อ่าน) ตรวจสอบล่าสุด ${lastCheckedDisplay}`
+      : `ระบบเชื่อมต่อกับตาราง order_status_logs / payment_status_logs / line_notification_logs แล้ว แต่ยังไม่มีเหตุการณ์ที่ถูกบันทึก ตรวจสอบล่าสุด ${lastCheckedDisplay}`;
 
   return (
     <SystemLayout
@@ -94,8 +99,22 @@ export default function SystemAuditLogsPage() {
             <div className="flex items-center justify-between">
               <h2 className="section-title mb-0">{bucketLabels[key]}</h2>
               <StatusBadge
-                label={buckets[key].length ? `${buckets[key].length} rows` : status === "unavailable" ? "unavailable" : "no data"}
-                tone={buckets[key].length ? "info" : status === "unavailable" ? "danger" : "neutral"}
+                label={
+                  buckets[key].length
+                    ? `${buckets[key].length} rows`
+                    : status === "unavailable"
+                      ? "unavailable"
+                      : bucketErrors[key]
+                        ? "อ่านไม่ได้"
+                        : "no data"
+                }
+                tone={
+                  buckets[key].length
+                    ? "info"
+                    : status === "unavailable" || bucketErrors[key]
+                      ? "danger"
+                      : "neutral"
+                }
               />
             </div>
             {buckets[key].length ? (
@@ -113,7 +132,11 @@ export default function SystemAuditLogsPage() {
                 rows={buckets[key]}
               />
             ) : (
-              <p className="text-sm text-muted-foreground">ไม่มีข้อมูลในหมวดนี้</p>
+              <p className="text-sm text-muted-foreground">
+                {bucketErrors[key]
+                  ? "อ่านตารางนี้ไม่สำเร็จ — อาจยังไม่มีตารางใน Supabase หรือบัญชีนี้ไม่มีสิทธิ์อ่าน"
+                  : "เชื่อมต่อแล้ว แต่ยังไม่มีเหตุการณ์ในหมวดนี้"}
+              </p>
             )}
           </section>
         ))}

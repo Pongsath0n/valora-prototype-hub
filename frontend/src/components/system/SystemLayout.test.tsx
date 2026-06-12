@@ -13,7 +13,7 @@ vi.mock("@/contexts/AuthContext", () => ({
 }));
 
 describe("SystemLayout", () => {
-  it("links back to store admin workspace", () => {
+  it("links back to the owner business dashboard", () => {
     render(
       <MemoryRouter>
         <SystemLayout title="system" subtitle="">
@@ -22,7 +22,22 @@ describe("SystemLayout", () => {
       </MemoryRouter>,
     );
 
-    const backLink = screen.getByRole("link", { name: "กลับไป Store Admin" });
-    expect(backLink).toHaveAttribute("href", "/store-admin");
+    const backLink = screen.getByRole("link", { name: "กลับไปแดชบอร์ดธุรกิจ" });
+    expect(backLink).toHaveAttribute("href", "/app/dashboard");
+  });
+
+  it("does not show a duplicate Storage Check nav entry", () => {
+    render(
+      <MemoryRouter>
+        <SystemLayout title="system" subtitle="">
+          <div>content</div>
+        </SystemLayout>
+      </MemoryRouter>,
+    );
+
+    expect(screen.queryByText("Storage Check")).toBeNull();
+    const hrefs = screen.getAllByRole("link").map((a) => a.getAttribute("href"));
+    expect(hrefs).not.toContain("/system/health#storage");
+    expect(hrefs).toContain("/system/health");
   });
 });

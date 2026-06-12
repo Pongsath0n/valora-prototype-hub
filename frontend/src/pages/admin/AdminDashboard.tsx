@@ -1,7 +1,7 @@
 import { Link } from "react-router-dom";
 import AdminLayout from "@/components/admin/AdminLayout";
 import { useProfileRole } from "@/contexts/RoleContext";
-import { ClipboardList, CreditCard, Settings, Soup, Store, Users } from "lucide-react";
+import { ClipboardList, Settings, Soup, Store, Users } from "lucide-react";
 import { featureFlags } from "@/config/featureFlags";
 
 const dailyOpsCards = [
@@ -11,12 +11,8 @@ const dailyOpsCards = [
     icon: ClipboardList,
     to: "/store-admin/orders",
   },
-  {
-    title: "POS",
-    desc: "เปิดออเดอร์หน้าร้าน/รับที่ร้านแบบแมนนวล",
-    icon: CreditCard,
-    to: "/store-admin/pos",
-  },
+  // POS card removed — POS is a deferred prototype and not part of the
+  // production daily-operations workflow yet.
   {
     title: "ลูกค้า",
     desc: "ค้นหาและอัปเดตข้อมูลลูกค้า",

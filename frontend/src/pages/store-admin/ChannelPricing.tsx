@@ -100,6 +100,12 @@ export default function StoreAdminChannelPricingPage() {
 
   return (
     <AdminLayout title="ราคาตามช่องทาง" subtitle="กำหนดราคาขายและกำไรต่อช่องทาง">
+      <div className="guidance-card mb-4 text-sm text-foreground">
+        ลูกค้าที่สั่งรับที่ร้าน (Pick-up) ผ่านหน้า /order จะเห็น
+        <span className="font-semibold"> ราคาขายพื้นฐาน</span> จากหน้าเมนูเสมอ —
+        ราคาตามช่องทางในหน้านี้ใช้สำหรับช่องทางขายอื่น (เช่น เดลิเวอรี)
+        และมีผลเฉพาะช่องทางที่ตั้งราคาไว้แล้วเท่านั้น ช่องทางที่ยังไม่ตั้งราคาจะไม่ถูกนำไปใช้
+      </div>
       <div className="flex flex-wrap items-center gap-3 mb-4">
         <button
           type="button"

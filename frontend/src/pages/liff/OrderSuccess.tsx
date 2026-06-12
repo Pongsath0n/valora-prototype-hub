@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { customerApi, type CustomerOrderSummary } from "@/services/customerApi";
+import { customerOrderStatus, customerPaymentStatus, type CustomerStatusTone } from "@/lib/customerStatus";
 import {
   clearCart,
   getLastOrderId,
@@ -12,21 +13,16 @@ import {
   setLastOrderToken,
 } from "@/services/cartStorage";
 
-type StatusBadgeProps = {
-  label: string;
-  tone: "success" | "warning" | "info";
-};
-
-function StatusBadge({ label, tone }: StatusBadgeProps) {
-  const tones: Record<StatusBadgeProps["tone"], string> = {
+function StatusBadge({ label, tone }: { label: string; tone: CustomerStatusTone }) {
+  const tones: Record<CustomerStatusTone, string> = {
     success: "bg-emerald-100 text-emerald-700",
     warning: "bg-amber-100 text-amber-700",
     info: "bg-blue-100 text-blue-700",
+    danger: "bg-red-100 text-red-700",
+    muted: "bg-muted text-muted-foreground",
   };
   return (
-    <span
-      className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${tones[tone]}`}
-    >
+    <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${tones[tone]}`}>
       {label}
     </span>
   );
@@ -40,35 +36,20 @@ function formatCurrency(value: number): string {
   }).format(value);
 }
 
-function translateOrderStatus(value: string): StatusBadgeProps {
-  const normalized = value?.toLowerCase?.() ?? "";
-  switch (normalized) {
-    case "accepted":
-      return { label: "ร้านรับออเดอร์แล้ว", tone: "success" };
-    case "pending":
-      return { label: "รอร้านยืนยัน", tone: "warning" };
-    case "ready":
-      return { label: "พร้อมรับสินค้า", tone: "success" };
-    case "completed":
-      return { label: "เสร็จสิ้น", tone: "success" };
-    case "cancelled":
-      return { label: "ยกเลิกแล้ว", tone: "info" };
-    default:
-      return { label: value || "สถานะไม่ระบุ", tone: "info" };
-  }
-}
+type PaymentInstructions = {
+  enabled: boolean;
+  method_label: string;
+  bank_name?: string | null;
+  account_name?: string | null;
+  account_number?: string | null;
+  promptpay_id?: string | null;
+  note_lines: string[];
+  allowed_file_types: string[];
+  max_file_mb: number;
+};
 
-function translatePaymentStatus(value: string): StatusBadgeProps {
-  const normalized = value?.toLowerCase?.() ?? "";
-  switch (normalized) {
-    case "paid":
-      return { label: "ชำระแล้ว", tone: "success" };
-    case "pending":
-      return { label: "รอชำระ", tone: "warning" };
-    default:
-      return { label: value || "-", tone: "info" };
-  }
-}
+const PAYMENT_CONFIG_FALLBACK =
+  "ร้านยังไม่ได้ตั้งค่าข้อมูลบัญชีรับชำระเงิน กรุณาติดต่อร้านโดยตรงเพื่อชำระเงิน";
 
 export default function OrderSuccessPage() {
   const [orderId, setOrderId] = useState<string | null>(() => getLastOrderId());
@@ -77,6 +58,8 @@ export default function OrderSuccessPage() {
   const [error, setError] = useState<string | null>(null);
   const [orderNo, setOrderNo] = useState<string | null>(() => getLastOrderNo());
   const [publicToken, setPublicToken] = useState<string | null>(() => getLastOrderToken());
+  const [instructions, setInstructions] = useState<PaymentInstructions | null>(null);
+  const [instructionsFailed, setInstructionsFailed] = useState(false);
 
   useEffect(() => {
     if (!orderId) {
@@ -118,21 +101,49 @@ export default function OrderSuccessPage() {
     };
   }, [orderId]);
 
+  useEffect(() => {
+    let mounted = true;
+    customerApi
+      .getPaymentInstructions()
+      .then((data) => {
+        if (mounted) setInstructions(data as PaymentInstructions);
+      })
+      .catch(() => {
+        if (mounted) setInstructionsFailed(true);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
   const statusBadges = useMemo(() => {
     if (!order) return null;
     return {
-      order: translateOrderStatus(order.status),
-      payment: translatePaymentStatus(order.payment_status),
+      order: customerOrderStatus(order.status),
+      payment: customerPaymentStatus(order.payment_status),
     };
   }, [order]);
 
+  const isPaid = (order?.payment_status ?? "").toLowerCase() === "paid";
   const displayOrderNo = order?.order_number ?? order?.order_no ?? orderNo;
+  const statusLink = publicToken
+    ? `/order/status?token=${encodeURIComponent(publicToken)}`
+    : "/order/status";
 
   function handleCopyOrderNo() {
     if (!displayOrderNo) return;
     navigator.clipboard?.writeText(displayOrderNo).catch(() => {
       /* ignore */
     });
+  }
+
+  function handleStartOver() {
+    clearCart();
+    setOrderId(null);
+    setOrderNo(null);
+    setLastOrderNo(null);
+    setPublicToken(null);
+    setLastOrderToken(null);
   }
 
   if (!orderId) {
@@ -159,43 +170,37 @@ export default function OrderSuccessPage() {
 
   return (
     <div className="mx-auto max-w-md space-y-5 px-4 py-6">
-      <div className="space-y-1">
+      {/* ── First view: success + key facts + next steps ── */}
+      <section className="rounded-2xl border bg-white p-5 shadow-sm">
         <h1 className="text-2xl font-semibold">สั่งซื้อสำเร็จ</h1>
-        <p className="text-sm text-muted-foreground">
-          หมายเลขคำสั่งซื้อ: {displayOrderNo || orderId}
-        </p>
-        {displayOrderNo ? (
-          <button
-            type="button"
-            onClick={handleCopyOrderNo}
-            className="text-sm text-primary underline"
-          >
-            คัดลอกรหัสออเดอร์
-          </button>
-        ) : null}
-      </div>
+        <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+          <span>หมายเลขคำสั่งซื้อ: <span className="font-semibold text-foreground">{displayOrderNo || orderId}</span></span>
+          {displayOrderNo ? (
+            <button type="button" onClick={handleCopyOrderNo} className="text-primary underline">
+              คัดลอก
+            </button>
+          ) : null}
+        </div>
 
-      <section className="rounded-2xl border bg-white p-4 shadow-sm">
         {loading ? (
-          <div className="animate-pulse space-y-3">
+          <div className="mt-4 animate-pulse space-y-3">
             <div className="h-4 w-1/3 rounded bg-muted" />
             <div className="h-4 w-1/2 rounded bg-muted" />
-            <div className="h-4 w-full rounded bg-muted" />
           </div>
         ) : error ? (
-          <div className="space-y-3">
+          <div className="mt-4 space-y-3">
             <p className="text-sm text-destructive">{error}</p>
             <button
               type="button"
               onClick={() => setOrderId(orderId)}
-              className="inline-flex rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground"
+              className="inline-flex rounded-full border border-primary/40 px-4 py-2 text-sm font-semibold text-primary"
             >
               ลองโหลดอีกครั้ง
             </button>
           </div>
         ) : order ? (
-          <div className="space-y-4">
-            <div className="flex flex-wrap gap-3">
+          <div className="mt-4 space-y-4">
+            <div className="flex flex-wrap gap-2">
               {statusBadges ? (
                 <>
                   <StatusBadge {...statusBadges.order} />
@@ -204,93 +209,135 @@ export default function OrderSuccessPage() {
               ) : null}
             </div>
 
-            <div className="rounded-2xl bg-muted/40 p-3 text-sm">
-              <p className="font-medium">เวลาที่รับโดยประมาณ</p>
-              <p className="text-muted-foreground">
-                {order.pickup_time
-                  ? new Date(order.pickup_time).toLocaleString("th-TH")
-                  : "-"}
-              </p>
+            <div className="flex items-center justify-between rounded-2xl bg-muted/40 p-3">
+              <div>
+                <p className="text-sm text-muted-foreground">ยอดที่ต้องชำระ</p>
+                <p className="text-2xl font-bold">{formatCurrency(order.total_amount)}</p>
+              </div>
+              <div className="text-right text-sm">
+                <p className="text-muted-foreground">เวลารับโดยประมาณ</p>
+                <p className="font-medium">
+                  {order.pickup_time ? new Date(order.pickup_time).toLocaleString("th-TH") : "-"}
+                </p>
+              </div>
             </div>
 
-            <div className="space-y-3">
-              {order.items.map((item) => (
-                <div key={item.product_id} className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-semibold">
-                      {item.product_name || item.product_id}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      x{item.quantity} · {formatCurrency(item.unit_price)}
-                    </p>
-                  </div>
-                  <p className="text-sm font-semibold">
-                    {formatCurrency(item.line_total)}
-                  </p>
-                </div>
-              ))}
-            </div>
-
-            <div className="flex items-center justify-between border-t pt-3">
-              <p className="text-sm text-muted-foreground">ยอดรวม</p>
-              <p className="text-lg font-semibold">
-                {formatCurrency(order.total_amount)}
-              </p>
-            </div>
+            {!isPaid ? (
+              <ol className="space-y-1.5 rounded-2xl border border-primary/20 bg-primary/5 p-4 text-sm">
+                <p className="font-semibold text-foreground">ขั้นตอนถัดไป</p>
+                <li className="text-muted-foreground">1. โอนเงินตามยอดที่แสดง</li>
+                <li className="text-muted-foreground">2. อัปโหลดสลิปการโอน</li>
+                <li className="text-muted-foreground">3. รอร้านตรวจสอบและยืนยันออเดอร์</li>
+              </ol>
+            ) : null}
           </div>
         ) : (
-          <p className="text-sm text-muted-foreground">
-            กำลังเตรียมข้อมูลคำสั่งซื้อของคุณ...
-          </p>
+          <p className="mt-4 text-sm text-muted-foreground">กำลังเตรียมข้อมูลคำสั่งซื้อของคุณ...</p>
         )}
       </section>
 
-      <section className="rounded-2xl border bg-white/80 p-4 shadow-sm">
-        <h2 className="text-base font-semibold">ขั้นตอนถัดไป</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          กรุณาชำระเงินตามคำแนะนำของร้านค้า และเตรียมหลักฐานการโอนเพื่ออัปโหลดผ่านหน้าเช็กสถานะ
-        </p>
-        {publicToken ? (
-          <a
-            href={`/order/status?token=${encodeURIComponent(publicToken)}`}
-            className="mt-3 inline-flex w-full items-center justify-center rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground"
-          >
-            ดูสถานะออเดอร์
-          </a>
-        ) : (
-          <p className="mt-3 text-xs text-muted-foreground">
-            หากยังไม่มีลิงก์ ให้เตรียมเลขออเดอร์ไว้เพื่อค้นหาสถานะในภายหลัง
-          </p>
-        )}
-      </section>
+      {/* ── Payment instruction card ── */}
+      {!isPaid ? (
+        <section className="rounded-2xl border bg-white p-5 shadow-sm">
+          <p className="text-xs font-semibold text-primary/70">ช่องทางการชำระเงิน</p>
+          {instructions?.enabled ? (
+            <div className="mt-1 space-y-2 text-sm">
+              <h2 className="text-lg font-semibold">{instructions.method_label}</h2>
+              {instructions.bank_name ? (
+                <p><span className="text-muted-foreground">ธนาคาร:</span> {instructions.bank_name}</p>
+              ) : null}
+              {instructions.account_name ? (
+                <p><span className="text-muted-foreground">ชื่อบัญชี:</span> {instructions.account_name}</p>
+              ) : null}
+              {instructions.account_number ? (
+                <p><span className="text-muted-foreground">เลขบัญชี:</span> {instructions.account_number}</p>
+              ) : null}
+              {instructions.promptpay_id ? (
+                <p><span className="text-muted-foreground">PromptPay:</span> {instructions.promptpay_id}</p>
+              ) : null}
+              {order ? (
+                <p><span className="text-muted-foreground">ยอดโอน:</span> <span className="font-semibold">{formatCurrency(order.total_amount)}</span></p>
+              ) : null}
+              {instructions.note_lines?.length ? (
+                <ul className="list-disc space-y-0.5 pl-4 text-xs text-muted-foreground">
+                  {instructions.note_lines.map((note, idx) => (
+                    <li key={`${note}-${idx}`}>{note}</li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+          ) : (
+            <p className="mt-2 text-sm text-muted-foreground">
+              {PAYMENT_CONFIG_FALLBACK}
+            </p>
+          )}
+          {instructionsFailed && !instructions ? (
+            <p className="mt-2 text-xs text-muted-foreground">
+              โหลดข้อมูลการชำระเงินไม่สำเร็จ — เปิดหน้าเช็กสถานะเพื่อลองใหม่ หรือติดต่อร้านโดยตรง
+            </p>
+          ) : null}
+        </section>
+      ) : null}
 
-      <section className="rounded-2xl border border-dashed bg-white/60 p-4 text-sm text-muted-foreground">
-        <p>LINE แจ้งเตือนยังเป็นโหมดทดสอบ ทำให้ข้อความอาจไม่ถูกส่งจริง</p>
-        <p className="mt-1">หากมีข้อสงสัย กรุณาติดต่อร้านค้าโดยตรง</p>
-      </section>
+      {/* ── Order item summary ── */}
+      {order ? (
+        <section className="rounded-2xl border bg-white p-4 shadow-sm">
+          <h2 className="text-base font-semibold">รายการที่สั่ง</h2>
+          <div className="mt-3 space-y-3">
+            {order.items.map((item) => (
+              <div key={item.product_id} className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-semibold">{item.product_name || item.product_id}</p>
+                  <p className="text-xs text-muted-foreground">
+                    x{item.quantity} · {formatCurrency(item.unit_price)}
+                  </p>
+                </div>
+                <p className="text-sm font-semibold">{formatCurrency(item.line_total)}</p>
+              </div>
+            ))}
+          </div>
+          <div className="mt-3 flex items-center justify-between border-t pt-3">
+            <p className="text-sm text-muted-foreground">ยอดรวม</p>
+            <p className="text-lg font-semibold">{formatCurrency(order.total_amount)}</p>
+          </div>
+        </section>
+      ) : null}
 
+      {/* ── Actions (priority order) ── */}
       <div className="space-y-3">
+        {!isPaid ? (
+          <a
+            href={statusLink}
+            className="inline-flex w-full items-center justify-center rounded-full bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground"
+          >
+            อัปโหลดสลิปการโอน
+          </a>
+        ) : null}
+        <a
+          href={statusLink}
+          className="inline-flex w-full items-center justify-center rounded-full border border-primary/40 px-4 py-2 text-sm font-semibold text-primary"
+        >
+          ดูสถานะออเดอร์
+        </a>
         <Link
           to="/liff/menu"
-          className="inline-flex w-full items-center justify-center rounded-full border border-primary/40 px-4 py-2 text-sm font-semibold text-primary"
+          className="inline-flex w-full items-center justify-center rounded-full border px-4 py-2 text-sm font-medium text-muted-foreground"
         >
           สั่งเพิ่ม
         </Link>
         <button
           type="button"
-          onClick={() => {
-            clearCart();
-            setOrderId(null);
-            setOrderNo(null);
-            setLastOrderNo(null);
-            setPublicToken(null);
-            setLastOrderToken(null);
-          }}
-          className="inline-flex w-full items-center justify-center rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground"
+          onClick={handleStartOver}
+          className="block w-full text-center text-xs text-muted-foreground underline"
         >
-          เคลียร์ข้อมูลและกลับไปหน้าแรก
+          เริ่มรายการใหม่
         </button>
       </div>
+
+      {/* Soft dev-mode note — intentionally low-key and at the bottom */}
+      <p className="text-center text-xs text-muted-foreground/80">
+        การแจ้งเตือนผ่าน LINE อยู่ระหว่างทดสอบ หากไม่ได้รับข้อความ สามารถติดตามสถานะได้จากหน้านี้
+      </p>
     </div>
   );
 }

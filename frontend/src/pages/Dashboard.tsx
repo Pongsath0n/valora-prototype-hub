@@ -173,21 +173,31 @@ export default function DashboardPage() {
       <div className="space-y-6">
         <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
           <div>
-            <p className="text-sm font-semibold text-primary/80">Store ID: {summary.store_id}</p>
-            <h1 className="text-3xl font-bold tracking-tight">แดชบอร์ดผลประกอบการ</h1>
+            <h1 className="text-3xl font-bold tracking-tight">แดชบอร์ดธุรกิจ</h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              ซิงก์จาก /store-admin orders & payments • เขตเวลา: {summary.store_timezone || "UTC"}
+              ข้อมูลจริงจากออเดอร์และการชำระเงินของร้าน • เขตเวลา: {summary.store_timezone || "UTC"}
             </p>
           </div>
           <div className="flex flex-col gap-2 sm:flex-row">
-            <CTAButton to="/store-admin/orders" variant="primary">
-              ไปตรวจสลิปใน /store-admin
+            <CTAButton to="/app/planning" variant="primary">
+              วางแผนกำไร
             </CTAButton>
             <CTAButton to="/store-admin/orders" variant="secondary">
-              ไปจัดการออเดอร์
+              จัดการออเดอร์และตรวจสลิป
             </CTAButton>
           </div>
         </div>
+
+        <Link
+          to="/app/planning"
+          className="block rounded-2xl border border-primary/30 bg-primary/5 p-5 shadow-sm transition hover:border-primary/60"
+        >
+          <p className="text-xs font-semibold uppercase tracking-[0.3em] text-primary/70">หัวใจของ Valora</p>
+          <h2 className="mt-1 text-lg font-semibold text-foreground">การวางแผนกำไร (Profit Planning)</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            จำลองราคา ต้นทุน วันเปิดขาย และเป้ากำไร เพื่อหาจุดคุ้มทุนและยอดขายที่ต้องทำ — เริ่มวางแผนได้จากที่นี่
+          </p>
+        </Link>
 
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
           {metricCards.map((card) => (

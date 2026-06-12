@@ -4,19 +4,22 @@ import {
   BarChart3,
   BookOpenCheck,
   ClipboardList,
+  FileText,
   LayoutDashboard,
   LogOut,
   Menu,
   Settings,
-  ShoppingCart,
+  ShieldCheck,
   Soup,
   Store,
+  TrendingUp,
   Users,
   X,
 } from "lucide-react";
 import { useState } from "react";
 import LogoBrand from "@/components/LogoBrand";
-import { PortalSwitcher } from "@/components/navigation/PortalSwitcher";
+// PortalSwitcher pill links removed from the Owner sidebar — they duplicated the
+// main grouped navigation. PortalSwitcher remains available for other surfaces.
 import { useProfileRole } from "@/contexts/RoleContext";
 import type { AppRole } from "@/lib/guards";
 
@@ -32,49 +35,66 @@ type OwnerNavSection = {
   items: OwnerNavItem[];
 };
 
+/**
+ * Owner navigation — organized around business purpose.
+ * Profit Planning (/app/planning) is the core product engine of Valora.
+ *
+ * Deliberately NOT in this nav:
+ * - /app/pos, /store-admin/pos  → POS prototype is deferred (redirected in prod)
+ * - /app/orders                 → duplicate of /store-admin/orders; redirected
+ * - legacy /app/menu, /app/channels, /app/channel-pricing, /app/ingredients,
+ *   /app/recipes                → canonical config lives under /store-admin/*
+ * - /store-admin/reports        → canonical reports route is /app/reports
+ */
 const OWNER_NAV_SECTIONS: OwnerNavSection[] = [
   {
-    title: "ภาพรวม",
+    title: "ภาพรวมธุรกิจ",
     items: [
       { title: "แดชบอร์ดธุรกิจ", path: "/app/dashboard", icon: LayoutDashboard },
+    ],
+  },
+  {
+    title: "การวางแผนกำไร",
+    items: [
+      { title: "วางแผนกำไร", path: "/app/planning", icon: TrendingUp },
+    ],
+  },
+  {
+    title: "ผลประกอบการ",
+    items: [
       { title: "รายงานสรุป", path: "/app/reports", icon: BarChart3 },
     ],
   },
   {
-    title: "การดำเนินงาน",
+    title: "เมนู ราคา และช่องทางขาย",
     items: [
-      { title: "Store Admin", path: "/store-admin", icon: ClipboardList },
-      { title: "ออเดอร์ (Owner)", path: "/app/orders", icon: ClipboardList },
-      { title: "POS", path: "/app/pos", icon: ShoppingCart },
+      { title: "เมนูและหมวดหมู่", path: "/store-admin/menus", icon: Soup },
+      { title: "ช่องทางขาย", path: "/store-admin/channels", icon: Store },
+      { title: "ราคาตามช่องทาง", path: "/store-admin/channel-pricing", icon: Store },
+    ],
+  },
+  {
+    title: "ต้นทุนและสูตร",
+    items: [
+      { title: "วัตถุดิบ", path: "/store-admin/ingredients", icon: Soup },
+      { title: "สูตรและต้นทุน", path: "/store-admin/recipes", icon: BookOpenCheck },
+    ],
+  },
+  {
+    title: "ภาพรวมลูกค้าและออเดอร์",
+    items: [
       { title: "ลูกค้า", path: "/store-admin/customers", icon: Users },
-    ],
-  },
-  {
-    title: "การตั้งค่าธุรกิจ",
-    items: [
-      { title: "เมนูและหมวดหมู่", path: "/app/menu", icon: Soup },
-      { title: "ช่องทางขาย", path: "/app/channels", icon: Store },
-      { title: "ราคาตามช่องทาง", path: "/app/channel-pricing", icon: Store },
-    ],
-  },
-  {
-    title: "ต้นทุนและสต็อก",
-    items: [
-      { title: "วัตถุดิบ", path: "/app/ingredients", icon: Soup },
-      { title: "สูตรและต้นทุน", path: "/app/recipes", icon: BookOpenCheck },
+      { title: "ออเดอร์ (ติดตามภาพรวม)", path: "/store-admin/orders", icon: ClipboardList },
     ],
   },
   {
     title: "ระบบ",
     items: [
-      { title: "ตั้งค่าระบบ", path: "/app/settings", icon: Settings },
-      { title: "System Health", path: "/system/health", icon: Activity, roles: ["owner"] },
-    ],
-  },
-  {
-    title: "ขั้นสูง / ทดสอบ",
-    items: [
       { title: "System Console", path: "/system", icon: Activity, roles: ["owner"] },
+      { title: "จัดการผู้ใช้", path: "/system/users", icon: Users, roles: ["owner"] },
+      { title: "จัดการสิทธิ์", path: "/system/roles", icon: ShieldCheck, roles: ["owner"] },
+      { title: "System Health", path: "/system/health", icon: Activity, roles: ["owner"] },
+      { title: "บันทึกเหตุการณ์", path: "/system/audit-logs", icon: FileText, roles: ["owner"] },
     ],
   },
 ];
@@ -85,9 +105,9 @@ const utilityNav = [
 
 const mobileNav = [
   { title: "ภาพรวม", path: "/app/dashboard", icon: LayoutDashboard },
-  { title: "Store Admin", path: "/store-admin", icon: ClipboardList },
-  { title: "POS", path: "/app/pos", icon: ShoppingCart },
-  { title: "ออเดอร์", path: "/app/orders", icon: ClipboardList },
+  { title: "วางแผนกำไร", path: "/app/planning", icon: TrendingUp },
+  { title: "รายงาน", path: "/app/reports", icon: BarChart3 },
+  { title: "ออเดอร์", path: "/store-admin/orders", icon: ClipboardList },
   { title: "ตั้งค่า", path: "/app/settings", icon: Settings },
 ];
 
@@ -148,9 +168,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 </div>
               ))
             : null}
-          <div className="mt-6 px-3">
-            {!loading && role ? <PortalSwitcher variant="stack" /> : null}
-          </div>
         </nav>
 
         {/* Utility nav */}

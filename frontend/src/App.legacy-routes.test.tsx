@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+import { MemoryRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { render, screen } from "@testing-library/react";
-import { AdminLegacyRedirect } from "./App";
+import { AdminLegacyRedirect, ScenarioLegacyRedirect, isPosDeferred, shouldRedirectLegacyConfig } from "./App";
+import { shouldShowDevCreateOrderForm } from "./pages/admin/AdminOrders";
 
 function LocationProbe() {
   const location = useLocation();
@@ -26,5 +27,68 @@ describe("AdminLegacyRedirect", () => {
     );
 
     expect(screen.getByText("/store-admin/orders?status=pending#slips")).toBeInTheDocument();
+  });
+});
+
+describe("ScenarioLegacyRedirect", () => {
+  it("redirects /app/scenario to the canonical /app/planning route", () => {
+    render(
+      <MemoryRouter initialEntries={["/app/scenario?case=price-up#results"]}>
+        <Routes>
+          <Route path="/app/scenario" element={<ScenarioLegacyRedirect />} />
+          <Route path="/app/planning" element={<LocationProbe />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("/app/planning?case=price-up#results")).toBeInTheDocument();
+  });
+
+  it("does not create a redirect loop (planning route renders without further navigation)", () => {
+    render(
+      <MemoryRouter initialEntries={["/app/scenario"]}>
+        <Routes>
+          <Route path="/app/scenario" element={<ScenarioLegacyRedirect />} />
+          <Route path="/app/planning" element={<div>planning-page</div>} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("planning-page")).toBeInTheDocument();
+  });
+});
+
+describe("POS deferral", () => {
+  it("defers POS in production builds and keeps it in dev", () => {
+    expect(isPosDeferred(false)).toBe(true); // production → redirect
+    expect(isPosDeferred(true)).toBe(false); // dev → prototype reachable
+  });
+});
+
+describe("Prototype/legacy route gating", () => {
+  it("redirects legacy /app/* config prototypes to canonical /store-admin/* in production", () => {
+    expect(shouldRedirectLegacyConfig(false)).toBe(true); // production → redirect
+    expect(shouldRedirectLegacyConfig(true)).toBe(false); // dev → legacy reachable
+  });
+
+  it("shows the incomplete create-pickup-order form only in dev builds", () => {
+    expect(shouldShowDevCreateOrderForm(false)).toBe(false); // production → hidden
+    expect(shouldShowDevCreateOrderForm(true)).toBe(true); // dev → visible with warning
+  });
+});
+
+describe("/system/storage legacy redirect", () => {
+  it("redirects to /system/health#storage without a loop", () => {
+    // Mirrors the static <Navigate> registered in App.tsx for /system/storage.
+    render(
+      <MemoryRouter initialEntries={["/system/storage"]}>
+        <Routes>
+          <Route path="/system/storage" element={<Navigate to="/system/health#storage" replace />} />
+          <Route path="/system/health" element={<LocationProbe />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("/system/health#storage")).toBeInTheDocument();
   });
 });

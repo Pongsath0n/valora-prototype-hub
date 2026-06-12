@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/lib/supabase";
 import { storeAdminApi } from "@/services/storeAdminApi";
+import { resolvePostLoginRoute } from "@/lib/postLogin";
 import { AlertCircle, Loader2 } from "lucide-react";
 import LogoBrand from "@/components/LogoBrand";
 
@@ -47,16 +48,7 @@ export default function LoginPage() {
         }
 
         const hasOnboarded = localStorage.getItem("valora:onboarded") === "1";
-        if (!hasOnboarded) {
-          navigate("/onboarding", { replace: true });
-          return;
-        }
-
-        if (role === "staff") {
-          navigate("/store-admin", { replace: true });
-        } else {
-          navigate("/app/dashboard", { replace: true });
-        }
+        navigate(resolvePostLoginRoute(role, hasOnboarded), { replace: true });
       } catch {
         setError("บัญชีนี้ยังไม่ได้รับสิทธิ์การใช้งาน");
       }

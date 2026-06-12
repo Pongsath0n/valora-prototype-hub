@@ -21,6 +21,17 @@ import {
   formatDateTime,
 } from "@/lib/format";
 
+/**
+ * The manual "create pickup order" form only collects pickup_time + note —
+ * it cannot create a complete order (no customer, items, quantities, channel,
+ * totals, or cost/profit snapshot). Until a full Manual Sales Entry flow
+ * exists, the form is dev-only and must not appear in production.
+ */
+export function shouldShowDevCreateOrderForm(isDevBuild: boolean): boolean {
+  return isDevBuild;
+}
+const showDevCreateOrderForm = shouldShowDevCreateOrderForm(Boolean(import.meta.env.DEV));
+
 type TabKey =
   | "queue"
   | "payments"
@@ -276,8 +287,13 @@ export default function AdminOrdersPage() {
       title="ออเดอร์"
       subtitle="คิวออเดอร์ การชำระเงิน การเตรียม และพร้อมรับ"
     >
-      <div className="stat-card mb-4 space-y-3">
-        <h2 className="section-title text-base">สร้างออเดอร์ Pickup</h2>
+      {showDevCreateOrderForm ? (
+      <div className="stat-card mb-4 space-y-3 border-amber-300">
+        <h2 className="section-title text-base">สร้างออเดอร์ Pickup (เครื่องมือทดสอบ — ยังไม่พร้อมใช้งานจริง)</h2>
+        <p className="text-xs text-amber-700">
+          ฟอร์มนี้ยังไม่เก็บข้อมูลลูกค้า เมนู จำนวน ช่องทาง และยอดเงิน จึงสร้างได้เฉพาะออเดอร์เปล่าสำหรับทดสอบระบบเท่านั้น
+          (แสดงเฉพาะโหมดพัฒนา)
+        </p>
         <div className="grid md:grid-cols-3 gap-3">
           <div>
             <label className="text-xs text-muted-foreground">Pickup Time</label>
@@ -310,6 +326,7 @@ export default function AdminOrdersPage() {
           <span className="text-xs text-muted-foreground">รองรับ pickup_time สำหรับ flow จาก LIFF ในอนาคต</span>
         </div>
       </div>
+      ) : null}
 
       <div className="flex flex-wrap gap-2 mb-4">
         {statusTabs.map((tab) => (

@@ -20,4 +20,36 @@ describe("SystemAuditLogsPage", () => {
     expect(await screen.findByText(/ไม่สามารถโหลดบันทึกเหตุการณ์/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /โหลดข้อมูลล่าสุด/i })).toBeInTheDocument();
   });
+
+  it("shows honest connected-but-empty state when queries succeed with no rows", async () => {
+    mockLoadAuditBuckets.mockResolvedValueOnce({
+      status: "partial",
+      buckets: { orders: [], payments: [], line_notifications: [] },
+      errors: {},
+      reason: "no_logs_found",
+    });
+    const { default: Page } = await import("@/pages/system/SystemAuditLogs");
+
+    render(<Page />);
+
+    expect(await screen.findByText(/ยังไม่มีข้อมูลบันทึกเหตุการณ์/i)).toBeInTheDocument();
+    expect(screen.getByText(/ยังไม่มีเหตุการณ์ที่ถูกบันทึก/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/เชื่อมต่อแล้ว แต่ยังไม่มีเหตุการณ์ในหมวดนี้/i).length).toBe(3);
+  });
+
+  it("distinguishes unreadable tables from genuinely empty ones", async () => {
+    mockLoadAuditBuckets.mockResolvedValueOnce({
+      status: "partial",
+      buckets: { orders: [], payments: [], line_notifications: [] },
+      errors: { orders: "query_failed" },
+      reason: "query_failed",
+    });
+    const { default: Page } = await import("@/pages/system/SystemAuditLogs");
+
+    render(<Page />);
+
+    expect(await screen.findByText("อ่านไม่ได้")).toBeInTheDocument();
+    expect(screen.getByText(/อ่านตารางนี้ไม่สำเร็จ/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/เชื่อมต่อแล้ว แต่ยังไม่มีเหตุการณ์ในหมวดนี้/i).length).toBe(2);
+  });
 });

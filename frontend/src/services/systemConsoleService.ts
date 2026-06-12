@@ -117,7 +117,13 @@ async function fetchAuditBucket(source: AuditBucketName, table: string, refKeys:
   }
 }
 
-export async function loadAuditBuckets(): Promise<{ status: "ok" | "partial" | "unavailable"; buckets: Record<AuditBucketName, AuditLogRow[]>; reason?: string }> {
+export async function loadAuditBuckets(): Promise<{
+  status: "ok" | "partial" | "unavailable";
+  buckets: Record<AuditBucketName, AuditLogRow[]>;
+  /** Per-bucket query errors — lets the UI distinguish "no activity yet" from "could not read this table". */
+  errors?: Partial<Record<AuditBucketName, string>>;
+  reason?: string;
+}> {
   const defaults: Record<AuditBucketName, AuditLogRow[]> = {
     orders: [],
     payments: [],
@@ -131,23 +137,27 @@ export async function loadAuditBuckets(): Promise<{ status: "ok" | "partial" | "
   ]);
 
   const buckets: Record<AuditBucketName, AuditLogRow[]> = { ...defaults };
+  const errors: Partial<Record<AuditBucketName, string>> = {};
   const hadError = results.some((r) => r.error);
   let totalRows = 0;
 
   for (const result of results) {
     buckets[result.source] = result.rows;
     totalRows += result.rows.length;
+    if (result.error) {
+      errors[result.source] = result.error;
+    }
   }
 
   if (results.some((r) => r.error === "supabase_unavailable")) {
-    return { status: "unavailable", buckets, reason: "supabase_unavailable" };
+    return { status: "unavailable", buckets, errors, reason: "supabase_unavailable" };
   }
 
   if (totalRows > 0) {
-    return { status: hadError ? "partial" : "ok", buckets, reason: hadError ? "some_queries_failed" : undefined };
+    return { status: hadError ? "partial" : "ok", buckets, errors, reason: hadError ? "some_queries_failed" : undefined };
   }
 
-  return { status: hadError ? "partial" : "partial", buckets, reason: hadError ? "query_failed" : "no_logs_found" };
+  return { status: "partial", buckets, errors, reason: hadError ? "query_failed" : "no_logs_found" };
 }
 
 export type SystemUserMembership = {

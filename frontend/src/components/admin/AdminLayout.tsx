@@ -32,8 +32,8 @@ const storeNavSections: { title: string; items: StoreNavItem[] }[] = [
   {
     title: "งานประจำวัน",
     items: [
+      // POS is a deferred prototype — intentionally not in production navigation.
       { title: "แดชบอร์ด", path: "/store-admin", icon: LayoutDashboard, end: true },
-      { title: "POS", path: "/store-admin/pos", icon: CreditCard },
       { title: "ออเดอร์", path: "/store-admin/orders", icon: ClipboardList },
       { title: "ลูกค้า", path: "/store-admin/customers", icon: Users },
     ],
@@ -46,7 +46,9 @@ const storeNavSections: { title: string; items: StoreNavItem[] }[] = [
       { title: "ราคาตามช่องทาง", path: "/store-admin/channel-pricing", icon: CreditCard, roles: MANAGER_NAV_ROLES },
       { title: "วัตถุดิบ", path: "/store-admin/ingredients", icon: Settings, roles: MANAGER_NAV_ROLES },
       { title: "สูตรและต้นทุน", path: "/store-admin/recipes", icon: Settings, roles: MANAGER_NAV_ROLES },
-      { title: "รายงาน", path: "/store-admin/reports", icon: LayoutDashboard, roles: MANAGER_NAV_ROLES },
+      // Reports link points to the canonical business reports route (/app/reports);
+      // /store-admin/reports already redirects there in production.
+      { title: "รายงาน", path: "/app/reports", icon: LayoutDashboard, roles: MANAGER_NAV_ROLES },
     ],
   },
 ];

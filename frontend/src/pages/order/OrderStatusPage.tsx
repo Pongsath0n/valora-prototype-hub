@@ -3,39 +3,16 @@ import { Link, useSearchParams } from "react-router-dom";
 
 import { cn } from "@/lib/utils";
 import { customerApi, type OrderStatusSummary } from "@/services/customerApi";
+import { customerOrderStatus, customerPaymentStatus } from "@/lib/customerStatus";
 import { getLastOrderNo, getLastOrderToken, setLastOrderNo, setLastOrderToken } from "@/services/cartStorage";
 
 const TIMELINE: { key: string; label: string }[] = [
   { key: "received", label: "รับออเดอร์แล้ว" },
-  { key: "payment", label: "รอชำระเงิน / รอตรวจสลิป" },
-  { key: "confirmed", label: "ยืนยันแล้ว" },
-  { key: "preparing", label: "กำลังเตรียม" },
-  { key: "ready", label: "พร้อมรับ / เสร็จสิ้น" },
+  { key: "payment", label: "ชำระเงิน / ตรวจสอบการชำระเงิน" },
+  { key: "confirmed", label: "ร้านยืนยันออเดอร์" },
+  { key: "preparing", label: "กำลังจัดเตรียม" },
+  { key: "ready", label: "พร้อมรับสินค้า / เสร็จสิ้น" },
 ];
-
-const EXTRA_STATUS_LABELS: Record<string, string> = {
-  pending_payment: "รอชำระเงิน",
-  waiting_payment_review: "รอตรวจสลิป",
-  accepted: "ยืนยันแล้ว",
-  preparing: "กำลังเตรียม",
-  ready: "พร้อมรับ",
-  completed: "เสร็จสิ้น",
-  cancelled: "ยกเลิกแล้ว",
-  paid: "ชำระเงินแล้ว",
-};
-
-const PAYMENT_STATUS_LABELS: Record<string, string> = {
-  pending: "รอชำระเงิน",
-  unpaid: "รอชำระเงิน",
-  pending_review: "รอตรวจสลิป",
-  paid: "ชำระเงินแล้ว",
-  rejected: "สลิปไม่ผ่าน",
-};
-
-function paymentStatusLabel(value: string | undefined | null): string {
-  const key = (value || "").toLowerCase();
-  return PAYMENT_STATUS_LABELS[key] ?? value ?? "-";
-}
 
 function timelineIndexForStatus(status: string): number {
   switch (status) {
@@ -77,6 +54,9 @@ type PaymentInstructions = {
   allowed_file_types: string[];
   max_file_mb: number;
 };
+
+const PAYMENT_CONFIG_FALLBACK =
+  "ร้านยังไม่ได้ตั้งค่าข้อมูลบัญชีรับชำระเงิน กรุณาติดต่อร้านโดยตรงเพื่อชำระเงิน";
 
 type UploadState = "idle" | "uploading" | "success" | "error";
 
@@ -173,11 +153,11 @@ export default function OrderStatusPage() {
       setUploadState("success");
       setSelectedFile(null);
       await fetchStatusByToken(statusData.public_token);
+      setTimeout(() => setUploadState("idle"), 5000);
     } catch (err: any) {
       setUploadState("error");
       setUploadError(err?.message || "อัปโหลดไม่สำเร็จ");
-    } finally {
-      setTimeout(() => setUploadState("idle"), 3000);
+      setTimeout(() => setUploadState("idle"), 5000);
     }
   }
 
@@ -196,17 +176,10 @@ export default function OrderStatusPage() {
   const hasSubmittedSlip = Boolean(statusData?.payment?.slip_submitted);
 
   function renderInstructionCard() {
-    if (instructionsError) {
-      return (
-        <div className="rounded-2xl border border-destructive/40 bg-destructive/5 p-4 text-sm text-destructive">
-          {instructionsError}
-        </div>
-      );
-    }
-    if (!instructions?.enabled) {
+    if (instructionsError || !instructions?.enabled) {
       return (
         <div className="rounded-2xl border bg-muted/30 p-4 text-sm text-muted-foreground">
-          ระบบคำแนะนำการชำระเงินยังไม่พร้อมใช้งาน
+          {PAYMENT_CONFIG_FALLBACK}
         </div>
       );
     }
@@ -238,6 +211,12 @@ export default function OrderStatusPage() {
               <span className="text-muted-foreground">PromptPay:</span> {instructions.promptpay_id}
             </p>
           )}
+          {statusData ? (
+            <p>
+              <span className="text-muted-foreground">ยอดโอน:</span>{" "}
+              <span className="font-semibold">{formatCurrency(statusData.total_amount)}</span>
+            </p>
+          ) : null}
         </div>
         {instructions.note_lines.length ? (
           <ul className="mt-4 list-disc space-y-1 pl-4 text-sm text-muted-foreground">
@@ -298,6 +277,9 @@ export default function OrderStatusPage() {
   const normalizedStatus = normalizeStatus(statusData?.order_status);
   const isCancelled = normalizedStatus === "cancelled";
   const isCompleted = normalizedStatus === "completed";
+  // Customer arrived with a direct status link (or already loaded an order) —
+  // the manual search form is only for visitors without a token.
+  const showSearchForm = !statusData && !loading;
   const timelineSteps = useMemo(() => {
     const index = timelineIndexForStatus(normalizedStatus);
     return TIMELINE.map((step, idx) => ({
@@ -336,7 +318,7 @@ export default function OrderStatusPage() {
     if (isRejected) {
       return {
         tone: "danger" as const,
-        title: "สลิปไม่ผ่านการตรวจสอบ",
+        title: "หลักฐานการชำระเงินไม่ผ่าน",
         desc: statusData.payment?.reject_reason
           ? `เหตุผล: ${statusData.payment.reject_reason}`
           : "กรุณาตรวจสอบยอดโอนและอัปโหลดสลิปใหม่อีกครั้ง",
@@ -346,7 +328,7 @@ export default function OrderStatusPage() {
     if (isPendingReview) {
       return {
         tone: "info" as const,
-        title: "ร้านกำลังตรวจสอบสลิปของคุณ",
+        title: "ร้านกำลังตรวจสอบการชำระเงินของคุณ",
         desc: "โปรดรอสักครู่ ระบบจะอัปเดตสถานะเมื่อร้านยืนยัน",
         anim: "animate-soft-pulse",
       };
@@ -364,9 +346,6 @@ export default function OrderStatusPage() {
       <header className="space-y-2 text-center">
         <p className="text-sm font-semibold text-primary/80">ติดตามออเดอร์ของคุณ</p>
         <h1 className="text-3xl font-bold tracking-tight">สถานะออเดอร์</h1>
-        <p className="text-sm text-muted-foreground">
-          ดูความคืบหน้าการเตรียมสินค้า ชำระเงิน และอัปโหลดสลิปได้จากหน้านี้
-        </p>
       </header>
 
       {error ? (
@@ -375,6 +354,7 @@ export default function OrderStatusPage() {
         </div>
       ) : null}
 
+      {/* 1) Current status summary */}
       {banner ? (
         <div
           className={cn(
@@ -460,55 +440,12 @@ export default function OrderStatusPage() {
 
             <div className="flex flex-wrap gap-2">
               <span className="rounded-full bg-primary/10 px-3 py-1 text-xs font-semibold text-primary">
-                {EXTRA_STATUS_LABELS[normalizedStatus] ?? statusData.order_status}
+                {customerOrderStatus(statusData.order_status).label}
               </span>
               <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-800">
-                {paymentStatusLabel(statusData.payment_status)}
+                {customerPaymentStatus(statusData.payment_status).label}
               </span>
             </div>
-
-            <ol className="relative space-y-1">
-              {timelineSteps.map((step, idx) => (
-                <li key={step.key} className="flex items-stretch gap-3">
-                  <div className="flex flex-col items-center">
-                    <span
-                      className={cn(
-                        "flex h-7 w-7 items-center justify-center rounded-full text-xs font-semibold transition-colors",
-                        step.active
-                          ? "bg-primary text-primary-foreground animate-ring-pulse"
-                          : step.completed
-                            ? "bg-primary/20 text-primary animate-check-pop"
-                            : "bg-muted text-muted-foreground",
-                      )}
-                      aria-current={step.active ? "step" : undefined}
-                    >
-                      {step.completed ? "✓" : step.active ? "•" : idx + 1}
-                    </span>
-                    {idx < timelineSteps.length - 1 ? (
-                      <span
-                        className={cn(
-                          "my-1 w-0.5 flex-1",
-                          step.completed ? "bg-primary/30" : "bg-muted",
-                        )}
-                        aria-hidden
-                      />
-                    ) : null}
-                  </div>
-                  <p
-                    className={cn(
-                      "py-0.5 text-sm",
-                      step.active
-                        ? "font-semibold text-foreground"
-                        : step.completed
-                          ? "font-medium text-foreground/80"
-                          : "text-muted-foreground",
-                    )}
-                  >
-                    {step.label}
-                  </p>
-                </li>
-              ))}
-            </ol>
           </div>
         ) : (
           <div className="space-y-2 text-center text-sm text-muted-foreground">
@@ -518,6 +455,120 @@ export default function OrderStatusPage() {
         )}
       </section>
 
+      {/* 2) Payment action/status — the customer's main task sits high on the page */}
+      {statusData ? (
+        <section className="space-y-4">
+          <div
+            className={cn(
+              "rounded-2xl",
+              !isPaid && !isPendingReview && canUploadSlip && "animate-soft-pulse ring-2 ring-amber-200 ring-offset-2",
+            )}
+          >
+            {!isPaid ? renderInstructionCard() : null}
+          </div>
+
+          <div className="rounded-2xl border bg-white p-5 shadow-sm">
+            <h2 className="text-base font-semibold">อัปโหลดสลิปการโอน</h2>
+            {uploadState === "success" ? (
+              <p className="mt-2 rounded-xl bg-emerald-50 px-4 py-2 text-sm text-emerald-700">
+                ส่งหลักฐานเรียบร้อย — ร้านจะตรวจสอบและยืนยันออเดอร์ของคุณโดยเร็ว
+              </p>
+            ) : null}
+            {isPaid ? (
+              <p className="mt-2 rounded-xl bg-emerald-50 px-4 py-2 text-sm text-emerald-700">
+                ร้านยืนยันการชำระเงินแล้ว ขอบคุณค่ะ
+              </p>
+            ) : isPendingReview && hasSubmittedSlip ? (
+              <div className="mt-3 overflow-hidden rounded-xl border border-sky-200 bg-sky-50 p-4">
+                <div className="flex items-center gap-2 text-sm font-medium text-sky-800">
+                  <span className="flex h-2.5 w-2.5 animate-soft-pulse rounded-full bg-sky-500" aria-hidden />
+                  ร้านกำลังตรวจสอบการชำระเงินของคุณ
+                </div>
+                <div className="relative mt-3 h-2 overflow-hidden rounded-full bg-sky-100">
+                  <div className="absolute inset-y-0 left-0 w-1/3 animate-shimmer rounded-full bg-gradient-to-r from-transparent via-sky-300 to-transparent" />
+                </div>
+                <p className="mt-2 text-xs text-sky-700/80">ระบบจะอัปเดตสถานะให้อัตโนมัติเมื่อร้านยืนยัน</p>
+              </div>
+            ) : canUploadSlip ? (
+              <form onSubmit={handleUpload} className="mt-3 space-y-3">
+                <p className="text-sm text-muted-foreground">
+                  แนบหลักฐานการโอนเงิน (สลิป) เพื่อให้ร้านตรวจสอบและยืนยันออเดอร์ของคุณ
+                </p>
+                {isRejected ? (
+                  <div className="animate-gentle-shake rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+                    <p className="font-semibold">หลักฐานการชำระเงินไม่ผ่าน</p>
+                    <p className="mt-0.5 text-xs">
+                      {statusData.payment.reject_reason
+                        ? `เหตุผล: ${statusData.payment.reject_reason}`
+                        : "กรุณาตรวจสอบยอดโอนและอัปโหลดสลิปใหม่อีกครั้ง"}
+                    </p>
+                  </div>
+                ) : null}
+                <input
+                  type="file"
+                  accept={(instructions?.allowed_file_types ?? []).join(",")}
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    setSelectedFile(file ?? null);
+                  }}
+                  className="w-full rounded-xl border px-3 py-2 text-sm file:mr-4 file:rounded-full file:border-0 file:bg-primary/10 file:px-4 file:py-1 file:text-sm file:font-semibold file:text-primary"
+                />
+                <p className="text-xs text-muted-foreground">
+                  รองรับไฟล์ JPG / PNG / WEBP ขนาดไม่เกิน {instructions?.max_file_mb ?? 5}MB —
+                  หลังอัปโหลด ร้านจะตรวจสอบยอดโอนและยืนยันออเดอร์
+                </p>
+                {uploadError ? (
+                  <p className="text-sm text-destructive">{uploadError}</p>
+                ) : null}
+                <button
+                  type="submit"
+                  disabled={uploadState === "uploading" || !selectedFile}
+                  className="inline-flex w-full items-center justify-center rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-60"
+                >
+                  {uploadState === "uploading"
+                    ? "กำลังอัปโหลด..."
+                    : isRejected
+                      ? "อัปโหลดสลิปใหม่อีกครั้ง"
+                      : "ส่งหลักฐานการโอน"}
+                </button>
+                <p className="text-xs text-muted-foreground">
+                  หลักฐานการชำระเงินจะถูกใช้เพื่อการตรวจสอบยอดโอนและยืนยันคำสั่งซื้อเท่านั้น
+                </p>
+              </form>
+            ) : (
+              <p className="mt-2 rounded-xl bg-muted/30 px-4 py-2 text-sm text-muted-foreground">
+                ไม่สามารถอัปโหลดสลิปได้ในสถานะปัจจุบัน
+              </p>
+            )}
+          </div>
+
+          <div className="rounded-2xl border bg-white p-5 shadow-sm">
+            <h2 className="text-base font-semibold">สถานะการชำระเงิน</h2>
+            <div className="mt-3 grid gap-3 md:grid-cols-2">
+              <div className="rounded-xl bg-muted/40 p-3 text-sm">
+                <p className="text-muted-foreground">สถานะ</p>
+                <p className="text-base font-semibold">{customerPaymentStatus(statusData.payment.status).label}</p>
+                <p className="text-xs text-muted-foreground">
+                  {statusData.payment.slip_submitted
+                    ? `แนบล่าสุดเมื่อ ${statusData.payment.last_submitted_at ?? "-"}`
+                    : "ยังไม่ส่งหลักฐานการโอน"}
+                </p>
+                {statusData.payment.reject_reason ? (
+                  <p className="mt-2 rounded-lg bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                    เหตุผลการปฏิเสธ: {statusData.payment.reject_reason}
+                  </p>
+                ) : null}
+              </div>
+              <div className="rounded-xl bg-muted/40 p-3 text-sm">
+                <p className="text-muted-foreground">ยอดที่ต้องชำระ</p>
+                <p className="text-base font-semibold">{formatCurrency(statusData.payment.amount)}</p>
+              </div>
+            </div>
+          </div>
+        </section>
+      ) : null}
+
+      {/* 3) Order item summary */}
       {statusData ? (
         <section className="rounded-2xl border bg-white p-5 shadow-sm">
           <h2 className="text-base font-semibold">สรุปรายการสินค้า</h2>
@@ -558,173 +609,114 @@ export default function OrderStatusPage() {
         </section>
       ) : null}
 
+      {/* 4) Simple progress timeline */}
       {statusData ? (
-        <section className="space-y-4">
-          <div className="rounded-2xl border bg-white p-5 shadow-sm">
-            <h2 className="text-base font-semibold">การชำระเงิน</h2>
-            <div className="mt-3 grid gap-3 md:grid-cols-2">
-              <div className="rounded-xl bg-muted/40 p-3 text-sm">
-                <p className="text-muted-foreground">สถานะการชำระเงิน</p>
-                <p className="text-base font-semibold">{paymentStatusLabel(statusData.payment.status)}</p>
-                <p className="text-xs text-muted-foreground">
-                  {statusData.payment.slip_submitted
-                    ? `แนบล่าสุดเมื่อ ${statusData.payment.last_submitted_at ?? "-"}`
-                    : "ยังไม่ส่งหลักฐานการโอน"}
-                </p>
-                {statusData.payment.reject_reason ? (
-                  <p className="mt-2 rounded-lg bg-destructive/10 px-3 py-2 text-xs text-destructive">
-                    เหตุผลการปฏิเสธ: {statusData.payment.reject_reason}
-                  </p>
-                ) : null}
-              </div>
-              <div className="rounded-xl bg-muted/40 p-3 text-sm">
-                <p className="text-muted-foreground">ช่องทางที่ใช้แจ้ง</p>
-                <p className="text-base font-semibold capitalize">{statusData.payment.method}</p>
-                <p className="text-xs text-muted-foreground">
-                  จำนวน {formatCurrency(statusData.payment.amount)}
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <div
-            className={cn(
-              "rounded-2xl",
-              !isPaid && !isPendingReview && canUploadSlip && "animate-soft-pulse ring-2 ring-amber-200 ring-offset-2",
-            )}
-          >
-            {renderInstructionCard()}
-          </div>
-
-          {instructions?.enabled ? (
-            <div className="rounded-2xl border bg-white p-5 shadow-sm">
-              <h2 className="text-base font-semibold">อัปโหลดสลิปการโอน</h2>
-              {isPaid ? (
-                <p className="mt-2 rounded-xl bg-emerald-50 px-4 py-2 text-sm text-emerald-700">
-                  ร้านยืนยันการชำระเงินแล้ว ขอบคุณค่ะ
-                </p>
-              ) : isPendingReview && hasSubmittedSlip ? (
-                <div className="mt-3 overflow-hidden rounded-xl border border-sky-200 bg-sky-50 p-4">
-                  <div className="flex items-center gap-2 text-sm font-medium text-sky-800">
-                    <span className="flex h-2.5 w-2.5 animate-soft-pulse rounded-full bg-sky-500" aria-hidden />
-                    ร้านกำลังตรวจสอบสลิปของคุณ
-                  </div>
-                  <div className="relative mt-3 h-2 overflow-hidden rounded-full bg-sky-100">
-                    <div className="absolute inset-y-0 left-0 w-1/3 animate-shimmer rounded-full bg-gradient-to-r from-transparent via-sky-300 to-transparent" />
-                  </div>
-                  <p className="mt-2 text-xs text-sky-700/80">ระบบจะอัปเดตสถานะให้อัตโนมัติเมื่อร้านยืนยัน</p>
-                </div>
-              ) : canUploadSlip ? (
-                <form onSubmit={handleUpload} className="mt-3 space-y-3">
-                  {isRejected ? (
-                    <div className="animate-gentle-shake rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
-                      <p className="font-semibold">สลิปไม่ผ่านการตรวจสอบ</p>
-                      <p className="mt-0.5 text-xs">
-                        {statusData.payment.reject_reason
-                          ? `เหตุผล: ${statusData.payment.reject_reason}`
-                          : "กรุณาตรวจสอบยอดโอนและอัปโหลดสลิปใหม่อีกครั้ง"}
-                      </p>
-                    </div>
-                  ) : null}
-                  <input
-                    type="file"
-                    accept={(instructions?.allowed_file_types ?? []).join(",")}
-                    onChange={(event) => {
-                      const file = event.target.files?.[0];
-                      setSelectedFile(file ?? null);
-                    }}
-                    className="w-full rounded-xl border px-3 py-2 text-sm file:mr-4 file:rounded-full file:border-0 file:bg-primary/10 file:px-4 file:py-1 file:text-sm file:font-semibold file:text-primary"
-                  />
-                  {uploadError ? (
-                    <p className="text-sm text-destructive">{uploadError}</p>
-                  ) : null}
-                  <button
-                    type="submit"
-                    disabled={uploadState === "uploading" || !selectedFile}
-                    className="inline-flex w-full items-center justify-center rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-60"
+        <section className="rounded-2xl border bg-white p-5 shadow-sm">
+          <h2 className="text-base font-semibold">ความคืบหน้า</h2>
+          <ol className="relative mt-3 space-y-1">
+            {timelineSteps.map((step, idx) => (
+              <li key={step.key} className="flex items-stretch gap-3">
+                <div className="flex flex-col items-center">
+                  <span
+                    className={cn(
+                      "flex h-7 w-7 items-center justify-center rounded-full text-xs font-semibold transition-colors",
+                      step.active
+                        ? "bg-primary text-primary-foreground animate-ring-pulse"
+                        : step.completed
+                          ? "bg-primary/20 text-primary animate-check-pop"
+                          : "bg-muted text-muted-foreground",
+                    )}
+                    aria-current={step.active ? "step" : undefined}
                   >
-                    {uploadState === "uploading"
-                      ? "กำลังอัปโหลด..."
-                      : isRejected
-                        ? "อัปโหลดสลิปใหม่อีกครั้ง"
-                        : "ส่งหลักฐานการโอน"}
-                  </button>
-                  <p className="text-xs text-muted-foreground">
-                    หลักฐานการชำระเงินจะถูกใช้เพื่อการตรวจสอบยอดโอนและยืนยันคำสั่งซื้อเท่านั้น
-                  </p>
-                </form>
-              ) : (
-                <p className="mt-2 rounded-xl bg-muted/30 px-4 py-2 text-sm text-muted-foreground">
-                  ไม่สามารถอัปโหลดสลิปได้ในสถานะปัจจุบัน
+                    {step.completed ? "✓" : step.active ? "•" : idx + 1}
+                  </span>
+                  {idx < timelineSteps.length - 1 ? (
+                    <span
+                      className={cn(
+                        "my-1 w-0.5 flex-1",
+                        step.completed ? "bg-primary/30" : "bg-muted",
+                      )}
+                      aria-hidden
+                    />
+                  ) : null}
+                </div>
+                <p
+                  className={cn(
+                    "py-0.5 text-sm",
+                    step.active
+                      ? "font-semibold text-foreground"
+                      : step.completed
+                        ? "font-medium text-foreground/80"
+                        : "text-muted-foreground",
+                  )}
+                >
+                  {step.label}
                 </p>
-              )}
-            </div>
-          ) : null}
+              </li>
+            ))}
+          </ol>
         </section>
       ) : null}
 
-      <section className="rounded-2xl border bg-white p-5 shadow-sm">
-        <h2 className="text-base font-semibold">ค้นหาสถานะด้วยเลขออเดอร์</h2>
-        <p className="text-sm text-muted-foreground">
-          กรอกเลขออเดอร์และเบอร์โทรศัพท์ที่ใช้สั่งซื้อเพื่อดึงข้อมูลล่าสุด
-        </p>
-        <form onSubmit={handleLookup} className="mt-4 space-y-3">
-          <div>
-            <label className="text-sm font-medium" htmlFor="order-no">
-              เลขออเดอร์
-            </label>
-            <input
-              id="order-no"
-              value={lookupOrderNo}
-              onChange={(event) => setLookupOrderNo(event.target.value)}
-              className="mt-1 w-full rounded-xl border px-3 py-2 text-sm focus:border-primary focus:outline-none"
-              placeholder="เช่น ORD-20240601-ABCD"
-            />
-          </div>
-          <div>
-            <label className="text-sm font-medium" htmlFor="phone">
-              เบอร์โทรศัพท์ที่ใช้สั่งซื้อ
-            </label>
-            <input
-              id="phone"
-              type="tel"
-              inputMode="tel"
-              value={lookupPhone}
-              onChange={(event) => setLookupPhone(event.target.value)}
-              className="mt-1 w-full rounded-xl border px-3 py-2 text-sm focus:border-primary focus:outline-none"
-              placeholder="08xxxxxxxx"
-            />
-          </div>
-          <button
-            type="submit"
-            className="inline-flex w-full items-center justify-center rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-60"
-            disabled={loading}
-          >
-            {loading ? "กำลังตรวจสอบ..." : "ดึงสถานะล่าสุด"}
-          </button>
-        </form>
-      </section>
+      {/* Manual search — only when the visitor has no direct status link/order loaded */}
+      {showSearchForm ? (
+        <section className="rounded-2xl border bg-white p-5 shadow-sm">
+          <h2 className="text-base font-semibold">ค้นหาสถานะด้วยเลขออเดอร์</h2>
+          <p className="text-sm text-muted-foreground">
+            กรอกเลขออเดอร์และเบอร์โทรศัพท์ที่ใช้สั่งซื้อเพื่อดึงข้อมูลล่าสุด
+          </p>
+          <form onSubmit={handleLookup} className="mt-4 space-y-3">
+            <div>
+              <label className="text-sm font-medium" htmlFor="order-no">
+                เลขออเดอร์
+              </label>
+              <input
+                id="order-no"
+                value={lookupOrderNo}
+                onChange={(event) => setLookupOrderNo(event.target.value)}
+                className="mt-1 w-full rounded-xl border px-3 py-2 text-sm focus:border-primary focus:outline-none"
+                placeholder="เช่น ORD-20240601-ABCD"
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium" htmlFor="phone">
+                เบอร์โทรศัพท์ที่ใช้สั่งซื้อ
+              </label>
+              <input
+                id="phone"
+                type="tel"
+                inputMode="tel"
+                value={lookupPhone}
+                onChange={(event) => setLookupPhone(event.target.value)}
+                className="mt-1 w-full rounded-xl border px-3 py-2 text-sm focus:border-primary focus:outline-none"
+                placeholder="08xxxxxxxx"
+              />
+            </div>
+            <button
+              type="submit"
+              className="inline-flex w-full items-center justify-center rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-60"
+              disabled={loading}
+            >
+              {loading ? "กำลังตรวจสอบ..." : "ดึงสถานะล่าสุด"}
+            </button>
+          </form>
+        </section>
+      ) : null}
 
-      <section className="rounded-2xl border border-dashed bg-white/70 p-5 text-sm text-muted-foreground">
-        <p>
-          ระบบแจ้งเตือนผ่าน LINE ยังคงเป็นโหมดทดสอบ หากไม่ได้รับการแจ้งเตือน กรุณาตรวจสอบผ่านหน้านี้หรือสอบถามร้านค้าโดยตรง
-        </p>
-      </section>
-
+      {/* 5) Secondary actions */}
       <div className="flex flex-wrap gap-3">
         <Link
-          to="/order"
+          to="/liff/menu"
           className="flex-1 rounded-full border border-primary/40 px-4 py-2 text-center text-sm font-semibold text-primary"
         >
-          กลับไปสั่งเมนูใหม่
-        </Link>
-        <Link
-          to="/liff/menu"
-          className="flex-1 rounded-full bg-primary px-4 py-2 text-center text-sm font-semibold text-primary-foreground"
-        >
-          เปิดหน้าเมนูแบบเต็ม
+          สั่งเพิ่ม
         </Link>
       </div>
+
+      {/* Soft dev-mode note — intentionally low-key and at the bottom */}
+      <p className="text-center text-xs text-muted-foreground/80">
+        การแจ้งเตือนผ่าน LINE อยู่ระหว่างทดสอบ หากไม่ได้รับข้อความ สามารถติดตามสถานะได้จากหน้านี้หรือสอบถามร้านค้าโดยตรง
+      </p>
     </div>
   );
 }

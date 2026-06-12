@@ -97,15 +97,18 @@ export default function ScenarioPage() {
         {/* ── Page Header ─────────────────────────────── */}
         <div className="page-header">
           <div>
-            <h1 className="page-title">จำลองสถานการณ์</h1>
-            <p className="page-subtitle">ปรับตัวแปรและเปรียบเทียบผลลัพธ์กับข้อมูลปัจจุบัน</p>
+            <h1 className="page-title">วางแผนกำไร</h1>
+            <p className="page-subtitle">
+              เครื่องมือจำลองสถานการณ์ — ปรับราคา ต้นทุน และเป้ากำไร เพื่อดูจุดคุ้มทุนและยอดขายที่ต้องทำ
+            </p>
           </div>
         </div>
 
         <div className="guidance-card flex items-start gap-2">
           <Info className="w-4 h-4 text-accent flex-shrink-0 mt-0.5" />
           <p className="text-sm text-foreground">
-            ค่าเริ่มต้นดึงจากข้อมูลร้านและเมนูที่กรอกใน Onboarding ปรับค่าในฝั่งซ้ายและดูผลลัพธ์ฝั่งขวาทันที สถานการณ์ที่บันทึกจะถูกเก็บไว้แม้ปิดหน้าต่าง
+            หน้านี้เป็นการจำลองเพื่อการวางแผน ไม่ใช่รายงานยอดขายจริง — ค่าเริ่มต้นดึงจากข้อมูลร้านและเมนูที่กรอกใน
+            Onboarding ปรับค่าในฝั่งซ้ายและดูผลลัพธ์ฝั่งขวาทันที สถานการณ์ที่บันทึกจะถูกเก็บไว้ในเครื่องนี้แม้ปิดหน้าต่าง
           </p>
         </div>
 

@@ -56,6 +56,38 @@ import SystemHealthPage from "./pages/system/SystemHealth";
 
 const queryClient = new QueryClient();
 const shouldRedirectStoreReports = !import.meta.env.DEV;
+/**
+ * POS is a prototype/local tool (localStorage only — no backend orders, payments,
+ * or report sync). It is deferred from production workflows until a real
+ * Manual Sales Entry / Sales Import feature exists. In production builds the
+ * POS routes redirect to safe canonical destinations.
+ */
+export function isPosDeferred(isDevBuild: boolean): boolean {
+  return !isDevBuild;
+}
+const shouldDeferPos = isPosDeferred(Boolean(import.meta.env.DEV));
+
+/**
+ * Legacy /app/* config pages (menu, channels, channel-pricing, ingredients,
+ * recipes) read Supabase but WRITE only to localStorage — they are prototypes.
+ * The canonical, backend-backed config workspace is /store-admin/*.
+ * In production the legacy routes redirect to canonical so two pages can never
+ * update two different data sources.
+ */
+export function shouldRedirectLegacyConfig(isDevBuild: boolean): boolean {
+  return !isDevBuild;
+}
+const redirectLegacyConfig = shouldRedirectLegacyConfig(Boolean(import.meta.env.DEV));
+
+function legacyOrCanonical(legacyElement: React.ReactNode, canonicalPath: string) {
+  return redirectLegacyConfig ? <Navigate to={canonicalPath} replace /> : legacyElement;
+}
+
+/** Legacy alias: /app/scenario → canonical Profit Planning route. */
+export function ScenarioLegacyRedirect() {
+  const location = useLocation();
+  return <Navigate to={{ pathname: "/app/planning", search: location.search, hash: location.hash }} replace />;
+}
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -116,7 +148,17 @@ function AppRoutes() {
       <Route path="/store-admin/recipes" element={<ManagerRoute><StoreAdminRecipesPage /></ManagerRoute>} />
       <Route path="/store-admin/channels" element={<ManagerRoute><AdminSalesChannelsPage /></ManagerRoute>} />
       <Route path="/store-admin/channel-pricing" element={<ManagerRoute><StoreAdminChannelPricingPage /></ManagerRoute>} />
-      <Route path="/store-admin/pos" element={<AdminRoute><StoreAdminPOSPage /></AdminRoute>} />
+      {/* Store-admin POS placeholder: dev-only. In production it redirects to the store dashboard. */}
+      <Route
+        path="/store-admin/pos"
+        element={
+          shouldDeferPos ? (
+            <Navigate to="/store-admin" replace />
+          ) : (
+            <AdminRoute><StoreAdminPOSPage /></AdminRoute>
+          )
+        }
+      />
       <Route path="/store-admin/orders" element={<AdminRoute><AdminOrdersPage /></AdminRoute>} />
       <Route path="/store-admin/orders/:id" element={<AdminRoute><AdminOrderDetailPage /></AdminRoute>} />
       <Route path="/store-admin/customers" element={<AdminRoute><CustomersPage /></AdminRoute>} />
@@ -146,18 +188,52 @@ function AppRoutes() {
       <Route path="/system/audit-logs" element={<SystemRoute><SystemAuditLogsPage /></SystemRoute>} />
 
       <Route path="/app/dashboard" element={<ProtectedRoute><BusinessRoute><Dashboard /></BusinessRoute></ProtectedRoute>} />
-      <Route path="/app/scenario" element={<ProtectedRoute><BusinessRoute><Scenario /></BusinessRoute></ProtectedRoute>} />
+      {/* Canonical Profit Planning route — core business engine of Valora */}
+      <Route path="/app/planning" element={<ProtectedRoute><BusinessRoute><Scenario /></BusinessRoute></ProtectedRoute>} />
+      <Route path="/app/scenario" element={<ScenarioLegacyRedirect />} />
       <Route path="/app/promo" element={<ProtectedRoute><BusinessRoute><Promo /></BusinessRoute></ProtectedRoute>} />
       <Route path="/app/delivery" element={<ProtectedRoute><BusinessRoute><Delivery /></BusinessRoute></ProtectedRoute>} />
       <Route path="/app/reports" element={<ProtectedRoute><BusinessRoute><Reports /></BusinessRoute></ProtectedRoute>} />
-      <Route path="/app/menu" element={<ProtectedRoute><BusinessRoute><MenuManagement /></BusinessRoute></ProtectedRoute>} />
-      <Route path="/app/ingredients" element={<ProtectedRoute><BusinessRoute><IngredientsStock /></BusinessRoute></ProtectedRoute>} />
-      <Route path="/app/recipes" element={<ProtectedRoute><BusinessRoute><RecipeCosting /></BusinessRoute></ProtectedRoute>} />
-      <Route path="/app/channels" element={<ProtectedRoute><BusinessRoute><SalesChannels /></BusinessRoute></ProtectedRoute>} />
-      <Route path="/app/channel-pricing" element={<ProtectedRoute><BusinessRoute><ChannelPricing /></BusinessRoute></ProtectedRoute>} />
-      <Route path="/app/pos" element={<ProtectedRoute><BusinessRoute><POSManualOrder /></BusinessRoute></ProtectedRoute>} />
-      <Route path="/app/orders" element={<ProtectedRoute><BusinessRoute><OrdersPage /></BusinessRoute></ProtectedRoute>} />
-      <Route path="/app/orders/:id" element={<ProtectedRoute><BusinessRoute><OrderDetailPage /></BusinessRoute></ProtectedRoute>} />
+      {/* Legacy config prototypes — redirect to canonical /store-admin/* in production */}
+      <Route path="/app/menu" element={legacyOrCanonical(<ProtectedRoute><BusinessRoute><MenuManagement /></BusinessRoute></ProtectedRoute>, "/store-admin/menus")} />
+      <Route path="/app/ingredients" element={legacyOrCanonical(<ProtectedRoute><BusinessRoute><IngredientsStock /></BusinessRoute></ProtectedRoute>, "/store-admin/ingredients")} />
+      <Route path="/app/recipes" element={legacyOrCanonical(<ProtectedRoute><BusinessRoute><RecipeCosting /></BusinessRoute></ProtectedRoute>, "/store-admin/recipes")} />
+      <Route path="/app/channels" element={legacyOrCanonical(<ProtectedRoute><BusinessRoute><SalesChannels /></BusinessRoute></ProtectedRoute>, "/store-admin/channels")} />
+      <Route path="/app/channel-pricing" element={legacyOrCanonical(<ProtectedRoute><BusinessRoute><ChannelPricing /></BusinessRoute></ProtectedRoute>, "/store-admin/channel-pricing")} />
+      {/* POS prototype: dev-only. In production it redirects to Profit Planning. */}
+      <Route
+        path="/app/pos"
+        element={
+          shouldDeferPos ? (
+            <Navigate to="/app/planning" replace />
+          ) : (
+            <ProtectedRoute><BusinessRoute><POSManualOrder /></BusinessRoute></ProtectedRoute>
+          )
+        }
+      />
+      {/* /app/orders is a localStorage prototype (same mock orderService as POS).
+          The real, backend-backed order workspace is /store-admin/orders — in
+          production these routes redirect there. */}
+      <Route
+        path="/app/orders"
+        element={
+          shouldDeferPos ? (
+            <Navigate to="/store-admin/orders" replace />
+          ) : (
+            <ProtectedRoute><BusinessRoute><OrdersPage /></BusinessRoute></ProtectedRoute>
+          )
+        }
+      />
+      <Route
+        path="/app/orders/:id"
+        element={
+          shouldDeferPos ? (
+            <Navigate to="/store-admin/orders" replace />
+          ) : (
+            <ProtectedRoute><BusinessRoute><OrderDetailPage /></BusinessRoute></ProtectedRoute>
+          )
+        }
+      />
       <Route path="/app/settings" element={<ProtectedRoute><BusinessRoute><Settings /></BusinessRoute></ProtectedRoute>} />
 
       <Route path="/order" element={<CustomerMenuPage />} />

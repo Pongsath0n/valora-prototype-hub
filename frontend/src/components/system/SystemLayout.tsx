@@ -2,7 +2,6 @@ import { NavLink, useNavigate } from "react-router-dom";
 import {
   Activity,
   ArrowLeft,
-  Database,
   FileText,
   LogOut,
   Menu,
@@ -21,7 +20,8 @@ const systemNav = [
   { title: "จัดการสิทธิ์", path: "/system/roles", icon: ShieldCheck },
   { title: "ตรวจสอบระบบ", path: "/system/health", icon: Activity },
   { title: "บันทึกเหตุการณ์", path: "/system/audit-logs", icon: FileText },
-  { title: "Storage Check", path: "/system/health#storage", icon: Database },
+  // "Storage Check" duplicate removed — storage status lives inside the
+  // Health Check page (/system/health#storage); /system/storage still redirects there.
 ];
 
 function SystemNavItem({
@@ -101,11 +101,11 @@ export default function SystemLayout({
             บัญชี
           </p>
           <NavLink
-            to="/store-admin"
+            to="/app/dashboard"
             className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-sidebar-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground transition-colors cursor-pointer"
           >
             <ArrowLeft className="w-4 h-4 flex-shrink-0" />
-            <span>กลับไป Store Admin</span>
+            <span>กลับไปแดชบอร์ดธุรกิจ</span>
           </NavLink>
           <button
             type="button"
@@ -148,12 +148,12 @@ export default function SystemLayout({
             ))}
             <div className="pt-3 mt-3 border-t border-sidebar-border space-y-0.5">
               <NavLink
-                to="/store-admin"
+                to="/app/dashboard"
                 onClick={() => setSidebarOpen(false)}
                 className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-sidebar-foreground hover:bg-sidebar-accent/60 transition-colors"
               >
                 <ArrowLeft className="w-4 h-4" />
-                กลับไป Store Admin
+                กลับไปแดชบอร์ดธุรกิจ
               </NavLink>
               <button
                 type="button"
