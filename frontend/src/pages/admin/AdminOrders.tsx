@@ -170,7 +170,17 @@ export default function AdminOrdersPage() {
   const filteredOrders = useMemo(() => {
     const query = searchText.trim().toLowerCase();
     const tab = statusTabs.find((t) => t.key === activeTab);
-    const base = tab ? rows.filter((r) => tab.filter.includes(r.status)) : rows;
+    const base = tab
+      ? rows.filter((r) => {
+          const statusMatch = tab.filter.includes(r.status);
+          if (activeTab === "queue") {
+            const isTerminal = ["completed", "cancelled", "rejected"].includes(r.status);
+            const paymentMatch = ["waiting_payment_review", "pending_review"].includes(r.payment_status);
+            return (statusMatch || paymentMatch) && !isTerminal;
+          }
+          return statusMatch;
+        })
+      : rows;
     const searched = query
       ? base.filter((order) => {
           const shortId = order.id.slice(-6).toLowerCase();
