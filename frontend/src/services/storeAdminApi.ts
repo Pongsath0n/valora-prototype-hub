@@ -175,6 +175,7 @@ export type ApiOrder = {
   note?: string | null;
   cancelled_reason?: string | null;
   cancelled_at?: string | null;
+  archived?: boolean;
   created_at?: string;
   updated_at?: string;
   items?: ApiOrderItem[];

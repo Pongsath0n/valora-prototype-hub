@@ -20,6 +20,7 @@ except Exception:  # pragma: no cover
 from app.core.config import settings
 from app.core.supabase import SupabaseConfigurationError, get_supabase_admin_client
 from app.services.notification_sender import send_line_notification
+from app.services.order_numbers import generate_order_number
 from app.services.storage import StorageUploadError, create_signed_slip_url, upload_public_asset
 
 logger = logging.getLogger(__name__)
@@ -39,6 +40,7 @@ OrderStatus = Literal[
     "ready_for_pickup",
     "completed",
     "cancelled",
+    "voided",
 ]
 PaymentStatus = Literal["unpaid", "pending", "pending_review", "paid", "rejected", "refunded"]
 
@@ -242,12 +244,6 @@ class ChannelPriceUpdate(BaseModel):
 
 
 # ─── Menus (products + categories) ─────────────────────────────────────────────
-
-
-def _generate_order_number() -> str:
-    timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
-    suffix = uuid4().hex[:4].upper()
-    return f"ORD-{timestamp}-{suffix}"
 
 
 class ProductCreate(BaseModel):
@@ -790,6 +786,11 @@ def _extract_missing_column(error: Any) -> Optional[str]:
     return matches[0] if matches else None
 
 
+def _is_unique_violation(error: Any, column: str) -> bool:
+    message = str(getattr(error, "message", error) or "").lower()
+    return "duplicate key value" in message and column.lower() in message
+
+
 def _omit_optional_fields(data: Dict[str, Any], optional_keys: List[str]) -> Dict[str, Any]:
     return {k: v for k, v in data.items() if k not in optional_keys}
 
@@ -1065,7 +1066,8 @@ def get_current_user(authorization: Optional[str] = Header(None)) -> Dict[str, A
 @router.get("/channels")
 def list_channels(authorization: Optional[str] = Header(None), store_id: Optional[str] = None) -> Dict[str, Any]:
     ctx = _get_ctx(authorization)
-    store_id_resolved, _role = _resolve_store_id(ctx["memberships"], store_id)
+    store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
+    _require_manager(role)
 
     response = ctx["client"].table("sales_channels").select("id, store_id, name, type, fee_type, fee_value, is_active, created_at").eq("store_id", store_id_resolved).order("created_at", desc=False).execute()
     error = getattr(response, "error", None)
@@ -2414,7 +2416,6 @@ def _sanitize_order_payload(payload: OrderCreate | OrderUpdate, partial: bool = 
         data.setdefault("payment_status", "unpaid")
         data.setdefault("order_type", "pickup")
         data.setdefault("pickup_type", "pickup")
-        data.setdefault("order_no", _generate_order_number())
 
     return data
 
@@ -2903,6 +2904,8 @@ def _map_order(
         customer_name = inline_customer_name
     order_no = row.get("order_no") or row.get("order_number")
     order_status = row.get("order_status") or row.get("status")
+    normalized_status = normalize_order_status(order_status)
+    archived = normalized_status in CANCELLED_ORDER_STATUSES or bool(row.get("cancelled_at"))
     customer_phone = row.get("customer_phone")
     return {
         "id": str(row.get("id")),
@@ -2931,6 +2934,7 @@ def _map_order(
         "cancelled_at": row.get("cancelled_at"),
         "created_at": row.get("created_at"),
         "updated_at": row.get("updated_at"),
+        "archived": archived,
         "latest_payment": latest_payment,
     }
 
@@ -3294,7 +3298,13 @@ def _write_order_status_log(
 
 
 def _get_order_row(client: Client, order_id: str, store_id: str) -> Dict[str, Any]:
-    resp = client.table("orders").select("id, store_id, status, payment_status").eq("id", order_id).limit(1).execute()
+    resp = (
+        client.table("orders")
+        .select("id, store_id, status, payment_status, cancelled_reason, cancelled_at")
+        .eq("id", order_id)
+        .limit(1)
+        .execute()
+    )
     error = getattr(resp, "error", None)
     if error:
         raise HTTPException(status_code=500, detail="order_lookup_failed")
@@ -3404,6 +3414,8 @@ def create_order(payload: OrderCreate, authorization: Optional[str] = Header(Non
         _ensure_channel_in_store(ctx["client"], data["channel_id"], store_id_resolved)
 
     data["store_id"] = store_id_resolved
+    if not data.get("order_no"):
+        data["order_no"] = generate_order_number(ctx["client"])
     data.pop("items", None)
     logger.warning("creating order with payload: %s", data)
 
@@ -3422,6 +3434,9 @@ def create_order(payload: OrderCreate, authorization: Optional[str] = Header(Non
         if missing_col and missing_col in attempt_data:
             logger.warning("orders insert missing column %s; retrying without it", missing_col)
             attempt_data.pop(missing_col, None)
+            continue
+        if _is_unique_violation(error, "order_no"):
+            attempt_data["order_no"] = generate_order_number(ctx["client"])
             continue
         message = getattr(error, "message", str(error))
         logger.error("order_create_failed: %s", message)
@@ -3580,22 +3595,64 @@ def delete_order(order_id: str, authorization: Optional[str] = Header(None), sto
     store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
     _require_manager(role)
 
-    _get_order_row(ctx["client"], order_id, store_id_resolved)
+    order_row = _get_order_row(ctx["client"], order_id, store_id_resolved)
+    current_status = normalize_order_status(order_row.get("status"))
+    current_payment_status = normalize_payment_status(order_row.get("payment_status"))
 
-    pay_resp = ctx["client"].table("payments").select("id").eq("store_id", store_id_resolved).eq("order_id", order_id).limit(1).execute()
-    if getattr(pay_resp, "error", None):
+    payments_query = ctx["client"].table("payments").select("id, status").eq("order_id", order_id)
+    if _payments_has_column(ctx["client"], "store_id"):
+        payments_query = payments_query.eq("store_id", store_id_resolved)
+    payments_resp = payments_query.execute()
+    if getattr(payments_resp, "error", None):
         raise HTTPException(status_code=500, detail="payment_lookup_failed")
-    if getattr(pay_resp, "data", None):
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="order_has_payments")
+    payments = getattr(payments_resp, "data", None) or []
 
-    delete_query = ctx["client"].table("order_items").delete().eq("order_id", order_id)
-    if _order_items_supports_store_scope(ctx["client"]):
-        delete_query = delete_query.eq("store_id", store_id_resolved)
-    delete_query.execute()
-    ctx["client"].table("order_status_logs").delete().eq("order_id", order_id).execute()
-    ctx["client"].table("payment_status_logs").delete().eq("order_id", order_id).execute()
-    ctx["client"].table("orders").delete().eq("id", order_id).eq("store_id", store_id_resolved).execute()
-    return {"status": "deleted"}
+    has_confirmed_payment = any(
+        normalize_payment_status(payment.get("status")) in CONFIRMED_PAYMENT_STATUSES for payment in payments
+    ) or current_payment_status in CONFIRMED_PAYMENT_STATUSES
+
+    target_status = "voided" if has_confirmed_payment or current_status == "completed" else "cancelled"
+    already_archived = current_status in CANCELLED_ORDER_STATUSES
+    archive_reason = "archived_by_manager" if target_status == "cancelled" else "voided_by_manager"
+
+    if already_archived and current_status == target_status:
+        return {
+            "id": order_id,
+            "status": "archived",
+            "order_status": current_status,
+            "archived": True,
+            "archived_reason": order_row.get("cancelled_reason") or archive_reason,
+            "archived_at": order_row.get("cancelled_at"),
+        }
+
+    archive_time = datetime.utcnow().isoformat()
+    update_data = {
+        "status": target_status,
+        "cancelled_reason": archive_reason,
+        "cancelled_at": archive_time,
+    }
+
+    resp = ctx["client"].table("orders").update(update_data).eq("id", order_id).eq("store_id", store_id_resolved).execute()
+    if getattr(resp, "error", None):
+        raise HTTPException(status_code=500, detail="order_archive_failed")
+
+    _write_order_status_log(
+        ctx["client"],
+        order_id,
+        str(order_row.get("status") or ""),
+        target_status,
+        ctx.get("user_id"),
+        archive_reason,
+    )
+
+    return {
+        "id": order_id,
+        "status": "archived",
+        "order_status": target_status,
+        "archived": True,
+        "archived_reason": archive_reason,
+        "archived_at": archive_time,
+    }
 
 
 @router.patch("/orders/{order_id}/status")

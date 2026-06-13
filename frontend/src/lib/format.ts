@@ -110,6 +110,7 @@ const ORDER_STATUS_MAP: StatusMap = {
   paid: { label: "ชำระเงินแล้ว", tone: "success" },
   fulfilled: { label: "จัดส่งแล้ว", tone: "success" },
   cancelled: { label: "ยกเลิกแล้ว", tone: "danger" },
+  voided: { label: "ยกเลิก (Void)", tone: "danger" },
   rejected: { label: "ถูกปฏิเสธ", tone: "danger" },
   draft: { label: "ฉบับร่าง", tone: "neutral" },
 };

@@ -14,6 +14,7 @@ from supabase import Client
 from app.core.config import settings
 from app.core.supabase import SupabaseConfigurationError, get_supabase_admin_client
 from app.services.storage import StorageUploadError, upload_payment_slip as storage_upload_payment_slip
+from app.services.order_numbers import generate_order_number
 
 logger = logging.getLogger(__name__)
 
@@ -62,12 +63,6 @@ def _extract_missing_column(error: Any) -> Optional[str]:
     if m:
         return m.group(1)
     return None
-
-
-def _generate_order_number() -> str:
-    timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
-    suffix = uuid4().hex[:4].upper()
-    return f"ORD-{timestamp}-{suffix}"
 
 
 def _generate_public_token() -> str:
@@ -1063,7 +1058,7 @@ def create_customer_order(payload: CustomerOrderCreatePayload) -> Dict[str, Any]
         "total_cost": total_cost,
         "gross_profit": gross_profit,
         "note": str(payload.note or "").strip() or None,
-        "order_no": _generate_order_number(),
+        "order_no": generate_order_number(client),
         "public_token": _generate_public_token(),
         "customer_name": customer_name,
         "customer_phone": normalized_phone,
@@ -1077,7 +1072,7 @@ def create_customer_order(payload: CustomerOrderCreatePayload) -> Dict[str, Any]
         if not order_err:
             break
         if _is_unique_violation(order_err, "order_no"):
-            order_data["order_no"] = _generate_order_number()
+            order_data["order_no"] = generate_order_number(client)
             if attempts < max_attempts:
                 continue
         if _is_unique_violation(order_err, "public_token"):
@@ -1119,6 +1114,15 @@ def create_customer_order(payload: CustomerOrderCreatePayload) -> Dict[str, Any]
         customer_id,
         float(order_row.get("total_amount") or total_amount),
     )
+    try:
+        _write_order_status_log_customer(
+            client,
+            order_id,
+            None,
+            str(order_row.get("status") or "pending_payment"),
+        )
+    except Exception as exc:  # pragma: no cover - non-critical
+        logger.warning("customer_initial_order_log_failed: %s", getattr(exc, "message", str(exc)))
 
     return {
         "order_id": order_id,
@@ -1176,23 +1180,31 @@ def lookup_customer_order(payload: CustomerOrderLookupPayload) -> Dict[str, Any]
 
 
 @router.get("/orders/{order_id}")
-def get_customer_order(order_id: str, store_id: Optional[str] = Query(default=None)) -> Dict[str, Any]:
+def get_customer_order(order_id: str, token: Optional[str] = Query(default=None), store_id: Optional[str] = Query(default=None)) -> Dict[str, Any]:
     try:
         UUID(order_id)
     except ValueError:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="order_not_found")
 
-    client = _get_client()
+    token_value = str(token or "").strip()
+    if not token_value:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="token_required")
 
-    store_id_resolved = store_id
-    if not store_id_resolved:
-        lookup = client.table("orders").select("id, store_id").eq("id", order_id).limit(1).execute()
-        if getattr(lookup, "error", None):
-            raise HTTPException(status_code=500, detail="customer_order_lookup_failed")
-        rows = getattr(lookup, "data", None) or []
-        if not rows:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="order_not_found")
-        store_id_resolved = str(rows[0].get("store_id") or "").strip()
+    client = _get_client()
+    lookup_query = client.table("orders").select("id, store_id, public_token").eq("id", order_id).limit(1)
+    if store_id:
+        lookup_query = lookup_query.eq("store_id", store_id)
+    lookup = lookup_query.execute()
+    if getattr(lookup, "error", None):
+        raise HTTPException(status_code=500, detail="customer_order_lookup_failed")
+    rows = getattr(lookup, "data", None) or []
+    if not rows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="order_not_found")
+    row = rows[0]
+    resolved_token = str(row.get("public_token") or "").strip()
+    if not resolved_token or resolved_token != token_value:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="token_invalid")
+    store_id_resolved = str(row.get("store_id") or "").strip()
     if not store_id_resolved:
         raise HTTPException(status_code=500, detail="store_resolution_failed")
 

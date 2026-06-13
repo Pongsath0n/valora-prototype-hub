@@ -32,6 +32,7 @@ describe("customer-facing status labels", () => {
     expect(customerOrderStatus("ready").label).toBe("พร้อมรับสินค้า");
     expect(customerOrderStatus("completed").label).toBe("รับสินค้าเรียบร้อย");
     expect(customerOrderStatus("cancelled").label).toBe("ยกเลิกแล้ว");
+    expect(customerOrderStatus("voided").label).toBe("ยกเลิกแล้ว");
   });
 
   it("never returns raw internal codes, even for unknown values", () => {

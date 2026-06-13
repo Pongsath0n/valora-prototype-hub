@@ -4,7 +4,7 @@ import DataTable from "@/components/shared/DataTable";
 import LoadingState from "@/components/shared/LoadingState";
 import EmptyState from "@/components/shared/EmptyState";
 import StatusBadge from "@/components/shared/StatusBadge";
-import { loadAuditBuckets, type AuditLogRow } from "@/services/systemConsoleService";
+import { loadAuditBuckets, type AuditLogEntry } from "@/services/systemConsoleService";
 
 type BucketKey = "orders" | "payments" | "line_notifications";
 
@@ -16,7 +16,7 @@ const bucketLabels: Record<BucketKey, string> = {
 
 export default function SystemAuditLogsPage() {
   const [loading, setLoading] = useState(true);
-  const [buckets, setBuckets] = useState<Record<BucketKey, AuditLogRow[]>>({
+  const [buckets, setBuckets] = useState<Record<BucketKey, AuditLogEntry[]>>({
     orders: [],
     payments: [],
     line_notifications: [],
@@ -31,7 +31,7 @@ export default function SystemAuditLogsPage() {
     setErrorMessage(null);
     try {
       const res = await loadAuditBuckets();
-      setBuckets(res.buckets as Record<BucketKey, AuditLogRow[]>);
+      setBuckets(res.buckets as Record<BucketKey, AuditLogEntry[]>);
       setBucketErrors((res.errors ?? {}) as Partial<Record<BucketKey, string>>);
       const hasRows = Object.values(res.buckets).some((rows) => rows.length);
       if (res.status === "ok" && hasRows) {
@@ -120,13 +120,27 @@ export default function SystemAuditLogsPage() {
             {buckets[key].length ? (
               <DataTable
                 columns={[
-                  { key: "id", header: "ID" },
-                  { key: "ref", header: "Ref" },
-                  { key: "status", header: "สถานะ", render: (r) => <StatusBadge label={r.status} tone="info" /> },
+                  { key: "event_type", header: "เหตุการณ์" },
+                  {
+                    key: "reference",
+                    header: "อ้างอิง",
+                    render: (row: AuditLogEntry) => row.payment_id || row.order_id || "-",
+                  },
+                  {
+                    key: "actor",
+                    header: "ผู้กระทำ",
+                    render: (row: AuditLogEntry) =>
+                      row.actor_role ? `${row.actor_role}${row.actor_id ? ` (${row.actor_id})` : ""}` : row.actor_id || "system",
+                  },
+                  {
+                    key: "message",
+                    header: "รายละเอียด",
+                    render: (row: AuditLogEntry) => row.message || "-",
+                  },
                   {
                     key: "created_at",
                     header: "เวลา",
-                    render: (r) => (r.created_at ? new Date(r.created_at).toLocaleString() : "-"),
+                    render: (row: AuditLogEntry) => (row.created_at ? new Date(row.created_at).toLocaleString() : "-"),
                   },
                 ]}
                 rows={buckets[key]}

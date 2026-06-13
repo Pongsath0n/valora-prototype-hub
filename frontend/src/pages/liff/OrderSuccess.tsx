@@ -72,7 +72,12 @@ export default function OrderSuccessPage() {
       try {
         setLoading(true);
         setError(null);
-        const data = await customerApi.getOrder(orderId);
+        const storedToken = getLastOrderToken();
+        if (!storedToken) {
+          throw new Error("ไม่พบโทเคนสำหรับตรวจสอบคำสั่งซื้อ กรุณาใช้ลิงก์สถานะล่าสุด");
+        }
+        setPublicToken(storedToken);
+        const data = await customerApi.getOrder(orderId, storedToken);
         if (!mounted) return;
         setOrder(data);
         setLastOrderId(data.order_id);
@@ -80,10 +85,6 @@ export default function OrderSuccessPage() {
         if (resolvedOrderNo) {
           setOrderNo(resolvedOrderNo);
           setLastOrderNo(resolvedOrderNo);
-        }
-        const storedToken = getLastOrderToken();
-        if (storedToken) {
-          setPublicToken(storedToken);
         }
       } catch (err: any) {
         if (!mounted) return;

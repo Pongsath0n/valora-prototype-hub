@@ -149,8 +149,13 @@ export const customerApi = {
     });
   },
 
-  async getOrder(orderId: string): Promise<CustomerOrderSummary> {
-    return request<CustomerOrderSummary>(`/api/customer/orders/${orderId}`);
+  async getOrder(orderId: string, token: string): Promise<CustomerOrderSummary> {
+    const trimmedToken = token?.trim();
+    if (!trimmedToken) {
+      throw new Error("จำเป็นต้องมีโทเคนสถานะล่าสุดเพื่อโหลดคำสั่งซื้อ");
+    }
+    const query = new URLSearchParams({ token: trimmedToken });
+    return request<CustomerOrderSummary>(`/api/customer/orders/${orderId}?${query.toString()}`);
   },
 
   async getOrderStatusByToken(token: string): Promise<OrderStatusSummary> {

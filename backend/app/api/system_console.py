@@ -1,5 +1,5 @@
 import logging
-from typing import Any, Dict, List, Optional, Literal, Tuple, Set
+from typing import Any, Dict, List, Optional, Literal, Tuple, Set, Callable
 
 from fastapi import APIRouter, Header, HTTPException, status
 from pydantic import BaseModel
@@ -33,6 +33,22 @@ class StoreMemberUpdate(BaseModel):
 
 class ListUsersResponse(BaseModel):
     items: List[Dict[str, Any]]
+
+
+AuditBucketKey = Literal["orders", "payments", "line_notifications"]
+
+
+class AuditLogEntry(BaseModel):
+    id: str
+    source: AuditBucketKey
+    event_type: str
+    order_id: Optional[str] = None
+    payment_id: Optional[str] = None
+    actor_id: Optional[str] = None
+    actor_role: Optional[str] = None
+    message: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
+    created_at: Optional[str] = None
 
 
 def _normalize_role(value: Optional[str]) -> Optional[str]:
@@ -172,6 +188,90 @@ def _require_user_exists(client: Client, user_id: str) -> Dict[str, Any]:
     return rows[0]
 
 
+def _safe_log_metadata(data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    cleaned = {k: v for k, v in data.items() if v not in (None, "", [], {})}
+    return cleaned or None
+
+
+def _coerce_timestamp(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    return str(value)
+
+
+def _map_order_audit_log(row: Dict[str, Any]) -> Dict[str, Any]:
+    metadata = _safe_log_metadata({"note": row.get("note")})
+    return {
+        "id": str(row.get("id")),
+        "source": "orders",
+        "event_type": f"status:{row.get('to_status') or 'unknown'}",
+        "order_id": str(row.get("order_id")) if row.get("order_id") else None,
+        "payment_id": None,
+        "actor_id": row.get("changed_by"),
+        "actor_role": row.get("changed_by_type"),
+        "message": f"{row.get('from_status') or '-'} -> {row.get('to_status') or '-'}",
+        "metadata": metadata,
+        "created_at": _coerce_timestamp(row.get("created_at")),
+    }
+
+
+def _map_payment_audit_log(row: Dict[str, Any]) -> Dict[str, Any]:
+    metadata = _safe_log_metadata({"note": row.get("note")})
+    return {
+        "id": str(row.get("id")),
+        "source": "payments",
+        "event_type": f"status:{row.get('to_status') or 'unknown'}",
+        "order_id": str(row.get("order_id")) if row.get("order_id") else None,
+        "payment_id": str(row.get("payment_id")) if row.get("payment_id") else None,
+        "actor_id": row.get("changed_by"),
+        "actor_role": row.get("changed_by_type"),
+        "message": f"{row.get('from_status') or '-'} -> {row.get('to_status') or '-'}",
+        "metadata": metadata,
+        "created_at": _coerce_timestamp(row.get("created_at")),
+    }
+
+
+def _map_line_audit_log(row: Dict[str, Any]) -> Dict[str, Any]:
+    metadata = _safe_log_metadata(
+        {
+            "message_type": row.get("message_type"),
+            "send_status": row.get("send_status"),
+            "error_message": row.get("error_message"),
+        }
+    )
+    return {
+        "id": str(row.get("id")),
+        "source": "line_notifications",
+        "event_type": f"line:{row.get('message_type') or 'notification'}",
+        "order_id": str(row.get("order_id")) if row.get("order_id") else None,
+        "payment_id": None,
+        "actor_id": row.get("customer_id") or row.get("line_user_id"),
+        "actor_role": "system",
+        "message": row.get("send_status") or row.get("message_type") or "line_notification",
+        "metadata": metadata,
+        "created_at": _coerce_timestamp(row.get("created_at")),
+    }
+
+
+def _fetch_audit_bucket(
+    client: Client,
+    table: str,
+    mapper: Callable[[Dict[str, Any]], Dict[str, Any]],
+    limit: int,
+) -> Tuple[List[Dict[str, Any]], Optional[str]]:
+    try:
+        resp = client.table(table).select("*").order("created_at", desc=True).limit(limit).execute()
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("audit_log_query_failed table=%s detail=%s", table, getattr(exc, "message", str(exc)))
+        return [], "query_failed"
+    err = getattr(resp, "error", None)
+    if err:
+        logger.warning("audit_log_query_error table=%s detail=%s", table, getattr(err, "message", str(err)))
+        return [], "query_failed"
+    rows = getattr(resp, "data", None) or []
+    return [mapper(row) for row in rows], None
+
+
 @router.get("/users")
 def list_users(authorization: Optional[str] = Header(None)) -> Dict[str, Any]:
     ctx = _get_system_ctx(authorization)
@@ -202,6 +302,55 @@ def list_users(authorization: Optional[str] = Header(None)) -> Dict[str, Any]:
         )
 
     return {"items": items}
+
+
+@router.get("/audit-logs")
+def list_audit_logs(authorization: Optional[str] = Header(None), limit: int = 50) -> Dict[str, Any]:
+    ctx = _get_system_ctx(authorization)
+    client = ctx["client"]
+
+    safe_limit = max(1, min(limit, 200))
+    buckets: Dict[AuditBucketKey, List[Dict[str, Any]]] = {
+        "orders": [],
+        "payments": [],
+        "line_notifications": [],
+    }
+    errors: Dict[AuditBucketKey, str] = {}
+
+    orders, order_err = _fetch_audit_bucket(client, "order_status_logs", _map_order_audit_log, safe_limit)
+    payments, pay_err = _fetch_audit_bucket(client, "payment_status_logs", _map_payment_audit_log, safe_limit)
+    line_logs, line_err = _fetch_audit_bucket(client, "line_notification_logs", _map_line_audit_log, safe_limit)
+
+    buckets["orders"] = orders
+    buckets["payments"] = payments
+    buckets["line_notifications"] = line_logs
+
+    if order_err:
+        errors["orders"] = order_err
+    if pay_err:
+        errors["payments"] = pay_err
+    if line_err:
+        errors["line_notifications"] = line_err
+
+    combined = orders + payments + line_logs
+    combined.sort(key=lambda row: row.get("created_at") or "", reverse=True)
+    status_value: Literal["ok", "partial", "unavailable"]
+    if len(errors) == len(buckets):
+        status_value = "unavailable"
+    elif errors:
+        status_value = "partial"
+    else:
+        status_value = "ok"
+
+    response: Dict[str, Any] = {
+        "status": status_value,
+        "limit": safe_limit,
+        "buckets": buckets,
+        "items": combined[:safe_limit],
+    }
+    if errors:
+        response["errors"] = errors
+    return response
 
 
 @router.get("/roles")

@@ -30,6 +30,7 @@ const ORDER_STATUS_LABELS: Record<string, CustomerStatusLabel> = {
   completed: { label: "รับสินค้าเรียบร้อย", tone: "success" },
   paid: { label: "ชำระเงินแล้ว", tone: "success" },
   cancelled: { label: "ยกเลิกแล้ว", tone: "muted" },
+  voided: { label: "ยกเลิกแล้ว", tone: "muted" },
 };
 
 const PAYMENT_STATUS_LABELS: Record<string, CustomerStatusLabel> = {

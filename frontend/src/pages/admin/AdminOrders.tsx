@@ -68,6 +68,11 @@ const doesTabContainStatus = (tabKey: TabKey, status: string | null | undefined)
   return tab.filter.some((value) => value === normalized);
 };
 
+const isArchivedStatus = (status: string | null | undefined): boolean => {
+  const normalized = normalizeStatus(status);
+  return normalized === "cancelled" || normalized === "voided";
+};
+
 const nextStatusByCurrent: Record<string, string[]> = {
   pending_payment: ["waiting_payment_review", "cancelled"],
   waiting_payment_review: ["accepted", "cancelled"],
@@ -157,6 +162,7 @@ export default function AdminOrdersPage() {
           note: null,
           cancelled_reason: null,
           cancelled_at: null,
+          archived: false,
           created_at: p.created_at ?? null,
           updated_at: p.created_at ?? null,
           latest_payment: {
@@ -214,10 +220,14 @@ export default function AdminOrdersPage() {
   const filteredOrders = useMemo(() => {
     const query = searchText.trim().toLowerCase();
     const tab = statusTabs.find((t) => t.key === activeTab);
+    const baseRows = rows;
     const base = tab
-      ? rows.filter((r) => {
+      ? baseRows.filter((r) => {
           const statusMatch = tab.filter.includes(r.status);
           if (activeTab === "queue") {
+            if (r.archived || isArchivedStatus(r.status)) {
+              return false;
+            }
             const isTerminal = ["completed", "cancelled", "rejected"].includes(r.status);
             const paymentMatch = ["waiting_payment_review", "pending_review"].includes(r.payment_status);
             return (statusMatch || paymentMatch) && !isTerminal;

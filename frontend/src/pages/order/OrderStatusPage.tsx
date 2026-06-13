@@ -275,7 +275,7 @@ export default function OrderStatusPage() {
   }
 
   const normalizedStatus = normalizeStatus(statusData?.order_status);
-  const isCancelled = normalizedStatus === "cancelled";
+  const isCancelled = normalizedStatus === "cancelled" || normalizedStatus === "voided";
   const isCompleted = normalizedStatus === "completed";
   // Customer arrived with a direct status link (or already loaded an order) —
   // the manual search form is only for visitors without a token.

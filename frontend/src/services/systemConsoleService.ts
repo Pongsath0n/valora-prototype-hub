@@ -80,84 +80,27 @@ export async function loadProfiles(limit = 100): Promise<{ status: "ok" | "error
 
 type AuditBucketName = "orders" | "payments" | "line_notifications";
 
-export type AuditLogRow = {
+export type AuditLogEntry = {
   id: string;
-  ref: string;
-  status: string;
-  created_at: string;
   source: AuditBucketName;
+  event_type: string;
+  order_id?: string | null;
+  payment_id?: string | null;
+  actor_id?: string | null;
+  actor_role?: string | null;
+  message?: string | null;
+  metadata?: Record<string, unknown> | null;
+  created_at?: string | null;
 };
-
-type BucketResult = { source: AuditBucketName; rows: AuditLogRow[]; error?: string };
-
-function mapLogRow(row: Record<string, any>, source: AuditBucketName, refKeys: string[]): AuditLogRow {
-  const refKey = refKeys.find((key) => row[key] !== undefined) ?? refKeys[0] ?? "id";
-  return {
-    id: String(row.id ?? row[refKey] ?? "n/a"),
-    ref: String(row[refKey] ?? "-"),
-    status: String(row.status ?? row.state ?? row.result ?? row.event ?? "n/a"),
-    created_at: String(row.created_at ?? row.inserted_at ?? row.timestamp ?? ""),
-    source,
-  };
-}
-
-async function fetchAuditBucket(source: AuditBucketName, table: string, refKeys: string[]): Promise<BucketResult> {
-  try {
-    const client = getSupabase();
-    const { data, error } = await client.from(table).select("*").order("created_at", { ascending: false }).limit(30);
-
-    if (error) {
-      return { source, rows: [], error: "query_failed" };
-    }
-
-    const rows = (data ?? []).map((row) => mapLogRow(row as Record<string, any>, source, refKeys));
-    return { source, rows };
-  } catch (err) {
-    return { source, rows: [], error: "supabase_unavailable" };
-  }
-}
 
 export async function loadAuditBuckets(): Promise<{
   status: "ok" | "partial" | "unavailable";
-  buckets: Record<AuditBucketName, AuditLogRow[]>;
-  /** Per-bucket query errors — lets the UI distinguish "no activity yet" from "could not read this table". */
+  buckets: Record<AuditBucketName, AuditLogEntry[]>;
   errors?: Partial<Record<AuditBucketName, string>>;
   reason?: string;
+  limit?: number;
 }> {
-  const defaults: Record<AuditBucketName, AuditLogRow[]> = {
-    orders: [],
-    payments: [],
-    line_notifications: [],
-  };
-
-  const results = await Promise.all([
-    fetchAuditBucket("orders", "order_status_logs", ["order_id", "id"]),
-    fetchAuditBucket("payments", "payment_status_logs", ["payment_id", "order_id", "id"]),
-    fetchAuditBucket("line_notifications", "line_notification_logs", ["customer_id", "line_user_id", "id"]),
-  ]);
-
-  const buckets: Record<AuditBucketName, AuditLogRow[]> = { ...defaults };
-  const errors: Partial<Record<AuditBucketName, string>> = {};
-  const hadError = results.some((r) => r.error);
-  let totalRows = 0;
-
-  for (const result of results) {
-    buckets[result.source] = result.rows;
-    totalRows += result.rows.length;
-    if (result.error) {
-      errors[result.source] = result.error;
-    }
-  }
-
-  if (results.some((r) => r.error === "supabase_unavailable")) {
-    return { status: "unavailable", buckets, errors, reason: "supabase_unavailable" };
-  }
-
-  if (totalRows > 0) {
-    return { status: hadError ? "partial" : "ok", buckets, errors, reason: hadError ? "some_queries_failed" : undefined };
-  }
-
-  return { status: "partial", buckets, errors, reason: hadError ? "query_failed" : "no_logs_found" };
+  return authRequest("/api/system/audit-logs");
 }
 
 export type SystemUserMembership = {
