@@ -324,6 +324,8 @@ export type OrderPayload = {
 export type OrderStatusPayload = {
   status: string;
   note?: string;
+  cancelled_reason?: string;
+  cancelled_at?: string;
 };
 
 export type OrderCancelPayload = {

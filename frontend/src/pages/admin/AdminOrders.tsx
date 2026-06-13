@@ -91,6 +91,15 @@ function friendlyError(message: string): string {
   if (message === "insufficient_role") {
     return "สิทธิ์ไม่เพียงพอสำหรับการแก้ไขข้อมูล";
   }
+  if (message === "staff_cannot_cancel_paid_order") {
+    return "สตาฟไม่สามารถยกเลิกออเดอร์ที่ชำระเงินแล้วได้";
+  }
+  if (message === "order_already_archived") {
+    return "ออเดอร์นี้ถูกยกเลิกหรือปิดไปแล้ว";
+  }
+  if (message === "order_already_completed") {
+    return "ออเดอร์นี้เสร็จสิ้นแล้วและไม่สามารถยกเลิกได้";
+  }
   return message;
 }
 

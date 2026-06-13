@@ -96,10 +96,10 @@ export default function AdminOrderDetailPage() {
     );
   }
 
-  const handleStatus = async (next: string) => {
+  const handleStatusUpdate = async (payload: { status: string; note?: string; cancelled_reason?: string }) => {
     setError("");
     try {
-      const res = await storeAdminApi.updateOrderStatus(order.id, { status: next });
+      const res = await storeAdminApi.updateOrderStatus(order.id, payload);
       if (res.mock_notification) setInfo(res.mock_notification);
       await refresh();
     } catch (err: any) {
@@ -107,15 +107,12 @@ export default function AdminOrderDetailPage() {
     }
   };
 
+  const handleStatus = async (next: string) => {
+    await handleStatusUpdate({ status: next });
+  };
+
   const handleCancel = async () => {
-    setError("");
-    try {
-      await storeAdminApi.cancelOrder(order.id, { reason: "cancelled_by_admin" });
-      setInfo("ยกเลิกออเดอร์แล้ว");
-      await refresh();
-    } catch (err: any) {
-      setError(err?.message || "ยกเลิกไม่สำเร็จ");
-    }
+    await handleStatusUpdate({ status: "cancelled", cancelled_reason: "cancelled_by_admin" });
   };
 
   const handleApprovePayment = async (paymentId: string) => {

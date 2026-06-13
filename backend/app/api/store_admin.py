@@ -65,6 +65,15 @@ _MANAGERIAL_ROLES: Set[str] = set(_BUSINESS_ROLES)
 _OPERATOR_ROLES: Set[str] = {"owner", "admin", "manager", "staff"}
 _PAYMENT_REVIEW_ROLES: Set[str] = set(_OPERATOR_ROLES)
 _STAFF_ORDER_STATUS_ALLOWED: Set[str] = {"accepted", "preparing", "ready", "completed"}
+_STAFF_CANCEL_OPERATIONAL_STATUSES: Set[str] = {
+    "pending_payment",
+    "waiting_payment_review",
+    "pending_review",
+    "accepted",
+    "preparing",
+    "ready",
+    "ready_for_pickup",
+}
 _ORDER_FINANCIAL_FIELDS: Set[str] = {"total_cost", "gross_profit"}
 _ORDER_ITEM_FINANCIAL_FIELDS: Set[str] = {"unit_cost", "line_cost", "line_profit"}
 _MENU_IMAGE_ALLOWED_TYPES: Set[str] = {
@@ -182,6 +191,25 @@ def normalize_payment_status(value: Optional[str]) -> str:
     if status == "pending":
         return "pending_review"
     return status
+
+
+def _staff_can_cancel_operational_order(
+    current_status: Optional[str],
+    payment_status: Optional[str],
+    cancelled_at: Optional[str],
+) -> Tuple[bool, Optional[str]]:
+    normalized_status = normalize_order_status(current_status)
+    normalized_payment = normalize_payment_status(payment_status)
+
+    if cancelled_at or normalized_status in CANCELLED_ORDER_STATUSES:
+        return False, "order_already_archived"
+    if normalized_status == "completed":
+        return False, "order_already_completed"
+    if normalized_status == "paid" or normalized_payment in CONFIRMED_PAYMENT_STATUSES:
+        return False, "staff_cannot_cancel_paid_order"
+    if normalized_status not in _STAFF_CANCEL_OPERATIONAL_STATUSES:
+        return False, "insufficient_role_for_status"
+    return True, None
 
 
 def _extract_row_payment_status(row: Dict[str, Any]) -> Optional[str]:
@@ -365,6 +393,8 @@ class OrderUpdate(BaseModel):
 class OrderStatusUpdate(BaseModel):
     status: OrderStatus
     note: Optional[str] = None
+    cancelled_reason: Optional[str] = None
+    cancelled_at: Optional[str] = None
 
 
 class OrderCancelPayload(BaseModel):
@@ -3667,27 +3697,55 @@ def update_order_status(order_id: str, payload: OrderStatusUpdate, authorization
     if next_status == "ready_for_pickup":
         next_status = "ready"
 
-    if not _valid_order_transition(str(current.get("status") or ""), str(next_status)):
+    current_status_raw = str(current.get("status") or "")
+    current_status_normalized = normalize_order_status(current_status_raw)
+    current_payment_status = normalize_payment_status(current.get("payment_status"))
+    next_status_value = str(next_status)
+
+    if not _valid_order_transition(current_status_normalized, next_status_value):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid_status_transition")
 
-    if normalized_role == "staff" and str(next_status) not in _STAFF_ORDER_STATUS_ALLOWED:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="insufficient_role_for_status")
+    if normalized_role == "staff":
+        if next_status_value == "cancelled":
+            allowed, denial_reason = _staff_can_cancel_operational_order(
+                current_status_normalized,
+                current_payment_status,
+                current.get("cancelled_at"),
+            )
+            if not allowed:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=denial_reason or "insufficient_role_for_status",
+                )
+        elif next_status_value not in _STAFF_ORDER_STATUS_ALLOWED:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="insufficient_role_for_status")
 
-    resp = ctx["client"].table("orders").update({"status": next_status}).eq("id", order_id).eq("store_id", store_id_resolved).execute()
+    status_note = (payload.note or "").strip() or None
+    update_data: Dict[str, Any] = {"status": next_status_value}
+    if next_status_value == "cancelled":
+        cancelled_reason = (payload.cancelled_reason or "").strip()
+        cancelled_reason = cancelled_reason or status_note or "cancelled_via_status_update"
+        cancelled_at_value = (payload.cancelled_at or "").strip() or datetime.utcnow().isoformat()
+        update_data["cancelled_reason"] = cancelled_reason
+        update_data["cancelled_at"] = cancelled_at_value
+
+    resp = (
+        ctx["client"].table("orders").update(update_data).eq("id", order_id).eq("store_id", store_id_resolved).execute()
+    )
     if getattr(resp, "error", None):
         raise HTTPException(status_code=500, detail="order_status_update_failed")
 
     _write_order_status_log(
         ctx["client"],
         order_id,
-        str(current.get("status") or ""),
-        str(next_status),
+        current_status_raw,
+        next_status_value,
         ctx.get("user_id"),
-        payload.note,
+        status_note,
     )
 
-    response: Dict[str, Any] = {"id": order_id, "status": str(next_status)}
-    if str(next_status) == "ready":
+    response: Dict[str, Any] = {"id": order_id, "status": next_status_value}
+    if next_status_value == "ready":
         mock_message = "เครื่องดื่มของคุณพร้อมแล้ว สามารถมารับได้เลยครับ"
         customer_ctx = _get_order_customer_context(ctx["client"], store_id_resolved, order_id)
         # TODO(LINE-Identity-Binding): After LIFF getProfile binds line_user_id
