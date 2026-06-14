@@ -246,8 +246,6 @@ def _validate_addon(row: Dict[str, Any], store_id: str, product_id: str, quantit
     if row.get("is_active") is False:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="addon_not_available")
     max_quantity = row.get("max_quantity")
-    if max_quantity is None:
-        max_quantity = row.get("quantity_limit")
     if max_quantity is not None:
         try:
             max_quantity_val = int(max_quantity)

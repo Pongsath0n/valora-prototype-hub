@@ -39,7 +39,70 @@ export type ApiProduct = {
   image_url?: string | null;
   description?: string | null;
   created_at?: string;
+  allow_sweetness?: boolean;
+  default_sweetness?: number;
 };
+
+export type ApiProductAddonRecipe = {
+  id: string;
+  addon_id: string;
+  store_id: string;
+  ingredient_id: string;
+  ingredient_name?: string;
+  ingredient_unit?: string | null;
+  quantity_used: number;
+  unit?: string | null;
+  cost_per_unit?: number;
+  line_cost?: number;
+};
+
+export type ApiProductAddon = {
+  id: string;
+  store_id: string;
+  product_id: string;
+  name: string;
+  code?: string | null;
+  addon_type?: string | null;
+  price: number;
+  max_quantity?: number | null;
+  is_active?: boolean;
+  created_at?: string;
+  unit_cost?: number | null;
+  unit_profit?: number | null;
+  has_recipe?: boolean;
+  recipes?: ApiProductAddonRecipe[];
+};
+
+export type ProductOptionsResponse = {
+  product_id: string;
+  allow_sweetness: boolean;
+  default_sweetness: number;
+  addons: ApiProductAddon[];
+};
+
+export type ProductOptionsPayload = {
+  allow_sweetness?: boolean;
+  default_sweetness?: number;
+};
+
+export type ProductAddonPayload = {
+  name: string;
+  code?: string | null;
+  addon_type?: string | null;
+  price: number;
+  max_quantity?: number | null;
+  is_active?: boolean;
+};
+
+export type ProductAddonUpdatePayload = Partial<ProductAddonPayload>;
+
+export type ProductAddonRecipePayload = {
+  ingredient_id: string;
+  quantity_used: number;
+  unit?: string | null;
+};
+
+export type ProductAddonRecipeUpdatePayload = Partial<ProductAddonRecipePayload>;
 
 export type ApiCategory = {
   id: string;
@@ -108,6 +171,8 @@ export type ProductPayload = {
   is_special?: boolean;
   image_url?: string | null;
   description?: string | null;
+  allow_sweetness?: boolean;
+  default_sweetness?: number;
 };
 
 export type IngredientPayload = {
@@ -630,6 +695,62 @@ export const storeAdminApi = {
       throw new Error(typeof reason === "string" ? reason : "upload_failed");
     }
     return body.product as ApiProduct;
+  },
+
+  async getProductOptions(productId: string): Promise<ProductOptionsResponse> {
+    return request(`/api/store-admin/products/${productId}/options`);
+  },
+
+  async updateProductOptions(productId: string, payload: ProductOptionsPayload): Promise<ProductOptionsResponse> {
+    return request<ProductOptionsResponse>(`/api/store-admin/products/${productId}/options`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async listProductAddons(productId: string): Promise<ApiProductAddon[]> {
+    const data = await request<{ items: ApiProductAddon[] }>(`/api/store-admin/products/${productId}/addons`);
+    return data.items ?? [];
+  },
+
+  async createProductAddon(productId: string, payload: ProductAddonPayload): Promise<ApiProductAddon> {
+    return request<ApiProductAddon>(`/api/store-admin/products/${productId}/addons`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async updateProductAddon(addonId: string, payload: ProductAddonUpdatePayload): Promise<ApiProductAddon> {
+    return request<ApiProductAddon>(`/api/store-admin/addons/${addonId}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async deactivateProductAddon(addonId: string): Promise<{ status: string }> {
+    return request<{ status: string }>(`/api/store-admin/addons/${addonId}`, { method: "DELETE" });
+  },
+
+  async listAddonRecipes(addonId: string): Promise<{ items: ApiProductAddonRecipe[]; unit_cost?: number }> {
+    return request(`/api/store-admin/addons/${addonId}/recipes`);
+  },
+
+  async createAddonRecipe(addonId: string, payload: ProductAddonRecipePayload): Promise<ApiProductAddonRecipe> {
+    return request<ApiProductAddonRecipe>(`/api/store-admin/addons/${addonId}/recipes`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async updateAddonRecipe(recipeId: string, payload: ProductAddonRecipeUpdatePayload): Promise<ApiProductAddonRecipe> {
+    return request<ApiProductAddonRecipe>(`/api/store-admin/addon-recipes/${recipeId}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async deleteAddonRecipe(recipeId: string): Promise<{ status: string }> {
+    return request<{ status: string }>(`/api/store-admin/addon-recipes/${recipeId}`, { method: "DELETE" });
   },
 
   // Ingredients

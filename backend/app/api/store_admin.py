@@ -93,6 +93,8 @@ _STAFF_CANCEL_OPERATIONAL_STATUSES: Set[str] = {
 }
 _ORDER_FINANCIAL_FIELDS: Set[str] = {"total_cost", "gross_profit"}
 _ORDER_ITEM_FINANCIAL_FIELDS: Set[str] = {"unit_cost", "line_cost", "line_profit", "total_cost", "option_cost_total"}
+SWEETNESS_LEVELS: Tuple[int, ...] = (0, 25, 50, 75, 100)
+DEFAULT_SWEETNESS = 100
 _MENU_IMAGE_ALLOWED_TYPES: Set[str] = {
     "image/jpeg",
     "image/jpg",
@@ -300,6 +302,8 @@ class ProductCreate(BaseModel):
     is_special: Optional[bool] = False
     image_url: Optional[str] = None
     description: Optional[str] = None
+    allow_sweetness: Optional[bool] = None
+    default_sweetness: Optional[int] = None
 
 
 class ProductUpdate(BaseModel):
@@ -311,6 +315,43 @@ class ProductUpdate(BaseModel):
     is_special: Optional[bool] = None
     image_url: Optional[str] = None
     description: Optional[str] = None
+    allow_sweetness: Optional[bool] = None
+    default_sweetness: Optional[int] = None
+
+
+class ProductOptionUpdate(BaseModel):
+    allow_sweetness: Optional[bool] = None
+    default_sweetness: Optional[int] = None
+
+
+class ProductAddonCreate(BaseModel):
+    name: str
+    code: Optional[str] = None
+    addon_type: Optional[str] = "extra_shot"
+    price: float
+    max_quantity: Optional[int] = None
+    is_active: Optional[bool] = True
+
+
+class ProductAddonUpdate(BaseModel):
+    name: Optional[str] = None
+    code: Optional[str] = None
+    addon_type: Optional[str] = None
+    price: Optional[float] = None
+    max_quantity: Optional[int] = None
+    is_active: Optional[bool] = None
+
+
+class ProductAddonRecipeCreate(BaseModel):
+    ingredient_id: str
+    quantity_used: float
+    unit: Optional[str] = None
+
+
+class ProductAddonRecipeUpdate(BaseModel):
+    ingredient_id: Optional[str] = None
+    quantity_used: Optional[float] = None
+    unit: Optional[str] = None
 
 
 class IngredientCreate(BaseModel):
@@ -626,6 +667,15 @@ def _safe_error_detail(error: Any, limit: int = 300) -> str:
     text = str(getattr(error, "message", "") or error or "")
     text = text.replace("\n", " ").replace("\r", " ")
     return text[:limit]
+
+
+def _safe_float(value: Any) -> float:
+    try:
+        if value is None or value == "":
+            return 0.0
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 _PAYMENTS_COLUMN_CACHE: Dict[str, Optional[bool]] = {}
@@ -1194,9 +1244,258 @@ def delete_channel(channel_id: str, authorization: Optional[str] = Header(None),
     return {"status": "deleted"}
 
 
+
+# ─── Product Options + Addons ────────────────────────────────────────────────
+@router.get("/products/{product_id}/options")
+def get_product_options(product_id: str, authorization: Optional[str] = Header(None), store_id: Optional[str] = None) -> Dict[str, Any]:
+    ctx = _get_ctx(authorization)
+    store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
+    _require_manager(role)
+
+    product_row = _ensure_product_in_store(ctx["client"], product_id, store_id_resolved)
+    return _build_product_options_response(ctx["client"], product_row, store_id_resolved)
+
+
+@router.patch("/products/{product_id}/options")
+def update_product_options(
+    product_id: str,
+    payload: ProductOptionUpdate,
+    authorization: Optional[str] = Header(None),
+    store_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    ctx = _get_ctx(authorization)
+    store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
+    _require_manager(role)
+
+    data = _sanitize_product_option_payload(payload)
+    if not data:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="no_fields_to_update")
+
+    _ensure_product_in_store(ctx["client"], product_id, store_id_resolved)
+
+    resp = (
+        ctx["client"].table("products").update(data).eq("id", product_id).eq("store_id", store_id_resolved).execute()
+    )
+    if getattr(resp, "error", None):
+        raise HTTPException(status_code=500, detail="product_option_update_failed")
+
+    refreshed = _ensure_product_in_store(ctx["client"], product_id, store_id_resolved)
+    return _build_product_options_response(ctx["client"], refreshed, store_id_resolved)
+
+
+@router.get("/products/{product_id}/addons")
+def list_product_addons(product_id: str, authorization: Optional[str] = Header(None), store_id: Optional[str] = None) -> Dict[str, Any]:
+    ctx = _get_ctx(authorization)
+    store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
+    _require_manager(role)
+
+    _ensure_product_in_store(ctx["client"], product_id, store_id_resolved)
+    addons = _collect_product_addons(ctx["client"], store_id_resolved, product_id)
+    return {"items": addons, "product_id": product_id, "store_id": store_id_resolved}
+
+
+@router.post("/products/{product_id}/addons")
+def create_product_addon(
+    product_id: str,
+    payload: ProductAddonCreate,
+    authorization: Optional[str] = Header(None),
+    store_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    ctx = _get_ctx(authorization)
+    store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
+    _require_manager(role)
+
+    product_row = _ensure_product_in_store(ctx["client"], product_id, store_id_resolved)
+    data = _sanitize_addon_payload(payload)
+    data["product_id"] = product_id
+    data["store_id"] = store_id_resolved
+    data.setdefault("addon_type", "extra_shot")
+    data.setdefault("code", _generate_addon_code(data.get("name") or "extra_shot", data.get("addon_type")))
+
+    try:
+        resp = ctx["client"].table("product_addons").insert(data).execute()
+        err = getattr(resp, "error", None)
+    except Exception as exc:
+        resp = None
+        err = exc
+
+    if err:
+        message = str(getattr(err, "message", err))
+        if "duplicate" in message or "unique" in message:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="addon_code_exists")
+        raise HTTPException(status_code=500, detail="addon_create_failed")
+
+    rows = getattr(resp, "data", None) or []
+    created = rows[0] if rows else data
+    mapped = _map_addon(created)
+    mapped["recipes"] = []
+    mapped["unit_cost"] = 0.0
+    mapped["unit_profit"] = mapped.get("price", 0.0)
+    mapped["has_recipe"] = False
+    return mapped | {"product_name": product_row.get("name")}
+
+
+@router.patch("/addons/{addon_id}")
+def update_product_addon(
+    addon_id: str,
+    payload: ProductAddonUpdate,
+    authorization: Optional[str] = Header(None),
+    store_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    ctx = _get_ctx(authorization)
+    store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
+    _require_manager(role)
+
+    data = _sanitize_addon_payload(payload, partial=True)
+    if not data:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="no_fields_to_update")
+
+    addon_row = _ensure_addon_in_store(ctx["client"], addon_id, store_id_resolved)
+
+    resp = (
+        ctx["client"].table("product_addons").update(data).eq("id", addon_id).eq("store_id", store_id_resolved).execute()
+    )
+    if getattr(resp, "error", None):
+        message = str(getattr(resp.error, "message", getattr(resp, "error", "")))
+        if "duplicate" in message or "unique" in message:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="addon_code_exists")
+        raise HTTPException(status_code=500, detail="addon_update_failed")
+
+    return _get_addon_with_cost(ctx["client"], store_id_resolved, addon_id) | {
+        "product_id": addon_row.get("product_id"),
+    }
+
+
+@router.delete("/addons/{addon_id}")
+def deactivate_product_addon(addon_id: str, authorization: Optional[str] = Header(None), store_id: Optional[str] = None) -> Dict[str, Any]:
+    ctx = _get_ctx(authorization)
+    store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
+    _require_manager(role)
+
+    _ensure_addon_in_store(ctx["client"], addon_id, store_id_resolved)
+
+    resp = (
+        ctx["client"].table("product_addons").update({"is_active": False}).eq("id", addon_id).eq("store_id", store_id_resolved).execute()
+    )
+    if getattr(resp, "error", None):
+        raise HTTPException(status_code=500, detail="addon_deactivate_failed")
+    return {"status": "deactivated"}
+
+
+@router.get("/addons/{addon_id}/recipes")
+def list_addon_recipes(addon_id: str, authorization: Optional[str] = Header(None), store_id: Optional[str] = None) -> Dict[str, Any]:
+    ctx = _get_ctx(authorization)
+    store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
+    _require_manager(role)
+
+    addon_row = _ensure_addon_in_store(ctx["client"], addon_id, store_id_resolved)
+    recipes, total_cost = _fetch_addon_recipes_with_cost(ctx["client"], store_id_resolved, addon_id)
+    return {
+        "items": recipes,
+        "addon_id": addon_id,
+        "product_id": addon_row.get("product_id"),
+        "store_id": store_id_resolved,
+        "unit_cost": total_cost,
+    }
+
+
+@router.post("/addons/{addon_id}/recipes")
+def create_addon_recipe(
+    addon_id: str,
+    payload: ProductAddonRecipeCreate,
+    authorization: Optional[str] = Header(None),
+    store_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    ctx = _get_ctx(authorization)
+    store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
+    _require_manager(role)
+
+    addon_row = _ensure_addon_in_store(ctx["client"], addon_id, store_id_resolved)
+    _ensure_ingredient_in_store(ctx["client"], payload.ingredient_id, store_id_resolved)
+    data = _sanitize_addon_recipe_payload(payload)
+    data["addon_id"] = addon_id
+    data["store_id"] = store_id_resolved
+
+    try:
+        resp = ctx["client"].table("product_addon_recipes").insert(data).execute()
+        err = getattr(resp, "error", None)
+    except Exception as exc:
+        resp = None
+        err = exc
+
+    if err:
+        raise HTTPException(status_code=500, detail="addon_recipe_create_failed")
+
+    rows = getattr(resp, "data", None) or []
+    created = rows[0] if rows else data
+    mapped = _map_addon_recipe(created)
+    mapped["addon_id"] = addon_id
+    mapped["product_id"] = addon_row.get("product_id")
+    return mapped
+
+
+@router.patch("/addon-recipes/{recipe_id}")
+def update_addon_recipe(
+    recipe_id: str,
+    payload: ProductAddonRecipeUpdate,
+    authorization: Optional[str] = Header(None),
+    store_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    ctx = _get_ctx(authorization)
+    store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
+    _require_manager(role)
+
+    data = _sanitize_addon_recipe_payload(payload, partial=True)
+    if not data:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="no_fields_to_update")
+
+    existing = _get_addon_recipe_row(ctx["client"], recipe_id)
+    if str(existing.get("store_id")) != str(store_id_resolved):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="store_mismatch")
+
+    target_addon = existing.get("addon_id")
+    addon_row = _ensure_addon_in_store(ctx["client"], target_addon, store_id_resolved)
+
+    if data.get("ingredient_id"):
+        _ensure_ingredient_in_store(ctx["client"], data["ingredient_id"], store_id_resolved)
+
+    resp = (
+        ctx["client"].table("product_addon_recipes").update(data).eq("id", recipe_id).eq("store_id", store_id_resolved).execute()
+    )
+    if getattr(resp, "error", None):
+        raise HTTPException(status_code=500, detail="addon_recipe_update_failed")
+
+    refreshed = _get_addon_recipe_row(ctx["client"], recipe_id)
+    mapped = _map_addon_recipe(refreshed)
+    mapped["product_id"] = addon_row.get("product_id")
+    return mapped
+
+
+@router.delete("/addon-recipes/{recipe_id}")
+def delete_addon_recipe(recipe_id: str, authorization: Optional[str] = Header(None), store_id: Optional[str] = None) -> Dict[str, Any]:
+    ctx = _get_ctx(authorization)
+    store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
+    _require_manager(role)
+
+    existing = _get_addon_recipe_row(ctx["client"], recipe_id)
+    if str(existing.get("store_id")) != str(store_id_resolved):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="store_mismatch")
+
+    ctx["client"].table("product_addon_recipes").delete().eq("id", recipe_id).eq("store_id", store_id_resolved).execute()
+    return {"status": "deleted"}
+
+
 def _ensure_product_in_store(client: Client, product_id: str, store_id: str) -> Dict[str, Any]:
-    resp = client.table("products").select("id, store_id, name").eq("id", product_id).limit(1).execute()
-    error = getattr(resp, "error", None)
+    select_cols = "id, store_id, name, allow_sweetness, default_sweetness"
+    try:
+        resp = client.table("products").select(select_cols).eq("id", product_id).limit(1).execute()
+        error = getattr(resp, "error", None)
+    except Exception as exc:
+        resp = None
+        error = exc
+    if error and any(_is_missing_column(error, col) for col in ["allow_sweetness", "default_sweetness"]):
+        resp = client.table("products").select("id, store_id, name").eq("id", product_id).limit(1).execute()
+        error = getattr(resp, "error", None)
     if error:
         raise HTTPException(status_code=500, detail="product_lookup_failed")
     data = getattr(resp, "data", None) or []
@@ -1291,6 +1590,62 @@ def _sanitize_product_payload(payload: ProductCreate | ProductUpdate, partial: b
         if flag in data and data[flag] is None:
             data.pop(flag)
 
+    if "allow_sweetness" in data:
+        allow_value = data.get("allow_sweetness")
+        if allow_value is None:
+            data.pop("allow_sweetness")
+        else:
+            data["allow_sweetness"] = bool(allow_value)
+
+    if "default_sweetness" in data:
+        ds_value = data.get("default_sweetness")
+        if ds_value is None:
+            data.pop("default_sweetness")
+        else:
+            data["default_sweetness"] = _sanitize_sweetness_level(ds_value)
+
+    return data
+
+
+def _sanitize_sweetness_level(value: Any) -> int:
+    try:
+        level = int(value)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="sweetness_invalid")
+    if level not in SWEETNESS_LEVELS:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="sweetness_invalid")
+    return level
+
+
+def _product_row_allows_sweetness(row: Dict[str, Any]) -> bool:
+    for key in ("allow_sweetness", "allows_sweetness", "sweetness_enabled"):
+        if key in row and row[key] is not None:
+            return bool(row[key])
+    return True
+
+
+def _product_row_default_sweetness(row: Dict[str, Any]) -> int:
+    for key in ("default_sweetness", "sweetness_default"):
+        if key in row and row[key] is not None:
+            try:
+                level = int(row[key])
+            except (TypeError, ValueError):
+                continue
+            if level in SWEETNESS_LEVELS:
+                return level
+    return DEFAULT_SWEETNESS
+
+
+def _sanitize_product_option_payload(payload: ProductOptionUpdate) -> Dict[str, Any]:
+    data = payload.model_dump(exclude_unset=True)
+    if "allow_sweetness" in data:
+        data["allow_sweetness"] = bool(data["allow_sweetness"])
+    if "default_sweetness" in data:
+        value = data.get("default_sweetness")
+        if value is None:
+            data.pop("default_sweetness")
+        else:
+            data["default_sweetness"] = _sanitize_sweetness_level(value)
     return data
 
 
@@ -1308,6 +1663,247 @@ def _map_product(row: Dict[str, Any]) -> Dict[str, Any]:
         "image_url": row.get("image_url"),
         "description": row.get("description"),
         "created_at": row.get("created_at"),
+        "allow_sweetness": _product_row_allows_sweetness(row),
+        "default_sweetness": _product_row_default_sweetness(row),
+    }
+
+
+def _generate_addon_code(name: str, addon_type: Optional[str]) -> str:
+    base = (addon_type or name or "extra_addon").strip().lower()
+    slug = re.sub(r"[^a-z0-9]+", "-", base).strip("-")
+    return slug or "addon"
+
+
+def _sanitize_addon_payload(payload: ProductAddonCreate | ProductAddonUpdate, *, partial: bool = False) -> Dict[str, Any]:
+    data = payload.model_dump(exclude_unset=True)
+
+    if "name" in data or not partial:
+        name = (data.get("name") or "").strip()
+        if not name:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="addon_name_required")
+        data["name"] = name
+
+    if "code" in data:
+        code_value = (data.get("code") or "").strip().lower()
+        if not code_value:
+            data.pop("code")
+        else:
+            data["code"] = code_value
+
+    if "addon_type" in data or not partial:
+        addon_type_value = (data.get("addon_type") or "extra_shot").strip().lower()
+        if addon_type_value not in {"extra_shot"}:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="addon_type_not_supported")
+        data["addon_type"] = addon_type_value
+
+    if "price" in data or not partial:
+        price_value = _safe_float(data.get("price"))
+        if price_value < 0:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="addon_price_non_negative")
+        data["price"] = price_value
+
+    if "max_quantity" in data:
+        max_quantity = data.get("max_quantity")
+        if max_quantity is None:
+            data["max_quantity"] = None
+        else:
+            try:
+                max_value = int(max_quantity)
+            except (TypeError, ValueError):
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="addon_max_quantity_invalid")
+            if max_value < 0:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="addon_max_quantity_invalid")
+            data["max_quantity"] = max_value
+
+    if "is_active" in data:
+        data["is_active"] = bool(data["is_active"])
+
+    if not partial and "code" not in data:
+        data["code"] = _generate_addon_code(data.get("name") or "extra_shot", data.get("addon_type"))
+
+    return data
+
+
+def _sanitize_addon_recipe_payload(
+    payload: ProductAddonRecipeCreate | ProductAddonRecipeUpdate,
+    *,
+    partial: bool = False,
+) -> Dict[str, Any]:
+    data = payload.model_dump(exclude_unset=True)
+
+    if "ingredient_id" in data or not partial:
+        ingredient_id = (data.get("ingredient_id") or "").strip()
+        if not ingredient_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="ingredient_id_required")
+        data["ingredient_id"] = ingredient_id
+
+    if "quantity_used" in data or not partial:
+        try:
+            quantity_value = float(data.get("quantity_used"))
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="quantity_required")
+        if quantity_value <= 0:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="quantity_positive_required")
+        data["quantity_used"] = quantity_value
+
+    if "unit" in data:
+        unit_value = (data.get("unit") or "").strip()
+        if not unit_value:
+            data.pop("unit")
+        else:
+            data["unit"] = unit_value
+
+    return data
+
+
+def _map_addon(row: Dict[str, Any]) -> Dict[str, Any]:
+    max_quantity = row.get("max_quantity")
+    try:
+        max_qty_value = int(max_quantity) if max_quantity is not None else None
+    except (TypeError, ValueError):
+        max_qty_value = None
+
+    price_value = _safe_float(row.get("price"))
+
+    return {
+        "id": str(row.get("id")),
+        "store_id": row.get("store_id"),
+        "product_id": row.get("product_id"),
+        "name": row.get("name"),
+        "code": row.get("code"),
+        "addon_type": (row.get("addon_type") or "extra_shot"),
+        "price": price_value,
+        "max_quantity": max_qty_value,
+        "is_active": bool(row.get("is_active")) if row.get("is_active") is not None else True,
+        "created_at": row.get("created_at"),
+    }
+
+
+def _map_addon_recipe(row: Dict[str, Any]) -> Dict[str, Any]:
+    ingredient_rel = row.get("ingredients") if isinstance(row, dict) else None
+    quantity = _safe_float(row.get("quantity_used"))
+    ingredient_cost = _safe_float((ingredient_rel or {}).get("cost_per_unit"))
+    line_cost = quantity * ingredient_cost
+    unit_value = row.get("unit") or (ingredient_rel or {}).get("unit")
+    return {
+        "id": str(row.get("id")),
+        "addon_id": row.get("addon_id"),
+        "store_id": row.get("store_id"),
+        "ingredient_id": row.get("ingredient_id"),
+        "quantity_used": quantity,
+        "unit": unit_value,
+        "ingredient_name": (ingredient_rel or {}).get("name"),
+        "ingredient_unit": (ingredient_rel or {}).get("unit"),
+        "cost_per_unit": ingredient_cost,
+        "line_cost": line_cost,
+    }
+
+
+def _fetch_addon_recipes_with_cost(client: Client, store_id: str, addon_id: str) -> Tuple[List[Dict[str, Any]], float]:
+    query = (
+        client.table("product_addon_recipes")
+        .select(
+            "id, store_id, addon_id, ingredient_id, quantity_used, unit, ingredients(name, unit, cost_per_unit)"
+        )
+        .eq("addon_id", addon_id)
+        .order("created_at", desc=False)
+    )
+    try:
+        query = query.eq("store_id", store_id)
+    except Exception:
+        pass
+    resp = query.execute()
+    err = getattr(resp, "error", None)
+    if err:
+        raise HTTPException(status_code=500, detail="addon_recipe_query_failed")
+    rows = getattr(resp, "data", None) or []
+    recipes = [_map_addon_recipe(r) for r in rows]
+    total_cost = sum(_safe_float(r.get("line_cost")) for r in recipes)
+    return recipes, total_cost
+
+
+def _collect_product_addons(client: Client, store_id: str, product_id: str) -> List[Dict[str, Any]]:
+    resp = (
+        client.table("product_addons")
+        .select("id, store_id, product_id, name, code, addon_type, price, max_quantity, is_active, created_at")
+        .eq("store_id", store_id)
+        .eq("product_id", product_id)
+        .order("created_at", desc=False)
+        .execute()
+    )
+    err = getattr(resp, "error", None)
+    if err:
+        raise HTTPException(status_code=500, detail="product_addon_query_failed")
+    rows = getattr(resp, "data", None) or []
+    addons: List[Dict[str, Any]] = []
+    for row in rows:
+        mapped = _map_addon(row)
+        recipes, unit_cost = _fetch_addon_recipes_with_cost(client, store_id, mapped["id"])
+        mapped["recipes"] = recipes
+        mapped["unit_cost"] = unit_cost
+        mapped["unit_profit"] = mapped.get("price", 0) - unit_cost
+        mapped["has_recipe"] = len(recipes) > 0
+        addons.append(mapped)
+    return addons
+
+
+def _get_addon_with_cost(client: Client, store_id: str, addon_id: str) -> Dict[str, Any]:
+    resp = (
+        client.table("product_addons")
+        .select("id, store_id, product_id, name, code, addon_type, price, max_quantity, is_active, created_at")
+        .eq("id", addon_id)
+        .eq("store_id", store_id)
+        .limit(1)
+        .execute()
+    )
+    err = getattr(resp, "error", None)
+    if err:
+        raise HTTPException(status_code=500, detail="product_addon_query_failed")
+    rows = getattr(resp, "data", None) or []
+    if not rows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="addon_not_found")
+    mapped = _map_addon(rows[0])
+    recipes, unit_cost = _fetch_addon_recipes_with_cost(client, store_id, mapped["id"])
+    mapped["recipes"] = recipes
+    mapped["unit_cost"] = unit_cost
+    mapped["unit_profit"] = mapped.get("price", 0) - unit_cost
+    mapped["has_recipe"] = len(recipes) > 0
+    return mapped
+
+
+def _ensure_addon_in_store(client: Client, addon_id: str, store_id: str) -> Dict[str, Any]:
+    resp = client.table("product_addons").select("id, store_id, product_id").eq("id", addon_id).limit(1).execute()
+    err = getattr(resp, "error", None)
+    if err:
+        raise HTTPException(status_code=500, detail="addon_lookup_failed")
+    rows = getattr(resp, "data", None) or []
+    if not rows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="addon_not_found")
+    row = rows[0]
+    if str(row.get("store_id")) != str(store_id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="store_mismatch")
+    return row
+
+
+def _get_addon_recipe_row(client: Client, recipe_id: str) -> Dict[str, Any]:
+    resp = client.table("product_addon_recipes").select("id, store_id, addon_id, ingredient_id").eq("id", recipe_id).limit(1).execute()
+    err = getattr(resp, "error", None)
+    if err:
+        raise HTTPException(status_code=500, detail="addon_recipe_lookup_failed")
+    rows = getattr(resp, "data", None) or []
+    if not rows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="addon_recipe_not_found")
+    return rows[0]
+
+
+def _build_product_options_response(client: Client, product_row: Dict[str, Any], store_id: str) -> Dict[str, Any]:
+    product_id = str(product_row.get("id"))
+    addons = _collect_product_addons(client, store_id, product_id)
+    return {
+        "product_id": product_id,
+        "allow_sweetness": _product_row_allows_sweetness(product_row),
+        "default_sweetness": _product_row_default_sweetness(product_row),
+        "addons": addons,
     }
 
 
@@ -1675,9 +2271,15 @@ def list_menus(authorization: Optional[str] = Header(None), store_id: Optional[s
         raise HTTPException(status_code=500, detail="category_query_failed")
     categories = getattr(categories_resp, "data", None) or []
 
-    prod_select = "id, store_id, name, category_id, base_price, is_active, is_special, image_url, description, created_at, product_categories(name)"
+    prod_select = "id, store_id, name, category_id, base_price, is_active, is_special, image_url, description, created_at, allow_sweetness, default_sweetness, product_categories(name)"
     products_resp = ctx["client"].table("products").select(prod_select).eq("store_id", store_id_resolved).order("created_at", desc=False).execute()
     prod_err = getattr(products_resp, "error", None)
+    if prod_err and any(
+        _is_missing_column(prod_err, col) for col in ["allow_sweetness", "default_sweetness"]
+    ):
+        prod_select = "id, store_id, name, category_id, base_price, is_active, is_special, image_url, description, created_at, product_categories(name)"
+        products_resp = ctx["client"].table("products").select(prod_select).eq("store_id", store_id_resolved).order("created_at", desc=False).execute()
+        prod_err = getattr(products_resp, "error", None)
     if prod_err and _is_missing_column(prod_err, "is_special"):
         prod_select = "id, store_id, name, category_id, base_price, is_active, image_url, description, created_at, product_categories(name)"
         products_resp = ctx["client"].table("products").select(prod_select).eq("store_id", store_id_resolved).order("created_at", desc=False).execute()
@@ -2062,13 +2664,23 @@ def list_recipes(authorization: Optional[str] = Header(None), store_id: Optional
         ctx["client"]
         .table("recipes")
         .select(
-            "id, store_id, product_id, ingredient_id, quantity_used, unit, products(name, base_price, is_active), ingredients(name, unit, cost_per_unit, cost_type, is_active)"
+            "id, store_id, product_id, ingredient_id, quantity_used, unit, products(name, base_price, is_active, allow_sweetness, default_sweetness), ingredients(name, unit, cost_per_unit, cost_type, is_active)"
         )
         .eq("store_id", store_id_resolved)
         .order("product_id", desc=False)
         .execute()
     )
     recipe_error = getattr(recipe_resp, "error", None)
+    if recipe_error and any(_is_missing_column(recipe_error, col) for col in ["allow_sweetness", "default_sweetness"]):
+        recipe_resp = (
+            ctx["client"].table("recipes").select(
+                "id, store_id, product_id, ingredient_id, quantity_used, unit, products(name, base_price, is_active), ingredients(name, unit, cost_per_unit, cost_type, is_active)"
+            )
+            .eq("store_id", store_id_resolved)
+            .order("product_id", desc=False)
+            .execute()
+        )
+        recipe_error = getattr(recipe_resp, "error", None)
     if recipe_error and _is_missing_column(recipe_error, "cost_type"):
         recipe_resp = (
             ctx["client"]
