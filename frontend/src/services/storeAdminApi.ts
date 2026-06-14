@@ -58,6 +58,7 @@ export type ApiIngredient = {
   low_stock_threshold: number;
   supplier_name?: string | null;
   is_active?: boolean;
+  cost_type?: string | null;
   created_at?: string;
 };
 
@@ -67,10 +68,13 @@ export type ApiRecipe = {
   product_id: string;
   ingredient_id: string;
   quantity_used: number;
+  unit?: string | null;
   product_name?: string | null;
   ingredient_name?: string | null;
   ingredient_unit?: string | null;
   ingredient_cost_per_unit?: number;
+  ingredient_cost_type?: string | null;
+  ingredient_is_active?: boolean | null;
   line_cost?: number;
 };
 
@@ -120,6 +124,7 @@ export type RecipePayload = {
   product_id: string;
   ingredient_id: string;
   quantity_used: number;
+  unit?: string;
 };
 
 export type ApiOrderItem = {
@@ -134,6 +139,11 @@ export type ApiOrderItem = {
   line_total: number;
   line_cost: number;
   line_profit: number;
+  option_total?: number;
+  option_cost_total?: number;
+  total_price?: number;
+  total_cost?: number;
+  options?: Record<string, unknown> | null;
   created_at?: string;
 };
 
@@ -335,8 +345,7 @@ export type OrderCancelPayload = {
 export type OrderItemPayload = {
   product_id: string;
   quantity: number;
-  unit_price: number;
-  unit_cost: number;
+  options?: Record<string, unknown>;
 };
 
 export type ApiPayment = {

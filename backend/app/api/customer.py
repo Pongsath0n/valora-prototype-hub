@@ -13,6 +13,8 @@ from supabase import Client
 
 from app.core.config import settings
 from app.core.supabase import SupabaseConfigurationError, get_supabase_admin_client
+from app.services.cost_engine import build_order_item_record, mask_option_costs, prepare_order_item_snapshot
+from app.services.order_item_columns import order_items_supports_store_scope, prune_order_item_columns
 from app.services.storage import StorageUploadError, upload_payment_slip as storage_upload_payment_slip
 from app.services.order_numbers import generate_order_number
 
@@ -30,6 +32,7 @@ class CustomerPayload(BaseModel):
 class CustomerOrderItemPayload(BaseModel):
     product_id: str
     quantity: int
+    options: Optional[Dict[str, Any]] = None
 
 
 class CustomerOrderCreatePayload(BaseModel):
@@ -442,6 +445,7 @@ def _load_order_items(client: Client, order_id: str) -> List[Dict[str, Any]]:
         "quantity",
         "unit_price",
         "total_price",
+        "options",
         "products(image_url)",
     ]
     while True:
@@ -482,6 +486,7 @@ def _load_order_items(client: Client, order_id: str) -> List[Dict[str, Any]]:
                         "line_total": float(line_total or 0.0),
                         "unit_price": unit_price,
                         "image_url": product_image,
+                        "options": mask_option_costs(row.get("options")),
                     }
                 )
             return items
@@ -996,47 +1001,46 @@ def create_customer_order(payload: CustomerOrderCreatePayload) -> Dict[str, Any]
 
     resolved_store_id = payload.store_id
     prepared_items: List[Dict[str, Any]] = []
+    item_snapshots: List[Dict[str, Any]] = []
 
     for item in payload.items:
         quantity = int(item.quantity or 0)
         if quantity <= 0:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="quantity_positive")
 
-        product_rows = _try_select_products(client, None, item.product_id)
-        if not product_rows:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="product_not_found")
-        product = product_rows[0]
-        if not bool(product.get("is_active", True)):
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="product_not_available")
-
-        product_store_id = str(product.get("store_id") or "").strip()
-        if not product_store_id:
+        snapshot = prepare_order_item_snapshot(
+            client,
+            resolved_store_id or payload.store_id or "",
+            product_id=item.product_id,
+            quantity=quantity,
+            channel_id=None,
+            raw_options=item.options,
+        )
+        snapshot_store_id = str(snapshot.get("store_id") or "").strip()
+        if not snapshot_store_id:
             raise HTTPException(status_code=500, detail="store_resolution_failed")
-
-        if resolved_store_id and str(resolved_store_id) != product_store_id:
+        if resolved_store_id and str(resolved_store_id) != snapshot_store_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="store_mismatch")
-        resolved_store_id = product_store_id
-
-        unit_price = float(product.get("base_price") or 0)
-        line_total = unit_price * quantity
-
+        resolved_store_id = snapshot_store_id
+        item_snapshots.append(snapshot)
         prepared_items.append(
             {
-                "product_id": str(product.get("id")),
-                "product_name": product.get("name"),
-                "quantity": quantity,
-                "unit_price": unit_price,
-                "line_total": line_total,
+                "product_id": snapshot.get("product_id"),
+                "product_name": snapshot.get("product_name"),
+                "quantity": snapshot.get("quantity"),
+                "unit_price": float(snapshot.get("unit_price") or 0),
+                "line_total": float(snapshot.get("total_price") or 0),
+                "options": mask_option_costs(snapshot.get("options_snapshot")),
             }
         )
 
     if not resolved_store_id:
         raise HTTPException(status_code=500, detail="store_resolution_failed")
 
-    subtotal = sum(float(item.get("line_total") or 0) for item in prepared_items)
+    subtotal = sum(float(snapshot.get("total_price") or 0) for snapshot in item_snapshots)
     total_amount = subtotal
-    total_cost = 0.0
-    gross_profit = total_amount
+    total_cost = sum(float(snapshot.get("total_cost") or 0) for snapshot in item_snapshots)
+    gross_profit = total_amount - total_cost
 
     customer_id: Optional[str] = None
     try:
@@ -1092,21 +1096,15 @@ def create_customer_order(payload: CustomerOrderCreatePayload) -> Dict[str, Any]
     order_id = str(order_row.get("id"))
 
     item_rows: List[Dict[str, Any]] = []
-    for item in prepared_items:
-        item_rows.append(
-            {
-                "store_id": resolved_store_id,
-                "order_id": order_id,
-                "product_id": item["product_id"],
-                "product_name_snapshot": item["product_name"],
-                "quantity": item["quantity"],
-                "unit_price": item["unit_price"],
-                "unit_cost": 0,
-                "line_total": item["line_total"],
-                "line_cost": 0,
-                "line_profit": item["line_total"],
-            }
+    store_scope_supported = order_items_supports_store_scope(client)
+    for snapshot in item_snapshots:
+        record = build_order_item_record(
+            snapshot,
+            order_id=order_id,
+            store_id=resolved_store_id if store_scope_supported else None,
+            product_name=snapshot.get("product_name"),
         )
+        item_rows.append(prune_order_item_columns(client, record))
     _insert_order_items(client, resolved_store_id, order_id, item_rows)
     _create_initial_payment(
         client,
@@ -1142,6 +1140,7 @@ def create_customer_order(payload: CustomerOrderCreatePayload) -> Dict[str, Any]
                 "quantity": int(item["quantity"]),
                 "unit_price": float(item["unit_price"]),
                 "line_total": float(item["line_total"]),
+                "options": item.get("options"),
             }
             for item in prepared_items
         ],
