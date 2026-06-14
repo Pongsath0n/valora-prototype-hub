@@ -47,6 +47,7 @@ def _mask_addon_cost(snapshot: Dict[str, Any]) -> Dict[str, Any]:
     cleaned = dict(snapshot)
     cleaned.pop("unit_cost", None)
     cleaned.pop("total_cost", None)
+    cleaned.pop("cost_status", None)
     return cleaned
 
 
@@ -54,6 +55,7 @@ def mask_option_costs(options: Any) -> Any:
     if not isinstance(options, dict):
         return options
     sanitized = dict(options)
+    sanitized.pop("cost_status", None)
     addons = sanitized.get("addons")
     if isinstance(addons, list):
         sanitized_addons: List[Any] = []
@@ -145,11 +147,11 @@ def _fetch_ingredients_map(client: Client, store_id: str, ingredient_ids: List[s
     return {str(row.get("id")): row for row in rows if row.get("id")}
 
 
-def _calculate_recipe_cost(client: Client, store_id: str, product_id: str) -> Tuple[float, List[Dict[str, Any]]]:
+def _calculate_recipe_cost(client: Client, store_id: str, product_id: str) -> Tuple[float, List[Dict[str, Any]], str]:
     recipe_rows = _fetch_recipe_rows(client, store_id, product_id)
     if not recipe_rows:
         logger.warning("recipe_missing_for_product store=%s product=%s", store_id, product_id)
-        return 0.0, []
+        return 0.0, [], "missing_recipe"
     ingredient_ids = [str(row.get("ingredient_id")) for row in recipe_rows if row.get("ingredient_id")]
     ingredients_map = _fetch_ingredients_map(client, store_id, ingredient_ids)
     total_cost = 0.0
@@ -172,7 +174,7 @@ def _calculate_recipe_cost(client: Client, store_id: str, product_id: str) -> Tu
                 "cost_type": (ingredient or {}).get("cost_type"),
             }
         )
-    return total_cost, breakdown
+    return total_cost, breakdown, "complete"
 
 
 def _product_allows_sweetness(product: Dict[str, Any]) -> bool:
@@ -268,11 +270,11 @@ def _fetch_addon_recipe_rows(client: Client, store_id: str, addon_id: str) -> Li
     return getattr(resp, "data", None) or []
 
 
-def _calculate_addon_unit_cost(client: Client, store_id: str, addon_id: str) -> Tuple[float, List[Dict[str, Any]]]:
+def _calculate_addon_unit_cost(client: Client, store_id: str, addon_id: str) -> Tuple[float, List[Dict[str, Any]], str]:
     recipe_rows = _fetch_addon_recipe_rows(client, store_id, addon_id)
     if not recipe_rows:
         logger.warning("addon_recipe_missing store=%s addon=%s", store_id, addon_id)
-        return 0.0, []
+        return 0.0, [], "missing_addon_recipe"
     ingredient_ids = [str(row.get("ingredient_id")) for row in recipe_rows if row.get("ingredient_id")]
     ingredients_map = _fetch_ingredients_map(client, store_id, ingredient_ids)
     total_cost = 0.0
@@ -293,7 +295,7 @@ def _calculate_addon_unit_cost(client: Client, store_id: str, addon_id: str) -> 
                 "ingredient_name": (ingredient or {}).get("name"),
             }
         )
-    return total_cost, breakdown
+    return total_cost, breakdown, "complete"
 
 
 def _sanitize_note(raw_options: Any) -> Optional[str]:
@@ -332,7 +334,7 @@ def prepare_order_item_snapshot(
         raise HTTPException(status_code=500, detail="store_resolution_failed")
     base_price = _safe_float(product.get("base_price"))
     unit_price = _resolve_product_price(client, resolved_store_id, product_id, channel_id, base_price)
-    base_cost, base_breakdown = _calculate_recipe_cost(client, resolved_store_id, product_id)
+    base_cost, base_breakdown, base_cost_status = _calculate_recipe_cost(client, resolved_store_id, product_id)
 
     requested_sweetness = _extract_requested_sweetness(raw_options)
     sweetness_value = _normalize_sweetness(product, requested_sweetness)
@@ -346,6 +348,10 @@ def prepare_order_item_snapshot(
     option_cost_total = 0.0
     addon_snapshots: List[Dict[str, Any]] = []
     addon_breakdown: List[Dict[str, Any]] = []
+    cost_status_summary: Dict[str, Any] = {}
+    if base_cost_status != "complete":
+        cost_status_summary["base"] = base_cost_status
+
     for addon_id, addon_qty in addon_quantities.items():
         addon_row = addon_rows.get(addon_id)
         if not addon_row:
@@ -355,23 +361,26 @@ def prepare_order_item_snapshot(
         if addon_price is None:
             addon_price = addon_row.get("unit_price")
         addon_unit_price = _safe_float(addon_price)
-        addon_unit_cost, addon_cost_breakdown = _calculate_addon_unit_cost(client, resolved_store_id, addon_id)
+        addon_unit_cost, addon_cost_breakdown, addon_cost_status = _calculate_addon_unit_cost(client, resolved_store_id, addon_id)
         addon_total_price = addon_unit_price * addon_qty
         addon_total_cost = addon_unit_cost * addon_qty
         option_total += addon_total_price
         option_cost_total += addon_total_cost
-        addon_snapshots.append(
-            {
-                "addon_id": addon_id,
-                "code": addon_row.get("code") or addon_row.get("reference"),
-                "name": addon_row.get("name"),
-                "quantity": addon_qty,
-                "unit_price": addon_unit_price,
-                "unit_cost": addon_unit_cost,
-                "total_price": addon_total_price,
-                "total_cost": addon_total_cost,
-            }
-        )
+        addon_snapshot = {
+            "addon_id": addon_id,
+            "code": addon_row.get("code") or addon_row.get("reference"),
+            "name": addon_row.get("name"),
+            "quantity": addon_qty,
+            "unit_price": addon_unit_price,
+            "unit_cost": addon_unit_cost,
+            "total_price": addon_total_price,
+            "total_cost": addon_total_cost,
+        }
+        if addon_cost_status != "complete":
+            addon_snapshot["cost_status"] = addon_cost_status
+            addons_status = cost_status_summary.setdefault("addons", {})
+            addons_status[addon_id] = addon_cost_status
+        addon_snapshots.append(addon_snapshot)
         addon_breakdown.extend(
             {
                 **detail,
@@ -385,6 +394,8 @@ def prepare_order_item_snapshot(
         "sweetness_label": _sweetness_label(sweetness_value),
         "addons": addon_snapshots,
     }
+    if cost_status_summary:
+        options_snapshot["cost_status"] = cost_status_summary
     if note_value:
         options_snapshot["note"] = note_value
 

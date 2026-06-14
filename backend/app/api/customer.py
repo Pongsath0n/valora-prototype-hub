@@ -15,6 +15,7 @@ from app.core.config import settings
 from app.core.supabase import SupabaseConfigurationError, get_supabase_admin_client
 from app.services.cost_engine import build_order_item_record, mask_option_costs, prepare_order_item_snapshot
 from app.services.order_item_columns import order_items_supports_store_scope, prune_order_item_columns
+from app.services.order_totals import recalculate_order_totals
 from app.services.storage import StorageUploadError, upload_payment_slip as storage_upload_payment_slip
 from app.services.order_numbers import generate_order_number
 
@@ -349,71 +350,6 @@ def _insert_order_items(client: Client, store_id: str, order_id: str, rows: List
             if changed:
                 continue
         raise HTTPException(status_code=500, detail="customer_order_items_create_failed")
-
-
-def _recalculate_order_totals(client: Client, store_id: str, order_id: str) -> None:
-    query = client.table("order_items").select("quantity, unit_price, unit_cost").eq("order_id", order_id)
-    query = query.eq("store_id", store_id)
-    try:
-        resp = query.execute()
-        err = getattr(resp, "error", None)
-    except Exception as exc:
-        resp = None
-        err = exc
-    if err and _extract_missing_column(err) == "store_id":
-        try:
-            resp = client.table("order_items").select("quantity, unit_price, unit_cost").eq("order_id", order_id).execute()
-            err = getattr(resp, "error", None)
-        except Exception as exc:
-            resp = None
-            err = exc
-    if err:
-        raise HTTPException(status_code=500, detail="customer_order_totals_recalc_failed")
-
-    items = getattr(resp, "data", None) or []
-    subtotal = 0.0
-    total_cost = 0.0
-    for item in items:
-        qty = float(item.get("quantity") or 0)
-        unit_price = float(item.get("unit_price") or 0)
-        unit_cost = float(item.get("unit_cost") or 0)
-        subtotal += qty * unit_price
-        total_cost += qty * unit_cost
-
-    total_amount = subtotal
-    gross_profit = total_amount - total_cost
-
-    update_data = {
-        "subtotal": subtotal,
-        "channel_fee": 0,
-        "total_amount": total_amount,
-        "total_cost": total_cost,
-        "gross_profit": gross_profit,
-    }
-    try:
-        update_resp = client.table("orders").update(update_data).eq("id", order_id).eq("store_id", store_id).execute()
-        update_err = getattr(update_resp, "error", None)
-    except Exception as exc:
-        update_resp = None
-        update_err = exc
-    if update_err and _extract_missing_column(update_err) == "channel_fee":
-        fallback = {
-            "subtotal": subtotal,
-            "channel_fee_total": 0,
-            "total_amount": total_amount,
-            "total_cost": total_cost,
-            "gross_profit": gross_profit,
-        }
-        try:
-            update_resp = client.table("orders").update(fallback).eq("id", order_id).eq("store_id", store_id).execute()
-            update_err = getattr(update_resp, "error", None)
-        except Exception as exc:
-            update_resp = None
-            update_err = exc
-    if update_err:
-        raise HTTPException(status_code=500, detail="customer_order_totals_recalc_failed")
-
-
 def _order_select_columns() -> List[str]:
     return [
         "id",
@@ -1218,6 +1154,9 @@ def create_customer_order(payload: CustomerOrderCreatePayload) -> Dict[str, Any]
         )
         item_rows.append(prune_order_item_columns(client, record))
     _insert_order_items(client, resolved_store_id, order_id, item_rows)
+    totals = recalculate_order_totals(client, resolved_store_id, order_id)
+    if totals:
+        order_row.update(totals)
     _create_initial_payment(
         client,
         order_id,

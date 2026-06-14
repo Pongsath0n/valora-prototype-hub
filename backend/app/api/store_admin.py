@@ -35,6 +35,7 @@ from app.services.order_item_columns import (
     order_items_supports_store_scope,
     prune_order_item_columns,
 )
+from app.services.order_totals import recalculate_order_totals, resolve_channel_fee
 from app.services.notification_sender import send_line_notification
 from app.services.order_numbers import generate_order_number
 from app.services.storage import StorageUploadError, create_signed_slip_url, upload_public_asset
@@ -3950,117 +3951,6 @@ def _load_latest_payments(client: Client, order_ids: List[str]) -> Dict[str, Dic
     return latest_map
 
 
-def _resolve_channel_fee(client: Client, store_id: str, channel_id: Optional[str], subtotal: float) -> float:
-    if not channel_id:
-        return 0.0
-    query = (
-        client.table("sales_channels")
-        .select("fee_type, fee_value")
-        .eq("id", channel_id)
-        .eq("store_id", store_id)
-        .limit(1)
-    )
-    try:
-        resp = query.execute()
-    except Exception as exc:  # pragma: no cover - defensive
-        logger.warning(
-            "channel_fee_lookup_failed store=%s channel=%s error=%s",
-            _short_identifier(store_id),
-            _short_identifier(channel_id),
-            getattr(exc, "message", str(exc)),
-        )
-        return 0.0
-    if getattr(resp, "error", None):
-        logger.warning(
-            "channel_fee_lookup_error store=%s channel=%s error=%s",
-            _short_identifier(store_id),
-            _short_identifier(channel_id),
-            getattr(resp.error, "message", str(resp.error)),
-        )
-        return 0.0
-    rows = getattr(resp, "data", None) or []
-    if not rows:
-        return 0.0
-    fee_type = str(rows[0].get("fee_type") or "none")
-    fee_value = float(rows[0].get("fee_value") or 0)
-    if fee_type == "percent":
-        return subtotal * (fee_value / 100)
-    if fee_type == "fixed":
-        return fee_value
-    return 0.0
-
-
-def _recalculate_order_totals(client: Client, store_id: str, order_id: str) -> None:
-    select_columns = [
-        "quantity",
-        "unit_price",
-        "unit_cost",
-        "total_price",
-        "total_cost",
-        "line_total",
-        "line_cost",
-    ]
-    optional_columns = {"total_price", "total_cost", "line_total", "line_cost"}
-    while True:
-        query = client.table("order_items").select(", ".join(select_columns)).eq("order_id", order_id)
-        if order_items_supports_store_scope(client):
-            query = query.eq("store_id", store_id)
-        items_resp = query.execute()
-        err = getattr(items_resp, "error", None)
-        if not err:
-            break
-        missing_col = _extract_missing_column(err)
-        if missing_col and missing_col in optional_columns:
-            select_columns = [col for col in select_columns if col != missing_col]
-            if not select_columns:
-                raise HTTPException(status_code=500, detail="order_totals_recalc_failed")
-            continue
-        raise HTTPException(status_code=500, detail="order_totals_recalc_failed")
-    items = getattr(items_resp, "data", None) or []
-
-    subtotal = 0.0
-    total_cost = 0.0
-    for item in items:
-        subtotal += _line_total(item)
-        total_cost += _line_cost(item)
-
-    order_resp = client.table("orders").select("id, channel_id, discount_amount").eq("id", order_id).eq("store_id", store_id).limit(1).execute()
-    if getattr(order_resp, "error", None):
-        raise HTTPException(status_code=500, detail="order_lookup_failed")
-    rows = getattr(order_resp, "data", None) or []
-    if not rows:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="order_not_found")
-    order_row = rows[0]
-
-    channel_fee = _resolve_channel_fee(client, store_id, order_row.get("channel_id"), subtotal)
-    discount_amount = float(order_row.get("discount_amount") or 0)
-    total_amount = subtotal + channel_fee - discount_amount
-    gross_profit = total_amount - total_cost - channel_fee
-
-    update_data = {
-        "subtotal": subtotal,
-        "total_cost": total_cost,
-        "channel_fee": channel_fee,
-        "total_amount": total_amount,
-        "gross_profit": gross_profit,
-    }
-    update_resp = client.table("orders").update(update_data).eq("id", order_id).eq("store_id", store_id).execute()
-    if getattr(update_resp, "error", None):
-        err = getattr(update_resp, "error")
-        if _is_missing_column(err, "channel_fee"):
-            fallback = {
-                "subtotal": subtotal,
-                "total_cost": total_cost,
-                "channel_fee_total": channel_fee,
-                "total_amount": total_amount,
-                "gross_profit": gross_profit,
-            }
-            update_resp = client.table("orders").update(fallback).eq("id", order_id).eq("store_id", store_id).execute()
-            if getattr(update_resp, "error", None):
-                raise HTTPException(status_code=500, detail="order_totals_recalc_failed")
-        else:
-            raise HTTPException(status_code=500, detail="order_totals_recalc_failed")
-
 
 def _write_order_status_log(
     client: Client,
@@ -4240,7 +4130,7 @@ def create_order(payload: OrderCreate, authorization: Optional[str] = Header(Non
     subtotal = sum(float(snapshot.get("total_price") or 0) for snapshot in item_snapshots)
     total_cost = sum(float(snapshot.get("total_cost") or 0) for snapshot in item_snapshots)
     discount_amount = float(data.get("discount_amount") or 0)
-    channel_fee = _resolve_channel_fee(ctx["client"], store_id_resolved, channel_id_value, subtotal)
+    channel_fee = resolve_channel_fee(ctx["client"], store_id_resolved, channel_id_value, subtotal)
     total_amount = subtotal + channel_fee - discount_amount
     gross_profit = total_amount - total_cost - channel_fee
 
@@ -4302,7 +4192,7 @@ def create_order(payload: OrderCreate, authorization: Optional[str] = Header(Non
         if getattr(item_resp, "error", None):
             raise HTTPException(status_code=500, detail="order_items_create_failed")
 
-    _recalculate_order_totals(ctx["client"], store_id_resolved, order_id)
+    recalculate_order_totals(ctx["client"], store_id_resolved, order_id)
     initial_status = str(created.get("status") or data.get("status") or "pending_payment")
     _write_order_status_log(ctx["client"], order_id, None, initial_status, ctx.get("user_id"), payload.note)
     return {"id": order_id, "status": "created"}
@@ -4385,7 +4275,7 @@ def update_order(order_id: str, payload: OrderUpdate, authorization: Optional[st
     if getattr(resp, "error", None):
         raise HTTPException(status_code=500, detail="order_update_failed")
 
-    _recalculate_order_totals(ctx["client"], store_id_resolved, order_id)
+    recalculate_order_totals(ctx["client"], store_id_resolved, order_id)
 
     new_status = next_status
     response: Dict[str, Any] = {"id": order_id, "status": "updated"}
@@ -4648,7 +4538,7 @@ def create_order_item(order_id: str, payload: OrderItemPayload, authorization: O
     if getattr(resp, "error", None):
         raise HTTPException(status_code=500, detail="order_item_create_failed")
     rows = getattr(resp, "data", None) or []
-    _recalculate_order_totals(ctx["client"], store_id_resolved, order_id)
+    recalculate_order_totals(ctx["client"], store_id_resolved, order_id)
     return _map_order_item(rows[0] if rows else pruned_insert)
 
 
@@ -4715,7 +4605,7 @@ def update_order_item(item_id: str, payload: OrderItemUpdate, authorization: Opt
         raise HTTPException(status_code=500, detail="order_item_update_failed")
     rows = getattr(resp, "data", None) or []
     updated = rows[0] if rows else (row | pruned_update)
-    _recalculate_order_totals(ctx["client"], store_id_resolved, order_id_value)
+    recalculate_order_totals(ctx["client"], store_id_resolved, order_id_value)
     return _map_order_item(updated)
 
 
@@ -4740,7 +4630,7 @@ def delete_order_item(item_id: str, authorization: Optional[str] = Header(None),
     if order_items_supports_store_scope(ctx["client"]):
         delete_item_query = delete_item_query.eq("store_id", store_id_resolved)
     delete_item_query.execute()
-    _recalculate_order_totals(ctx["client"], store_id_resolved, str(row.get("order_id")))
+    recalculate_order_totals(ctx["client"], store_id_resolved, str(row.get("order_id")))
     return {"status": "deleted"}
 
 
