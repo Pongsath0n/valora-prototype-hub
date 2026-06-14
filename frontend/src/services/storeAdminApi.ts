@@ -216,18 +216,34 @@ export type DashboardRecentOrder = {
   latest_payment?: LatestPaymentSummary | null;
 };
 
+export type DashboardTrendPoint = {
+  date: string;
+  sales_amount: number;
+  cost_amount: number;
+  profit_amount: number;
+  order_count: number;
+};
+
 export type DashboardSummaryResponse = {
   store_id: string;
   store_timezone?: string | null;
+  store_timezone_offset?: string | null;
+  store_timezone_display?: string | null;
   today_orders_count: number;
   confirmed_revenue_today: number;
   pending_revenue_today: number;
   pending_payment_review_count: number;
+  pending_payment_review_value: number;
+  today_cost_amount: number;
+  today_profit_amount: number;
+  today_completed_orders_count: number;
+  today_cancelled_orders_count: number;
   paid_orders_count: number;
   active_orders_count: number;
   completed_orders_count: number;
   queues: Record<DashboardQueueStatus | string, number>;
   recent_orders: DashboardRecentOrder[];
+  seven_day_trend: DashboardTrendPoint[];
 };
 
 export type SalesReportSummary = {

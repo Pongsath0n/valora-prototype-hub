@@ -1,10 +1,12 @@
 import { Link } from "react-router-dom";
 import { useEffect, useState, type ReactNode } from "react";
+import { Area, AreaChart, CartesianGrid, Line, XAxis, YAxis } from "recharts";
 import AppLayout from "@/components/AppLayout";
 import DataTable, { type Column } from "@/components/shared/DataTable";
 import LoadingState from "@/components/shared/LoadingState";
 import StatusBadge, { type BadgeTone } from "@/components/shared/StatusBadge";
 import { type AppRole, useRoleGuard } from "@/lib/guards";
+import { ChartContainer, ChartLegend, ChartLegendContent, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
 import {
   storeAdminApi,
   type DashboardQueueStatus,
@@ -15,7 +17,10 @@ import {
 const DASHBOARD_ALLOWED_ROLES: AppRole[] = ["owner", "admin", "manager"];
 const currencyFormatter = new Intl.NumberFormat("th-TH", { style: "currency", currency: "THB" });
 const numberFormatter = new Intl.NumberFormat("th-TH");
+const trendTickFormatter = new Intl.DateTimeFormat("th-TH", { weekday: "short", day: "numeric" });
 const dateTimeFormatter = new Intl.DateTimeFormat("th-TH", { dateStyle: "medium", timeStyle: "short" });
+const compactNumberFormatter = new Intl.NumberFormat("th-TH", { notation: "compact", maximumFractionDigits: 1 });
+const DEFAULT_TIMEZONE_DISPLAY = "Asia/Bangkok (UTC+7)";
 
 const queueStatusDefinitions: { key: DashboardQueueStatus; label: string }[] = [
   { key: "pending_payment", label: "รอชำระ" },
@@ -119,13 +124,63 @@ export default function DashboardPage() {
   }
 
   const summary = state.data;
-  const metricCards = [
-    { label: "ยอดขายยืนยันแล้ววันนี้", value: formatCurrency(summary.confirmed_revenue_today) },
-    { label: "ยอดรอตรวจสลิป", value: formatCurrency(summary.pending_revenue_today) },
-    { label: "จำนวนออเดอร์วันนี้", value: formatNumber(summary.today_orders_count) },
-    { label: "รายการรอตรวจสลิป", value: formatNumber(summary.pending_payment_review_count) },
-    { label: "ออเดอร์ที่ชำระแล้ว", value: formatNumber(summary.paid_orders_count) },
+  const timezoneDisplay = summary.store_timezone_display || buildTimezoneDisplay(summary);
+  const trendData = (summary.seven_day_trend ?? []).map((point) => ({ ...point }));
+  const financialCards = [
+    {
+      label: "ยอดขายที่ชำระแล้ววันนี้",
+      value: formatCurrency(summary.confirmed_revenue_today),
+      helper: "รวมเฉพาะออเดอร์ที่ยืนยันการชำระแล้ว",
+    },
+    {
+      label: "ต้นทุนวันนี้",
+      value: formatCurrency(summary.today_cost_amount),
+      helper: "Snapshot ต้นทุนจากออเดอร์ที่ชำระแล้ว",
+    },
+    {
+      label: "กำไรวันนี้",
+      value: formatCurrency(summary.today_profit_amount),
+      helper: "ยอดขายลบต้นทุนของออเดอร์ที่ชำระแล้ว",
+    },
   ];
+  const operationsCards = [
+    {
+      label: "ออเดอร์วันนี้ทั้งหมด",
+      value: formatNumber(summary.today_orders_count),
+      helper: "รวมทุกสถานะที่สร้างในวันนี้",
+    },
+    {
+      label: "รอตรวจสลิป",
+      value: formatNumber(summary.pending_payment_review_count),
+      helper: "จำนวนรายการที่อยู่ในคิวรอตรวจ",
+    },
+    {
+      label: "มูลค่ารอตรวจสลิป",
+      value: formatCurrency(summary.pending_payment_review_value),
+      helper: "ยอดรวมออเดอร์ที่ยังไม่ได้ยืนยันสลิป",
+    },
+    {
+      label: "ออเดอร์กำลังดำเนินการ",
+      value: formatNumber(summary.active_orders_count),
+      helper: "ยังไม่เสร็จสิ้น / ไม่ถูกยกเลิก",
+    },
+    {
+      label: "ออเดอร์สำเร็จวันนี้",
+      value: formatNumber(summary.today_completed_orders_count),
+      helper: "เปลี่ยนสถานะเป็นเสร็จสิ้นภายในวันนี้",
+    },
+    {
+      label: "ออเดอร์ยกเลิกวันนี้",
+      value: formatNumber(summary.today_cancelled_orders_count),
+      helper: "ยกเลิกภายในวันนี้",
+    },
+  ];
+  const trendChartConfig = {
+    sales_amount: { label: "ยอดขาย", color: "hsl(142, 71%, 45%)" },
+    cost_amount: { label: "ต้นทุน", color: "hsl(27, 96%, 61%)" },
+    profit_amount: { label: "กำไร", color: "hsl(221, 83%, 53%)" },
+    order_count: { label: "จำนวนออเดอร์", color: "hsl(260, 83%, 57%)" },
+  } as const;
 
   const queueRows = queueStatusDefinitions.map(({ key, label }) => ({
     key,
@@ -175,7 +230,7 @@ export default function DashboardPage() {
           <div>
             <h1 className="text-3xl font-bold tracking-tight">แดชบอร์ดธุรกิจ</h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              ข้อมูลจริงจากออเดอร์และการชำระเงินของร้าน • เขตเวลา: {summary.store_timezone || "UTC"}
+              ข้อมูลจริงจากออเดอร์และการชำระเงินของร้าน • เขตเวลา: {timezoneDisplay}
             </p>
           </div>
           <div className="flex flex-col gap-2 sm:flex-row">
@@ -199,11 +254,27 @@ export default function DashboardPage() {
           </p>
         </Link>
 
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-          {metricCards.map((card) => (
-            <MetricCard key={card.label} label={card.label} value={card.value} />
-          ))}
-        </div>
+        <section className="space-y-4">
+          <div>
+            <div className="mb-2 flex items-center justify-between">
+              <h2 className="text-base font-semibold text-foreground">การเงินวันนี้</h2>
+              <p className="text-xs text-muted-foreground">เวลาร้าน: {timezoneDisplay}</p>
+            </div>
+            <div className="grid gap-3 md:grid-cols-3">
+              {financialCards.map((card) => (
+                <MetricCard key={card.label} label={card.label} value={card.value} helper={card.helper} />
+              ))}
+            </div>
+          </div>
+          <div>
+            <h2 className="mb-2 text-base font-semibold text-foreground">สถานะออเดอร์ & การตรวจสลิป</h2>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3">
+              {operationsCards.map((card) => (
+                <MetricCard key={card.label} label={card.label} value={card.value} helper={card.helper} />
+              ))}
+            </div>
+          </div>
+        </section>
 
         <div className="grid gap-4 lg:grid-cols-3">
           <Panel title="ภาพรวมสถานะออเดอร์">
@@ -223,18 +294,102 @@ export default function DashboardPage() {
             <div className="rounded-2xl bg-amber-50 p-4 text-amber-900 shadow-inner">
               <p className="text-xs uppercase tracking-[0.3em]">Pending review</p>
               <p className="mt-2 text-4xl font-bold">{formatNumber(summary.pending_payment_review_count)}</p>
-              <p className="mt-1 text-sm text-amber-900/80">รายการที่ต้องตรวจสอบเพิ่มเติมใน Store Admin</p>
+              <p className="text-sm text-amber-900/80">รายการที่ต้องตรวจสอบเพิ่มเติมใน Store Admin</p>
+              <div className="mt-4 rounded-xl bg-white/70 px-4 py-3 text-amber-900">
+                <div className="flex items-center justify-between text-sm">
+                  <span>มูลค่ารวม</span>
+                  <span className="font-semibold">{formatCurrency(summary.pending_payment_review_value)}</span>
+                </div>
+                <div className="mt-1 text-xs text-amber-900/70">กดที่ปุ่มด้านล่างเพื่อตรวจสลิป</div>
+              </div>
+              <Link
+                to="/store-admin/orders"
+                className="mt-3 inline-flex w-full items-center justify-center rounded-xl border border-amber-900/20 bg-amber-900/10 px-3 py-2 text-sm font-semibold text-amber-900 transition hover:bg-amber-900/20"
+              >
+                เปิดหน้าตรวจสลิป
+              </Link>
             </div>
           </Panel>
 
           <Panel title="สถานะการดำเนินการ">
             <div className="space-y-3">
-              <ListStat label="ออเดอร์กำลังดำเนินการ" value={formatNumber(summary.active_orders_count)} />
-              <ListStat label="ออเดอร์เสร็จสิ้น" value={formatNumber(summary.completed_orders_count)} />
-              <ListStat label="ออเดอร์ชำระแล้ว" value={formatNumber(summary.paid_orders_count)} />
+              <ListStat label="ออเดอร์กำลังดำเนินการ (ทั้งหมด)" value={formatNumber(summary.active_orders_count)} />
+              <ListStat label="ออเดอร์เสร็จสิ้น (ทั้งหมด)" value={formatNumber(summary.completed_orders_count)} />
+              <ListStat label="ออเดอร์ที่ชำระแล้ว (ทั้งหมด)" value={formatNumber(summary.paid_orders_count)} />
             </div>
           </Panel>
         </div>
+
+        <Section title="เทรนด์ 7 วันที่ผ่านมา">
+          {trendData.length ? (
+            <ChartContainer config={trendChartConfig} className="min-h-[320px] w-full">
+              <AreaChart data={trendData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" strokeOpacity={0.4} />
+                <XAxis dataKey="date" tickFormatter={formatTrendTickLabel} tickMargin={8} />
+                <YAxis
+                  yAxisId="currency"
+                  tickFormatter={(value) => formatCompactCurrency(Number(value))}
+                  width={80}
+                />
+                <YAxis
+                  yAxisId="orders"
+                  orientation="right"
+                  tickFormatter={(value) => formatNumber(value as number)}
+                  width={60}
+                />
+                <ChartTooltip
+                  content={
+                    <ChartTooltipContent
+                      labelFormatter={(value) => formatTrendTickLabel(String(value))}
+                      formatter={(value, name, item) => trendTooltipFormatter(value, name, item)}
+                    />
+                  }
+                />
+                <ChartLegend content={<ChartLegendContent />} verticalAlign="top" />
+                <Area
+                  type="monotone"
+                  dataKey="sales_amount"
+                  yAxisId="currency"
+                  stroke="var(--color-sales_amount)"
+                  fill="var(--color-sales_amount)"
+                  fillOpacity={0.15}
+                  strokeWidth={2}
+                />
+                <Area
+                  type="monotone"
+                  dataKey="cost_amount"
+                  yAxisId="currency"
+                  stroke="var(--color-cost_amount)"
+                  fill="var(--color-cost_amount)"
+                  fillOpacity={0.12}
+                  strokeWidth={2}
+                />
+                <Area
+                  type="monotone"
+                  dataKey="profit_amount"
+                  yAxisId="currency"
+                  stroke="var(--color-profit_amount)"
+                  fill="var(--color-profit_amount)"
+                  fillOpacity={0.12}
+                  strokeWidth={2}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="order_count"
+                  yAxisId="orders"
+                  stroke="var(--color-order_count)"
+                  strokeWidth={2.4}
+                  dot={false}
+                  activeDot={{ r: 4 }}
+                />
+              </AreaChart>
+            </ChartContainer>
+          ) : (
+            <div className="rounded-xl border border-dashed border-muted-foreground/30 p-8 text-center text-sm text-muted-foreground">
+              ยังไม่มีข้อมูลเพียงพอสำหรับสร้างเทรนด์ 7 วัน
+            </div>
+          )}
+        </Section>
 
         <Section title="ออเดอร์ล่าสุด">
           <DataTable columns={recentColumns} rows={summary.recent_orders} />
@@ -244,11 +399,18 @@ export default function DashboardPage() {
   );
 }
 
-function MetricCard({ label, value }: { label: string; value: string }) {
+type ChartTooltipItem = {
+  dataKey?: string | number | symbol;
+};
+
+type ChartTooltipValue = number | string | (number | string)[];
+
+function MetricCard({ label, value, helper }: { label: string; value: string; helper?: string }) {
   return (
     <div className="rounded-2xl border bg-card/70 p-4 shadow-sm">
-      <p className="text-xs uppercase tracking-[0.3em] text-muted-foreground">{label}</p>
+      <p className="text-sm font-medium text-muted-foreground">{label}</p>
       <p className="mt-2 text-2xl font-semibold text-foreground">{value}</p>
+      {helper ? <p className="mt-1 text-xs text-muted-foreground">{helper}</p> : null}
     </div>
   );
 }
@@ -297,6 +459,16 @@ function ListStat({ label, value }: { label: string; value: string }) {
   );
 }
 
+function buildTimezoneDisplay(summary: DashboardSummaryResponse): string {
+  const base = summary.store_timezone || "Asia/Bangkok";
+  const offset = summary.store_timezone_offset || "UTC+7";
+  const display = summary.store_timezone_display;
+  if (display) {
+    return display;
+  }
+  return `${base} (${offset})` || DEFAULT_TIMEZONE_DISPLAY;
+}
+
 function statusLabel(value?: string | null): string {
   if (!value) return "-";
   return STATUS_LABELS[value.toLowerCase()] ?? value;
@@ -323,6 +495,11 @@ function formatCurrency(value?: number | null): string {
   return currencyFormatter.format(value ?? 0);
 }
 
+function formatCompactCurrency(value?: number | null): string {
+  if (!value) return "฿0";
+  return `฿${compactNumberFormatter.format(value)}`;
+}
+
 function formatNumber(value?: number | null): string {
   return numberFormatter.format(value ?? 0);
 }
@@ -334,4 +511,39 @@ function formatDate(value?: string | null): string {
   } catch {
     return value;
   }
+}
+
+function formatTrendTickLabel(value?: string): string {
+  if (!value) return "-";
+  const parsed = parseDateOnly(value);
+  if (!parsed) return value;
+  return trendTickFormatter.format(parsed);
+}
+
+function parseDateOnly(value?: string): Date | null {
+  if (!value) return null;
+  const [year, month, day] = value.split("-").map((part) => Number(part));
+  if (!year || !month || !day) return null;
+  return new Date(Date.UTC(year, month - 1, day));
+}
+
+function trendTooltipFormatter(value: ChartTooltipValue, name: string | number, item?: ChartTooltipItem) {
+  const numericValue = Array.isArray(value) ? Number(value[0]) : Number(value);
+  const key = String(item?.dataKey || name);
+  const isOrderCount = key === "order_count";
+  const displayValue = isOrderCount ? formatNumber(numericValue || 0) : formatCurrency(numericValue || 0);
+  return (
+    <div className="flex w-full items-center justify-between gap-4">
+      <span className="text-muted-foreground">{trendLabelForKey(key)}</span>
+      <span className="font-semibold text-foreground">{displayValue}</span>
+    </div>
+  );
+}
+
+function trendLabelForKey(key: string): string {
+  if (key === "sales_amount") return "ยอดขาย";
+  if (key === "cost_amount") return "ต้นทุน";
+  if (key === "profit_amount") return "กำไร";
+  if (key === "order_count") return "จำนวนออเดอร์";
+  return key;
 }

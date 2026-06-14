@@ -7,7 +7,7 @@ from io import StringIO
 from typing import Any, Callable, Dict, List, Optional, Tuple, Literal, Set, Union
 from uuid import uuid4
 
-from fastapi import APIRouter, File, Header, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Header, HTTPException, UploadFile, status
 from fastapi.responses import Response
 from pydantic import BaseModel
 from supabase import Client
@@ -16,6 +16,15 @@ try:  # Python 3.9+
     from zoneinfo import ZoneInfo  # type: ignore
 except Exception:  # pragma: no cover
     ZoneInfo = None  # type: ignore
+
+DEFAULT_BUSINESS_TIMEZONE = "Asia/Bangkok"
+if ZoneInfo is not None:
+    try:
+        _DEFAULT_TZINFO = ZoneInfo(DEFAULT_BUSINESS_TIMEZONE)
+    except Exception:  # pragma: no cover - tzdata missing
+        _DEFAULT_TZINFO = timezone(timedelta(hours=7))
+else:  # pragma: no cover - zoneinfo unavailable
+    _DEFAULT_TZINFO = timezone(timedelta(hours=7))
 
 from app.core.config import settings
 from app.core.supabase import SupabaseConfigurationError, get_supabase_admin_client
@@ -66,6 +75,7 @@ CONFIRMED_PAYMENT_STATUSES: Set[str] = {"paid"}
 PENDING_REVIEW_PAYMENT_STATUSES: Set[str] = {"pending_review"}
 _FINALIZED_ORDER_STATUSES: Set[str] = {"completed"} | CANCELLED_ORDER_STATUSES
 _RECENT_ORDERS_LIMIT = 10
+_DASHBOARD_TREND_DAYS = 7
 
 _BUSINESS_ROLES: Set[str] = {"owner", "admin", "manager"}
 _MANAGERIAL_ROLES: Set[str] = set(_BUSINESS_ROLES)
@@ -847,25 +857,46 @@ def _line_profit(row: Dict[str, Any]) -> float:
     if row.get("line_profit") is not None:
         return _parse_float(row.get("line_profit"))
     return _line_total(row) - _line_cost(row)
+
+
+def _normalize_timezone_name(value: Optional[str]) -> str:
+    candidate = str(value or "").strip()
+    return candidate or DEFAULT_BUSINESS_TIMEZONE
+
+
+def _get_store_timezone(client: Client, store_id: str) -> str:
+    try:
+        resp = client.table("stores").select("timezone").eq("id", store_id).limit(1).execute()
+    except Exception:
+        return DEFAULT_BUSINESS_TIMEZONE
     error = getattr(resp, "error", None)
     if error:
         if _is_missing_column(error, "timezone"):
-            return None
-        return None
+            return DEFAULT_BUSINESS_TIMEZONE
+        return DEFAULT_BUSINESS_TIMEZONE
     rows = getattr(resp, "data", None) or []
     tz_value = rows[0].get("timezone") if rows else None
-    if tz_value:
-        return str(tz_value)
-    return None
+    return _normalize_timezone_name(tz_value)
 
 
 def _resolve_timezone(store_tz: Optional[str]):
-    if store_tz and ZoneInfo is not None:
+    tz_name = _normalize_timezone_name(store_tz)
+    if ZoneInfo is not None:
         try:
-            return ZoneInfo(store_tz)
+            return ZoneInfo(tz_name)
         except Exception:
-            return timezone.utc
-    return timezone.utc
+            return _DEFAULT_TZINFO
+    return _DEFAULT_TZINFO
+
+
+def _format_timezone_offset(tzinfo) -> str:
+    probe = datetime.now(tzinfo) if tzinfo else datetime.now(_DEFAULT_TZINFO)
+    offset = probe.utcoffset() or timedelta()
+    total_minutes = int(offset.total_seconds() // 60)
+    sign = "+" if total_minutes >= 0 else "-"
+    hours = abs(total_minutes) // 60
+    minutes = abs(total_minutes) % 60
+    return f"UTC{sign}{hours:02d}:{minutes:02d}"
 
 
 def _today_range(store_tz: Optional[str]) -> Tuple[datetime, datetime]:
@@ -2727,7 +2758,7 @@ def _generate_sales_report(
 
 @router.get("/reports/sales")
 def get_sales_report(
-    filters: SalesReportFilters = SalesReportFilters(),
+    filters: SalesReportFilters = Depends(),
     authorization: Optional[str] = Header(None),
     store_id: Optional[str] = None,
 ) -> Dict[str, Any]:
@@ -2740,7 +2771,7 @@ def get_sales_report(
 
 @router.get("/reports/sales/export")
 def export_sales_report_csv(
-    filters: SalesReportFilters = SalesReportFilters(),
+    filters: SalesReportFilters = Depends(),
     authorization: Optional[str] = Header(None),
     store_id: Optional[str] = None,
 ) -> Response:
@@ -3109,6 +3140,23 @@ def _map_recent_order(order: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _init_trend_buckets(today_start: datetime) -> Tuple[List[str], Dict[str, Dict[str, Any]]]:
+    ordered_keys: List[str] = []
+    buckets: Dict[str, Dict[str, Any]] = {}
+    for delta in range(_DASHBOARD_TREND_DAYS - 1, -1, -1):
+        day = (today_start - timedelta(days=delta)).date()
+        key = day.isoformat()
+        ordered_keys.append(key)
+        buckets[key] = {
+            "date": key,
+            "sales_amount": 0.0,
+            "cost_amount": 0.0,
+            "profit_amount": 0.0,
+            "order_count": 0,
+        }
+    return ordered_keys, buckets
+
+
 def _build_dashboard_summary(orders: List[Dict[str, Any]], today_start: datetime, today_end: datetime) -> Dict[str, Any]:
     tzinfo = today_start.tzinfo or timezone.utc
     queue_counts: Dict[str, int] = {status: 0 for status in _DASHBOARD_QUEUE_STATUSES}
@@ -3116,11 +3164,18 @@ def _build_dashboard_summary(orders: List[Dict[str, Any]], today_start: datetime
     confirmed_revenue_today = 0.0
     pending_revenue_today = 0.0
     pending_payment_review_count = 0
+    pending_payment_review_value = 0.0
+    today_cost_amount = 0.0
+    today_profit_amount = 0.0
+    today_completed_orders_count = 0
+    today_cancelled_orders_count = 0
     paid_orders_count = 0
     active_orders_count = 0
     completed_orders_count = 0
     recent_candidates: List[Tuple[datetime, Dict[str, Any]]] = []
     default_dt = datetime.min.replace(tzinfo=timezone.utc)
+    trend_keys, trend_buckets = _init_trend_buckets(today_start)
+    trend_key_set = set(trend_buckets.keys())
 
     for order in orders:
         status_value = normalize_order_status(order.get("status") or order.get("order_status"))
@@ -3128,19 +3183,31 @@ def _build_dashboard_summary(orders: List[Dict[str, Any]], today_start: datetime
         created_dt = _parse_iso_datetime(order.get("created_at"))
         created_in_tz = created_dt.astimezone(tzinfo) if created_dt else None
         is_today = bool(created_in_tz and today_start <= created_in_tz < today_end)
+        amount = _parse_float(order.get("total_amount"))
+        cost_amount = _parse_float(order.get("total_cost"))
+        profit_amount = _parse_float(order.get("gross_profit"))
+        is_confirmed = is_confirmed_sales_order(order, order_status=status_value, payment_status=payment_status_value)
+        is_pending_review = is_pending_review_order(order, order_status=status_value, payment_status=payment_status_value)
 
         if is_today:
             today_orders_count += 1
-            amount = _parse_float(order.get("total_amount"))
-            if is_confirmed_sales_order(order, order_status=status_value, payment_status=payment_status_value):
+            if is_confirmed:
                 confirmed_revenue_today += amount
-            elif is_pending_review_order(order, order_status=status_value, payment_status=payment_status_value):
+                today_cost_amount += cost_amount
+                today_profit_amount += profit_amount
+            elif is_pending_review:
                 pending_revenue_today += amount
 
-        if is_pending_review_order(order, order_status=status_value, payment_status=payment_status_value) or status_value == "waiting_payment_review":
-            pending_payment_review_count += 1
+            if status_value == "completed":
+                today_completed_orders_count += 1
+            elif status_value in CANCELLED_ORDER_STATUSES:
+                today_cancelled_orders_count += 1
 
-        if is_confirmed_sales_order(order, order_status=status_value, payment_status=payment_status_value):
+        if is_pending_review or status_value == "waiting_payment_review":
+            pending_payment_review_count += 1
+            pending_payment_review_value += amount
+
+        if is_confirmed:
             paid_orders_count += 1
 
         if status_value and status_value not in _FINALIZED_ORDER_STATUSES:
@@ -3152,21 +3219,38 @@ def _build_dashboard_summary(orders: List[Dict[str, Any]], today_start: datetime
         if status_value in queue_counts:
             queue_counts[status_value] += 1
 
+        if created_in_tz:
+            day_key = created_in_tz.date().isoformat()
+            if day_key in trend_key_set:
+                bucket = trend_buckets[day_key]
+                bucket["order_count"] += 1
+                if is_confirmed:
+                    bucket["sales_amount"] += amount
+                    bucket["cost_amount"] += cost_amount
+                    bucket["profit_amount"] += profit_amount
+
         recent_candidates.append((created_in_tz or default_dt, order))
 
     recent_candidates.sort(key=lambda item: item[0], reverse=True)
     recent_orders = [_map_recent_order(order) for _, order in recent_candidates[:_RECENT_ORDERS_LIMIT]]
+    seven_day_trend = [trend_buckets[key] for key in trend_keys]
 
     return {
         "today_orders_count": today_orders_count,
         "confirmed_revenue_today": confirmed_revenue_today,
         "pending_revenue_today": pending_revenue_today,
         "pending_payment_review_count": pending_payment_review_count,
+        "pending_payment_review_value": pending_payment_review_value,
+        "today_cost_amount": today_cost_amount,
+        "today_profit_amount": today_profit_amount,
+        "today_completed_orders_count": today_completed_orders_count,
+        "today_cancelled_orders_count": today_cancelled_orders_count,
         "paid_orders_count": paid_orders_count,
         "active_orders_count": active_orders_count,
         "completed_orders_count": completed_orders_count,
         "queues": queue_counts,
         "recent_orders": recent_orders,
+        "seven_day_trend": seven_day_trend,
     }
 
 
@@ -3180,10 +3264,14 @@ def get_dashboard_summary(authorization: Optional[str] = Header(None), store_id:
     orders = _load_orders_for_dashboard(ctx["client"], store_id_resolved)
     today_start, today_end = _today_range(store_timezone)
     summary = _build_dashboard_summary(orders, today_start, today_end)
+    tzinfo = today_start.tzinfo or _DEFAULT_TZINFO
+    timezone_offset = _format_timezone_offset(tzinfo)
 
     response = {
         "store_id": store_id_resolved,
         "store_timezone": store_timezone,
+        "store_timezone_offset": timezone_offset,
+        "store_timezone_display": f"{store_timezone} ({timezone_offset})",
         **summary,
     }
     return response
