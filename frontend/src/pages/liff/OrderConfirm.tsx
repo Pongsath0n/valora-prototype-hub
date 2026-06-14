@@ -7,10 +7,13 @@ import {
   shouldSubmitLineUserId,
   type CustomerIdentity,
 } from "@/features/store/customerIdentity";
-import { customerApi } from "@/services/customerApi";
+import { customerApi, type CustomerOrderItemOptions } from "@/services/customerApi";
 import {
   type CartItem,
   clearCart,
+  getCartItemLineTotal,
+  getCartItemUnitPrice,
+  getCartItemKey,
   readCart,
   setLastOrderMetadata,
 } from "@/services/cartStorage";
@@ -40,8 +43,32 @@ function formatCurrency(value: number): string {
 }
 
 function buildCartSummary(items: CartItem[]): { total: number } {
-  const total = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
+  const total = items.reduce((sum, item) => sum + getCartItemLineTotal(item), 0);
   return { total };
+}
+
+function buildItemOptionsPayload(item: CartItem): CustomerOrderItemOptions | undefined {
+  const options: CustomerOrderItemOptions = {};
+  const sweetness = item.options?.sweetness;
+  if (sweetness !== undefined) {
+    options.sweetness = sweetness;
+  }
+  if (item.options?.addons?.length) {
+    const addons = item.options.addons
+      .map((addon) => ({
+        addon_id: addon.addon_id,
+        quantity: Math.max(0, Math.floor(Number(addon.quantity) || 0)),
+      }))
+      .filter((addon) => addon.quantity > 0);
+    if (addons.length) {
+      options.addons = addons;
+    }
+  }
+  const note = item.options?.note ?? item.note;
+  if (note) {
+    options.note = note;
+  }
+  return Object.keys(options).length ? options : undefined;
 }
 
 export default function OrderConfirmPage() {
@@ -96,10 +123,21 @@ export default function OrderConfirmPage() {
         throw new Error("กรุณาเลือกเวลารับสินค้าในอนาคต");
       }
 
-      const items = cartItems.map((item) => ({
-        product_id: item.productId,
-        quantity: Math.max(1, Number(item.quantity) || 1),
-      }));
+      const items = cartItems.map((item) => {
+        const payload: {
+          product_id: string;
+          quantity: number;
+          options?: CustomerOrderItemOptions;
+        } = {
+          product_id: item.productId,
+          quantity: Math.max(1, Number(item.quantity) || 1),
+        };
+        const options = buildItemOptionsPayload(item);
+        if (options) {
+          payload.options = options;
+        }
+        return payload;
+      });
 
       const resolvedIdentity = identity ?? (await getCustomerIdentity());
       const manualIdentity = getManualIdentityFromForm({
@@ -182,19 +220,29 @@ export default function OrderConfirmPage() {
           <p className="mt-2 text-xs text-destructive">{identityError}</p>
         ) : null}
         <div className="mt-4 space-y-3">
-          {cartItems.map((item) => (
-            <div key={item.productId} className="flex items-center justify-between">
+          {cartItems.map((item, index) => (
+            <div key={getCartItemKey(item, index)} className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-semibold">{item.name}</p>
                 <p className="text-xs text-muted-foreground">
-                  x{item.quantity} · {formatCurrency(item.price)}
+                  x{item.quantity} · {formatCurrency(getCartItemUnitPrice(item))} / แก้ว (ประมาณ)
                 </p>
+                {item.options?.sweetness !== undefined ? (
+                  <p className="text-xs text-muted-foreground">ความหวาน: {item.options.sweetness}%</p>
+                ) : null}
+                {item.options?.addons?.map((addon, addonIndex) => (
+                  <p key={`${addon.addon_id}-${addonIndex}`} className="text-xs text-muted-foreground">
+                    เพิ่มช็อต x{addon.quantity} (+
+                    {formatCurrency((Number(addon.price ?? 0) || 0) * Math.max(1, addon.quantity))}
+                    /แก้ว)
+                  </p>
+                ))}
                 {item.note ? (
                   <p className="text-xs text-muted-foreground">หมายเหตุ: {item.note}</p>
                 ) : null}
               </div>
               <p className="text-sm font-semibold">
-                {formatCurrency(item.price * item.quantity)}
+                {formatCurrency(getCartItemLineTotal(item))}
               </p>
             </div>
           ))}

@@ -3,6 +3,9 @@ import { Link } from "react-router-dom";
 
 import {
   type CartItem,
+  getCartItemLineTotal,
+  getCartItemUnitPrice,
+  getCartItemKey,
   readCart,
   removeCartItem,
   updateCartQuantity,
@@ -20,7 +23,7 @@ export default function CartPage() {
   const [items, setItems] = useState<CartItem[]>(() => readCart());
 
   const estimatedTotal = useMemo(
-    () => items.reduce((sum, item) => sum + item.price * item.quantity, 0),
+    () => items.reduce((sum, item) => sum + getCartItemLineTotal(item), 0),
     [items],
   );
 
@@ -68,20 +71,35 @@ export default function CartPage() {
       <div className="space-y-3">
         {items.map((item, index) => (
           <div
-            key={`${item.productId}-${index}`}
+            key={getCartItemKey(item, index)}
             className="rounded-2xl border bg-white p-4 shadow-sm"
           >
             <div className="flex items-start justify-between gap-4">
               <div>
                 <p className="text-base font-semibold">{item.name}</p>
                 <p className="text-sm text-muted-foreground">
-                  {formatCurrency(item.price)} / ชิ้น
+                  {formatCurrency(item.price)} / แก้ว (ไม่รวมตัวเลือก)
                 </p>
+                {item.options?.sweetness !== undefined ? (
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    ความหวาน: {item.options.sweetness}%
+                  </p>
+                ) : null}
+                {item.options?.addons?.map((addon, idx) => (
+                  <p key={`${addon.addon_id}-${idx}`} className="text-xs text-muted-foreground">
+                    เพิ่มช็อต x{addon.quantity} (+
+                    {formatCurrency((Number(addon.price ?? 0) || 0) * Math.max(1, addon.quantity))}
+                    /แก้ว)
+                  </p>
+                ))}
                 {item.note ? (
                   <p className="mt-2 text-xs text-muted-foreground">
                     หมายเหตุ: {item.note}
                   </p>
                 ) : null}
+                <p className="mt-2 text-xs font-semibold text-foreground">
+                  ประมาณ {formatCurrency(getCartItemUnitPrice(item))} / แก้ว (รวมตัวเลือก)
+                </p>
               </div>
               <button
                 type="button"
@@ -121,7 +139,7 @@ export default function CartPage() {
                 </button>
               </div>
               <p className="text-base font-semibold">
-                {formatCurrency(item.price * item.quantity)}
+                {formatCurrency(getCartItemLineTotal(item))}
               </p>
             </div>
           </div>
@@ -130,7 +148,7 @@ export default function CartPage() {
 
       <div className="rounded-2xl border bg-white p-4 shadow-sm">
         <div className="flex items-center justify-between">
-          <p className="text-sm text-muted-foreground">ยอดรวมโดยประมาณ</p>
+          <p className="text-sm text-muted-foreground">ยอดรวมโดยประมาณ (สำหรับลูกค้า)</p>
           <p className="text-lg font-semibold">{formatCurrency(estimatedTotal)}</p>
         </div>
         <p className="mt-1 text-xs text-muted-foreground">

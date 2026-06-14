@@ -1,5 +1,14 @@
 const BACKEND_BASE = (import.meta.env.VITE_BACKEND_URL ?? "http://127.0.0.1:8000").replace(/\/$/, "");
 
+export type CustomerProductAddon = {
+  addon_id: string;
+  code?: string | null;
+  name: string;
+  price: number;
+  max_quantity?: number | null;
+  addon_type?: string | null;
+};
+
 export type CustomerMenuItem = {
   id: string;
   name: string;
@@ -8,6 +17,9 @@ export type CustomerMenuItem = {
   price: number;
   category?: string | null;
   available: boolean;
+  allow_sweetness: boolean;
+  default_sweetness: number;
+  addons: CustomerProductAddon[];
 };
 
 export type CustomerOrderItem = {
@@ -74,13 +86,25 @@ export type PaymentInstructionsResponse = {
   max_file_mb: number;
 };
 
+export type CustomerOrderItemOptions = {
+  sweetness?: number;
+  addons?: { addon_id: string; quantity: number }[];
+  note?: string;
+};
+
+type CustomerOrderItemPayload = {
+  product_id: string;
+  quantity: number;
+  options?: CustomerOrderItemOptions | null;
+};
+
 type CustomerOrderCreatePayload = {
   customer: {
     name: string;
     phone: string;
     line_user_id?: string;
   };
-  items: { product_id: string; quantity: number }[];
+  items: CustomerOrderItemPayload[];
   pickup_time: string;
   note?: string;
 };

@@ -4,7 +4,7 @@ import os
 import re
 import secrets
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile, status
@@ -85,10 +85,13 @@ def _normalize_phone(value: str) -> str:
 
 
 def _try_select_products(client: Client, store_id: Optional[str], product_id: Optional[str] = None) -> List[Dict[str, Any]]:
-    select_cols = "id, store_id, name, base_price, is_active, image_url, description, product_categories(name)"
+    include_categories = True
     active_filter_enabled = True
     while True:
-        query = client.table("products").select(select_cols)
+        select_expr = "*"
+        if include_categories:
+            select_expr = "*, product_categories(name)"
+        query = client.table("products").select(select_expr)
         if store_id:
             query = query.eq("store_id", store_id)
         if product_id:
@@ -105,19 +108,118 @@ def _try_select_products(client: Client, store_id: Optional[str], product_id: Op
         if missing == "is_active" and active_filter_enabled:
             active_filter_enabled = False
             continue
-        if missing in {"image_url", "description"}:
-            select_cols = "id, store_id, name, base_price, is_active, product_categories(name)"
-            continue
-        if missing == "is_active":
-            select_cols = select_cols.replace(", is_active", "")
-            continue
-        if missing == "product_categories":
-            select_cols = "id, store_id, name, base_price, is_active, image_url, description"
+        if missing == "product_categories" and include_categories:
+            include_categories = False
             continue
 
         message = str(getattr(err, "message", err))
         logger.error("customer_product_query_failed: %s", message)
         raise HTTPException(status_code=500, detail="customer_product_query_failed")
+
+
+SWEETNESS_LEVELS: Tuple[int, ...] = (0, 25, 50, 75, 100)
+DEFAULT_SWEETNESS = 100
+
+
+def _coerce_int(value: Any) -> Optional[int]:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _product_allows_sweetness_flag(row: Dict[str, Any]) -> bool:
+    for key in ("allows_sweetness", "allow_sweetness", "sweetness_enabled"):
+        if key in row and row[key] is not None:
+            return bool(row[key])
+    return True
+
+
+def _product_default_sweetness_value(row: Dict[str, Any]) -> int:
+    for key in ("sweetness_default", "default_sweetness"):
+        if key in row and row[key] is not None:
+            coerced = _coerce_int(row[key])
+            if coerced in SWEETNESS_LEVELS:
+                return coerced
+    return DEFAULT_SWEETNESS
+
+
+def _load_product_addons_map(client: Client, store_id: str, product_ids: List[str]) -> Dict[str, List[Dict[str, Any]]]:
+    unique_ids = sorted({str(pid) for pid in product_ids if pid})
+    if not unique_ids:
+        return {}
+
+    select_cols = [
+        "id",
+        "product_id",
+        "store_id",
+        "name",
+        "code",
+        "addon_type",
+        "price",
+        "max_quantity",
+        "is_active",
+    ]
+
+    try:
+        query = client.table("product_addons").select(", ".join(select_cols)).in_("product_id", unique_ids)
+        if store_id:
+            query = query.eq("store_id", store_id)
+        query = query.eq("is_active", True)
+        resp = query.execute()
+        err = getattr(resp, "error", None)
+    except Exception as exc:
+        logger.warning(
+            "customer_product_addon_query_failed store=%s detail=%s",
+            _short_identifier(store_id),
+            _safe_error_detail(exc),
+        )
+        return {}
+
+    if err:
+        logger.warning(
+            "customer_product_addon_query_failed store=%s detail=%s",
+            _short_identifier(store_id),
+            _safe_error_detail(err),
+        )
+        return {}
+
+    rows = getattr(resp, "data", None) or []
+    addons_map: Dict[str, List[Dict[str, Any]]] = {}
+    for row in rows:
+        product_id = str(row.get("product_id") or "").strip()
+        if not product_id or product_id not in unique_ids:
+            continue
+        row_store = str(row.get("store_id") or "").strip()
+        if store_id and row_store and row_store != store_id:
+            continue
+
+        addon_id = row.get("id")
+        if not addon_id:
+            continue
+
+        price_value = row.get("price")
+        try:
+            price = float(price_value or 0.0)
+        except (TypeError, ValueError):
+            price = 0.0
+
+        max_quantity_value = row.get("max_quantity")
+        max_quantity = _coerce_int(max_quantity_value)
+
+        addon_entry = {
+            "addon_id": str(addon_id),
+            "code": row.get("code"),
+            "name": row.get("name"),
+            "price": price,
+            "max_quantity": max_quantity,
+            "addon_type": row.get("addon_type"),
+        }
+        addons_map.setdefault(product_id, []).append(addon_entry)
+
+    return addons_map
 
 
 def _resolve_store_id(client: Client, requested_store_id: Optional[str]) -> str:
@@ -149,7 +251,7 @@ def _resolve_store_id(client: Client, requested_store_id: Optional[str]) -> str:
     return resolved
 
 
-def _map_customer_menu_item(row: Dict[str, Any]) -> Dict[str, Any]:
+def _map_customer_menu_item(row: Dict[str, Any], *, addons: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
     category_rel = row.get("product_categories") if isinstance(row, dict) else None
     category = category_rel.get("name") if isinstance(category_rel, dict) else None
     return {
@@ -160,6 +262,9 @@ def _map_customer_menu_item(row: Dict[str, Any]) -> Dict[str, Any]:
         "price": float(row.get("base_price") or 0),
         "category": category,
         "available": bool(row.get("is_active", True)),
+        "allow_sweetness": _product_allows_sweetness_flag(row),
+        "default_sweetness": _product_default_sweetness_value(row),
+        "addons": list(addons or []),
     }
 
 
@@ -960,7 +1065,13 @@ def list_menu(store_id: Optional[str] = Query(default=None)) -> Dict[str, Any]:
     client = _get_client()
     store_id_resolved = _resolve_store_id(client, store_id)
     rows = _try_select_products(client, store_id_resolved)
-    items = [_map_customer_menu_item(r) for r in rows if bool(r.get("is_active", True))]
+    product_ids = [str(r.get("id")) for r in rows if r.get("id")]
+    addons_map = _load_product_addons_map(client, store_id_resolved, product_ids)
+    items = [
+        _map_customer_menu_item(r, addons=addons_map.get(str(r.get("id")) or "", []))
+        for r in rows
+        if bool(r.get("is_active", True))
+    ]
     return {"items": items, "store_id": store_id_resolved}
 
 
@@ -974,7 +1085,8 @@ def get_menu_item(product_id: str, store_id: Optional[str] = Query(default=None)
     row = rows[0]
     if not bool(row.get("is_active", True)):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="menu_item_not_available")
-    return _map_customer_menu_item(row)
+    addons_map = _load_product_addons_map(client, store_id_resolved, [str(row.get("id"))])
+    return _map_customer_menu_item(row, addons=addons_map.get(str(row.get("id")) or "", []))
 
 
 @router.post("/orders")

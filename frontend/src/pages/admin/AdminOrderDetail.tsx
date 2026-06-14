@@ -3,10 +3,11 @@ import { Link, useParams } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
 import AdminLayout from "@/components/admin/AdminLayout";
 import StatusBadge from "@/components/shared/StatusBadge";
-import DataTable from "@/components/shared/DataTable";
-import { storeAdminApi, type ApiOrder, type ApiPayment } from "@/services/storeAdminApi";
+import DataTable, { type Column } from "@/components/shared/DataTable";
+import { storeAdminApi, type ApiOrder, type ApiOrderItem, type ApiPayment } from "@/services/storeAdminApi";
 import { PaymentSlipPreviewModal } from "@/components/admin/PaymentSlipPreviewModal";
 import { formatOrderStatus, orderStatusTone, formatPaymentStatus, paymentStatusTone, formatTHB } from "@/lib/format";
+import { useProfileRole } from "@/contexts/RoleContext";
 
 const nextStatusActions: { label: string; next: string }[] = [
   { label: "Mark Waiting Payment Review", next: "waiting_payment_review" },
@@ -16,9 +17,109 @@ const nextStatusActions: { label: string; next: string }[] = [
   { label: "Mark Completed", next: "completed" },
 ];
 
+type OrderItemAddonSnapshot = {
+  addon_id?: string;
+  code?: string;
+  name?: string;
+  quantity?: number;
+  unit_price?: number;
+  price?: number;
+};
+
+type OrderItemOptionsSnapshot = {
+  sweetness?: number;
+  sweetness_label?: string;
+  addons?: OrderItemAddonSnapshot[];
+  note?: string;
+};
+
+function formatTHBExact(amount: number | null | undefined): string {
+  const numeric = Number(amount ?? 0);
+  if (!Number.isFinite(numeric)) {
+    return formatTHB(0);
+  }
+  return `฿${numeric.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function toNumber(value: unknown): number | undefined {
+  if (value === null || value === undefined || value === "") {
+    return undefined;
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function parseOrderItemOptions(raw: ApiOrderItem["options"]): OrderItemOptionsSnapshot | null {
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+  const base = raw as Record<string, any>;
+  const addons = Array.isArray(base.addons)
+    ? base.addons
+        .map((addon) => {
+          if (!addon || typeof addon !== "object") return null;
+          const casted = addon as Record<string, any>;
+          const quantity = toNumber(casted.quantity);
+          return {
+            addon_id: typeof casted.addon_id === "string" ? casted.addon_id : undefined,
+            code: typeof casted.code === "string" ? casted.code : undefined,
+            name: typeof casted.name === "string" ? casted.name : undefined,
+            quantity,
+            unit_price: toNumber(casted.unit_price ?? casted.price),
+            price: toNumber(casted.price),
+          } as OrderItemAddonSnapshot;
+        })
+        .filter((addon): addon is OrderItemAddonSnapshot => Boolean(addon && (addon.quantity ?? 0) > 0))
+    : undefined;
+
+  return {
+    sweetness: typeof base.sweetness === "number" ? base.sweetness : toNumber(base.sweetness),
+    sweetness_label: typeof base.sweetness_label === "string" ? base.sweetness_label : undefined,
+    addons,
+    note: typeof base.note === "string" ? base.note.trim() || undefined : undefined,
+  };
+}
+
+function renderOrderItemOptions(item: ApiOrderItem) {
+  const options = parseOrderItemOptions(item.options);
+  if (!options) return null;
+  const nodes: JSX.Element[] = [];
+  const sweetnessLabel = options.sweetness_label || (options.sweetness !== undefined ? `ความหวาน ${options.sweetness}%` : null);
+  if (sweetnessLabel) {
+    nodes.push(
+      <p key="sweetness" className="text-xs text-muted-foreground">
+        {sweetnessLabel}
+      </p>,
+    );
+  }
+  options.addons?.forEach((addon, index) => {
+    const name = addon.name || addon.code || "เพิ่มตัวเลือก";
+    const unitPrice = addon.unit_price ?? addon.price;
+    const priceLabel = unitPrice !== undefined ? ` (+${formatTHBExact(unitPrice)}/แก้ว)` : "";
+    nodes.push(
+      <p key={addon.addon_id ?? `${addon.code ?? "addon"}-${index}`} className="text-xs text-muted-foreground">
+        {name} x{addon.quantity ?? 0}
+        {priceLabel}
+      </p>,
+    );
+  });
+  if (options.note) {
+    nodes.push(
+      <p key="note" className="text-xs text-muted-foreground">
+        หมายเหตุ: {options.note}
+      </p>,
+    );
+  }
+
+  if (!nodes.length) return null;
+  return <div className="mt-1 space-y-0.5">{nodes}</div>;
+}
+
 export default function AdminOrderDetailPage() {
   const { id } = useParams();
+  const { role } = useProfileRole();
   const [order, setOrder] = useState<ApiOrder | null>(null);
+  const [orderItems, setOrderItems] = useState<ApiOrderItem[]>([]);
   const [payments, setPayments] = useState<ApiPayment[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -32,12 +133,27 @@ export default function AdminOrderDetailPage() {
     if (!id) return;
     setError("");
     try {
-      const [orderData, paymentData] = await Promise.all([
+      const [orderResult, paymentResult, itemsResult] = await Promise.allSettled([
         storeAdminApi.getOrder(id),
         storeAdminApi.listOrderPayments(id),
+        storeAdminApi.listOrderItems(id),
       ]);
+
+      if (orderResult.status === "rejected") {
+        throw orderResult.reason;
+      }
+      if (paymentResult.status === "rejected") {
+        throw paymentResult.reason;
+      }
+
+      const orderData = orderResult.value;
+      const paymentData = paymentResult.value;
+      const itemsData = itemsResult.status === "fulfilled" ? itemsResult.value.items ?? [] : [];
+
       setOrder(orderData);
       setPayments(paymentData.items ?? []);
+      const mergedItems = itemsData.length ? itemsData : orderData.items ?? [];
+      setOrderItems(mergedItems);
     } catch (err: any) {
       setError(err?.message || "โหลดข้อมูลไม่สำเร็จ");
     } finally {
@@ -68,6 +184,8 @@ export default function AdminOrderDetailPage() {
     await handleRejectPayment(payment.id, resolved);
     closePaymentPreview();
   };
+
+  const canViewFinancials = role === "owner" || role === "admin" || role === "manager";
 
   useEffect(() => {
     void refresh();
@@ -136,7 +254,37 @@ export default function AdminOrderDetailPage() {
     } catch (err: any) {
       setError(err?.message || "ปฏิเสธไม่สำเร็จ");
     }
-  };
+  }
+
+  const summaryMetrics = [
+    { key: "sales", label: "ยอดขาย", value: order.total_amount },
+    { key: "cost", label: "ต้นทุน", value: order.total_cost, restricted: true },
+    { key: "channel_fee", label: "ค่าช่องทาง", value: order.channel_fee },
+    { key: "profit", label: "กำไร", value: order.gross_profit, restricted: true },
+  ];
+  const visibleMetrics = summaryMetrics.filter((metric) => canViewFinancials || !metric.restricted);
+
+  const itemColumns: Column<ApiOrderItem>[] = [
+    {
+      key: "product_name",
+      header: "เมนู",
+      render: (row) => (
+        <div>
+          <p className="font-medium">{row.product_name || "-"}</p>
+          {renderOrderItemOptions(row)}
+        </div>
+      ),
+    },
+    { key: "quantity", header: "จำนวน", render: (r) => `x${r.quantity ?? 0}` },
+    { key: "unit_price", header: "ราคา/หน่วย", render: (r) => formatTHBExact(r.unit_price) },
+  ];
+
+  if (canViewFinancials) {
+    itemColumns.push(
+      { key: "unit_cost", header: "ต้นทุน/หน่วย", render: (r) => formatTHBExact(r.unit_cost) },
+      { key: "line_profit", header: "กำไร", render: (r) => formatTHBExact(r.line_profit) },
+    );
+  }
 
   return (
     <AdminLayout title="รายละเอียดออเดอร์" subtitle={`Order ${order.order_no || `#${order.id}`}`}>
@@ -147,9 +295,17 @@ export default function AdminOrderDetailPage() {
         </div>
         {error ? <p className="text-sm text-destructive">{error}</p> : null}
         {info ? <p className="text-sm text-muted-foreground">{info}</p> : null}
-        <p className="text-sm">
-          ยอดขาย {formatTHB(order.total_amount || 0)} | ต้นทุน {formatTHB(order.total_cost || 0)} | ค่าช่องทาง {formatTHB(order.channel_fee || 0)} | กำไร {formatTHB(order.gross_profit || 0)}
-        </p>
+        <div className="grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-4">
+          {visibleMetrics.map((metric) => (
+            <div key={metric.key} className="rounded-lg border bg-muted/30 px-3 py-2">
+              <p className="text-xs text-muted-foreground">{metric.label}</p>
+              <p className="font-semibold">{formatTHBExact(metric.value)}</p>
+            </div>
+          ))}
+        </div>
+        {!canViewFinancials ? (
+          <p className="text-xs text-muted-foreground">ข้อมูลต้นทุนและกำไรแสดงเฉพาะ Owner/Admin/Manager</p>
+        ) : null}
         <p className="text-sm text-muted-foreground">
           ลูกค้า: {order.customer_name || "-"} ({order.customer_phone || "-"})
         </p>
@@ -178,16 +334,7 @@ export default function AdminOrderDetailPage() {
         </div>
       </div>
 
-      <DataTable
-        columns={[
-          { key: "product_name", header: "เมนู" },
-          { key: "quantity", header: "จำนวน" },
-          { key: "unit_price", header: "ราคา/หน่วย", render: (r) => formatTHB(r.unit_price || 0) },
-          { key: "unit_cost", header: "ต้นทุน/หน่วย", render: (r) => formatTHB(r.unit_cost || 0) },
-          { key: "line_profit", header: "กำไร", render: (r) => formatTHB(r.line_profit || 0) },
-        ]}
-        rows={order.items || []}
-      />
+      <DataTable columns={itemColumns} rows={orderItems} />
 
       <div className="stat-card">
         <h2 className="section-title mb-2">การชำระเงิน</h2>

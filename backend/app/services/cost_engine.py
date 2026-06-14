@@ -258,7 +258,7 @@ def _validate_addon(row: Dict[str, Any], store_id: str, product_id: str, quantit
 
 
 def _fetch_addon_recipe_rows(client: Client, store_id: str, addon_id: str) -> List[Dict[str, Any]]:
-    query = client.table("product_addon_recipes").select("*").eq("product_addon_id", addon_id)
+    query = client.table("product_addon_recipes").select("*").eq("addon_id", addon_id)
     try:
         query = query.eq("store_id", store_id)
     except Exception:
