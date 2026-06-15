@@ -101,27 +101,19 @@
   body {
     @apply bg-background text-foreground font-sans antialiased;
     font-family: var(--font-sans);
-    /* Prevent horizontal scroll on all devices */
     overflow-x: hidden;
   }
 
-  /* Safe area support for iOS notch/Dynamic Island */
   .bottom-nav {
     padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
   }
 
-  h1,
-  h2,
-  h3,
-  h4,
-  h5,
-  h6 {
+  h1, h2, h3, h4, h5, h6 {
     @apply font-semibold;
   }
 }
 
 @layer components {
-  /* ── Cards & Containers ───────────────────────────── */
   .guidance-card {
     @apply bg-accent/10 border-accent/30 border rounded-xl p-4;
   }
@@ -130,12 +122,10 @@
     @apply bg-card border rounded-xl p-4 sm:p-5 shadow-sm;
   }
 
-  /* Table scroll wrapper for narrow screens */
   .table-scroll {
     @apply w-full overflow-x-auto -mx-3 sm:mx-0 px-3 sm:px-0;
   }
 
-  /* ── Metrics ──────────────────────────────────────── */
   .metric-value {
     @apply text-2xl font-bold text-foreground tabular-nums leading-normal;
   }
@@ -153,11 +143,6 @@
     @apply text-xs font-medium text-destructive;
   }
 
-  /* ── Page Header ──────────────────────────────────── */
-  /*  Usage: <div class="page-header">                  */
-  /*           <div><h1>Title</h1><p>Subtitle</p></div> */
-  /*           <div>{/* actions *\/}</div>               */
-  /*         </div>                                      */
   .page-header {
     @apply flex items-start justify-between flex-wrap gap-4 mb-7;
   }
@@ -170,8 +155,6 @@
     @apply text-sm text-muted-foreground mt-1;
   }
 
-  /* ── KPI Grid ─────────────────────────────────────── */
-  /*  2-col mobile, 4-col desktop                       */
   .kpi-grid {
     @apply grid grid-cols-2 lg:grid-cols-4 gap-4;
   }
@@ -180,7 +163,6 @@
     @apply stat-card flex flex-col gap-1;
   }
 
-  /* ── Data Table ───────────────────────────────────── */
   .data-table {
     @apply w-full text-sm;
   }
@@ -201,7 +183,6 @@
     @apply py-3 pr-4 text-sm;
   }
 
-  /* ── Form ─────────────────────────────────────────── */
   .form-group {
     @apply space-y-1.5;
   }
@@ -211,15 +192,13 @@
   }
 
   .form-input {
-    @apply w-full px-3 py-2.5 rounded-lg border bg-background text-foreground text-sm
-           focus:outline-none focus:ring-2 focus:ring-ring transition-shadow;
+    @apply w-full px-3 py-2.5 rounded-lg border bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-ring transition-shadow;
   }
 
   .form-hint {
     @apply text-xs text-muted-foreground;
   }
 
-  /* ── Status Badges ────────────────────────────────── */
   .status-badge {
     @apply inline-flex items-center text-xs font-medium px-2.5 py-0.5 rounded-full;
   }
@@ -244,22 +223,19 @@
     @apply status-badge bg-sky-100 text-sky-700;
   }
 
-  /* ── Navigation ───────────────────────────────────── */
   .bottom-nav {
     @apply fixed bottom-0 left-0 right-0 z-50 bg-card border-t flex items-center justify-around pt-2;
     padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
   }
 
   .bottom-nav-item {
-    @apply flex flex-col items-center gap-0.5 text-muted-foreground px-3 py-1 rounded-lg
-           transition-colors min-w-[3.5rem] cursor-pointer;
+    @apply flex flex-col items-center gap-0.5 text-muted-foreground px-3 py-1 rounded-lg transition-colors min-w-[3.5rem] cursor-pointer;
   }
 
   .bottom-nav-item.active {
     @apply text-primary font-semibold;
   }
 
-  /* ── Misc ─────────────────────────────────────────── */
   .timestamp {
     @apply text-xs text-muted-foreground tabular-nums;
   }
@@ -272,21 +248,16 @@
     @apply flex items-center justify-between pb-3 border-b mb-4;
   }
 
-  /* ── Action Bar ───────────────────────────────────── */
-  /*  Sticky CTA row — used in Reports & export pages   */
   .action-bar {
     @apply flex flex-wrap items-center gap-2 justify-end;
   }
 
-  /* ── Divider ──────────────────────────────────────── */
   .section-divider {
     @apply border-t my-6;
   }
 
-  /* ── Empty State ──────────────────────────────────── */
   .empty-state {
-    @apply flex flex-col items-center justify-center py-16 text-center space-y-2
-           text-muted-foreground;
+    @apply flex flex-col items-center justify-center py-16 text-center space-y-2 text-muted-foreground;
   }
 
   .empty-state-icon {
@@ -301,7 +272,6 @@
     @apply text-xs text-muted-foreground;
   }
 
-  /* ── Premium UI Effects ───────────────────────────── */
   .glass-card {
     @apply bg-card/60 backdrop-blur-md border border-white/20 shadow-xl;
   }
@@ -324,40 +294,128 @@
 }
 
 
-/* ─── Print / PDF ──────────────────────────────────────────────────────────────
-   Used when user clicks พิมพ์/PDF in the Reports page.
-   Hides the app shell so only the report content is visible in the printout.
-────────────────────────────────────────────────────────────────────────────── */
-@media print {
-  /* Hide app navigation, sidebar, and export toolbar */
-  nav,
-  aside,
-  [data-sidebar],
-  [class*="bottom-nav"],
-  [class*="sidebar"],
-  .print\\:hidden,
-  button {
-    display: none !important;
+/* Brewway/Valora Customer Cafe Theme - scoped warm palette for customer flow only */
+@layer base {
+  .brewway-customer {
+    --background: 36 80% 96%;
+    --foreground: 16 28% 20%;
+    --card: 0 0% 100%;
+    --card-foreground: 16 28% 20%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 16 28% 20%;
+    --primary: 26 40% 39%;
+    --primary-foreground: 36 80% 97%;
+    --secondary: 36 60% 92%;
+    --secondary-foreground: 26 45% 30%;
+    --muted: 35 42% 91%;
+    --muted-foreground: 18 16% 40%;
+    --accent: 29 45% 59%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 33 35% 86%;
+    --input: 33 35% 86%;
+    --ring: 26 40% 39%;
+    --radius: 0.875rem;
+    --success: 160 84% 30%;
+    --success-foreground: 0 0% 100%;
+    --warning: 30 92% 44%;
+    --warning-foreground: 0 0% 100%;
+    --info: 239 70% 60%;
+    --info-foreground: 0 0% 100%;
+  }
+}
+
+@layer components {
+  .bw-surface {
+    background-color: hsl(var(--background));
+    background-image:
+      radial-gradient(at 0% 0%, hsl(29 55% 90% / 0.6) 0px, transparent 55%),
+      radial-gradient(at 100% 0%, hsl(36 80% 94% / 0.7) 0px, transparent 45%);
+    min-height: 100vh;
+    min-height: 100dvh;
   }
 
-  /* Full-width report content */
+  .bw-card {
+    @apply rounded-2xl border bg-card;
+    box-shadow: 0 1px 2px hsl(26 40% 30% / 0.04), 0 8px 20px -12px hsl(26 40% 30% / 0.18);
+  }
+
+  .bw-chip {
+    @apply inline-flex min-h-[44px] items-center justify-center rounded-full border px-4 py-2 text-sm font-semibold transition-colors;
+  }
+
+  .bw-chip-idle {
+    @apply border-transparent bg-secondary text-secondary-foreground;
+  }
+
+  .bw-chip-idle:hover {
+    background-color: hsl(var(--accent) / 0.18);
+  }
+
+  .bw-chip-active {
+    @apply border-transparent bg-primary text-primary-foreground;
+  }
+
+  .bw-cta {
+    @apply inline-flex min-h-[48px] w-full items-center justify-center gap-2 rounded-full bg-primary px-5 text-base font-semibold text-primary-foreground transition-colors disabled:cursor-not-allowed disabled:opacity-60;
+  }
+
+  .bw-cta:not(:disabled):hover {
+    background-color: hsl(25 48% 30%);
+  }
+
+  .bw-btn-outline {
+    @apply inline-flex min-h-[48px] w-full items-center justify-center gap-2 rounded-full border border-primary/35 bg-card px-5 text-base font-semibold text-primary transition-colors;
+  }
+
+  .bw-btn-outline:hover {
+    background-color: hsl(var(--secondary));
+  }
+
+  .bw-stepper-btn {
+    @apply flex h-10 w-10 items-center justify-center rounded-full text-xl leading-none text-primary transition-colors;
+  }
+
+  .bw-stepper-btn:hover {
+    background-color: hsl(var(--secondary));
+  }
+
+  .bw-input {
+    @apply w-full rounded-xl border bg-card px-4 py-3 text-base text-foreground placeholder:text-muted-foreground/70 focus:border-primary focus:outline-none focus:ring-2 focus:ring-ring/30 transition-shadow;
+  }
+}
+
+
+@media print {
+  nav, aside, [data-sidebar], [class*="bottom-nav"], [class*="sidebar"], .print\:hidden, button {
+    display: none !important;
+  }
   body {
     background: white !important;
     color: black !important;
     font-size: 12pt;
   }
-
   .stat-card {
     box-shadow: none !important;
     border: 1px solid #e5e7eb !important;
     break-inside: avoid;
   }
-
-  /* Remove max-width constraints */
-  main,
-  [class*="max-w"] {
+  main, [class*="max-w"] {
     max-width: 100% !important;
     margin: 0 !important;
     padding: 0.5cm !important;
+  }
+}
+
+
+/* Hide scrollbar for horizontal chip rows (customer menu) while keeping scroll */
+@layer components {
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
   }
 }

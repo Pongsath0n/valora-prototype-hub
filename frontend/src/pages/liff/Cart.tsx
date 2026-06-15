@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import { ArrowRight, Coffee, Minus, Plus, Trash2 } from "lucide-react";
 
 import {
   type CartItem,
@@ -40,18 +41,14 @@ export default function CartPage() {
   if (!items.length) {
     return (
       <div className="mx-auto max-w-md space-y-4 px-4 py-6">
-        <h1 className="text-2xl font-semibold">ตะกร้า</h1>
-        <div className="rounded-2xl border border-dashed bg-white/70 p-6 text-center shadow-sm">
-          <p className="text-base font-medium text-muted-foreground">
-            ยังไม่มีสินค้าในตะกร้า
-          </p>
-          <p className="mt-1 text-sm text-muted-foreground">
-            เลือกเมนูจากหน้าหลักเพื่อเริ่มสั่งได้เลย
-          </p>
-          <Link
-            to="/liff/menu"
-            className="mt-4 inline-flex w-full items-center justify-center rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground"
-          >
+        <h1 className="text-2xl font-bold">ตะกร้าของคุณ</h1>
+        <div className="bw-card flex flex-col items-center gap-2 border-dashed p-8 text-center">
+          <span className="flex h-12 w-12 items-center justify-center rounded-full bg-secondary text-primary">
+            <Coffee className="h-6 w-6" aria-hidden />
+          </span>
+          <p className="text-base font-semibold">ยังไม่มีสินค้าในตะกร้า</p>
+          <p className="text-sm text-muted-foreground">เลือกเมนูจากหน้าหลักเพื่อเริ่มสั่งได้เลย</p>
+          <Link to="/liff/menu" className="bw-cta mt-2">
             กลับไปเลือกเมนู
           </Link>
         </div>
@@ -60,85 +57,73 @@ export default function CartPage() {
   }
 
   return (
-    <div className="mx-auto max-w-md space-y-5 px-4 py-6">
+    <div className="mx-auto max-w-md space-y-5 px-4 py-5 pb-28">
       <div className="space-y-1">
-        <h1 className="text-2xl font-semibold">ตะกร้า</h1>
-        <p className="text-sm text-muted-foreground">
-          ตรวจสอบรายการก่อนยืนยันคำสั่งซื้อ
-        </p>
+        <h1 className="text-2xl font-bold">ตะกร้าของคุณ</h1>
+        <p className="text-sm text-muted-foreground">ตรวจสอบรายการก่อนยืนยันคำสั่งซื้อ</p>
       </div>
 
       <div className="space-y-3">
         {items.map((item, index) => (
-          <div
-            key={getCartItemKey(item, index)}
-            className="rounded-2xl border bg-white p-4 shadow-sm"
-          >
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <p className="text-base font-semibold">{item.name}</p>
-                <p className="text-sm text-muted-foreground">
+          <div key={getCartItemKey(item, index)} className="bw-card p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-base font-bold">{item.name}</p>
+                <p className="text-xs text-muted-foreground">
                   {formatCurrency(item.price)} / แก้ว (ไม่รวมตัวเลือก)
                 </p>
                 {item.options?.sweetness !== undefined ? (
-                  <p className="mt-2 text-xs text-muted-foreground">
-                    ความหวาน: {item.options.sweetness}%
-                  </p>
+                  <span className="mt-2 mr-1 inline-flex rounded-full bg-secondary px-2 py-0.5 text-[11px] font-medium text-secondary-foreground">
+                    ความหวาน {item.options.sweetness}%
+                  </span>
                 ) : null}
                 {item.options?.addons?.map((addon, idx) => (
-                  <p key={`${addon.addon_id}-${idx}`} className="text-xs text-muted-foreground">
+                  <span
+                    key={`${addon.addon_id}-${idx}`}
+                    className="mt-2 mr-1 inline-flex rounded-full bg-secondary px-2 py-0.5 text-[11px] font-medium text-secondary-foreground"
+                  >
                     เพิ่มช็อต x{addon.quantity} (+
-                    {formatCurrency((Number(addon.price ?? 0) || 0) * Math.max(1, addon.quantity))}
-                    /แก้ว)
-                  </p>
+                    {formatCurrency((Number(addon.price ?? 0) || 0) * Math.max(1, addon.quantity))}/แก้ว)
+                  </span>
                 ))}
                 {item.note ? (
-                  <p className="mt-2 text-xs text-muted-foreground">
-                    หมายเหตุ: {item.note}
-                  </p>
+                  <p className="mt-2 text-xs text-muted-foreground">หมายเหตุ: {item.note}</p>
                 ) : null}
-                <p className="mt-2 text-xs font-semibold text-foreground">
+                <p className="mt-2 text-xs font-semibold">
                   ประมาณ {formatCurrency(getCartItemUnitPrice(item))} / แก้ว (รวมตัวเลือก)
                 </p>
               </div>
               <button
                 type="button"
                 onClick={() => handleRemove(index)}
-                className="text-sm font-medium text-destructive"
+                aria-label={`ลบ ${item.name}`}
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-destructive transition-colors hover:bg-destructive/10"
               >
-                ลบ
+                <Trash2 className="h-4 w-4" aria-hidden />
               </button>
             </div>
 
             <div className="mt-4 flex items-center justify-between">
-              <div className="inline-flex items-center rounded-full border bg-muted px-1">
+              <div className="inline-flex items-center gap-1 rounded-full border bg-secondary/60 p-1">
                 <button
                   type="button"
-                  className="px-3 py-1 text-lg leading-none"
+                  className="bw-stepper-btn"
                   onClick={() => handleQuantityChange(index, items[index].quantity - 1)}
                   aria-label="ลดจำนวน"
                 >
-                  −
+                  <Minus className="h-4 w-4" aria-hidden />
                 </button>
-                <input
-                  type="number"
-                  min={1}
-                  value={item.quantity}
-                  onChange={(event) =>
-                    handleQuantityChange(index, Number(event.target.value))
-                  }
-                  className="w-12 border-none bg-transparent text-center text-base font-semibold focus:outline-none"
-                />
+                <span className="w-8 text-center text-base font-bold tabular-nums">{item.quantity}</span>
                 <button
                   type="button"
-                  className="px-3 py-1 text-lg leading-none"
+                  className="bw-stepper-btn"
                   onClick={() => handleQuantityChange(index, items[index].quantity + 1)}
                   aria-label="เพิ่มจำนวน"
                 >
-                  +
+                  <Plus className="h-4 w-4" aria-hidden />
                 </button>
               </div>
-              <p className="text-base font-semibold">
+              <p className="text-base font-bold text-primary">
                 {formatCurrency(getCartItemLineTotal(item))}
               </p>
             </div>
@@ -146,29 +131,31 @@ export default function CartPage() {
         ))}
       </div>
 
-      <div className="rounded-2xl border bg-white p-4 shadow-sm">
+      <Link to="/liff/menu" className="bw-btn-outline text-sm">
+        เลือกเมนูเพิ่ม
+      </Link>
+
+      <div className="bw-card p-4">
         <div className="flex items-center justify-between">
           <p className="text-sm text-muted-foreground">ยอดรวมโดยประมาณ (สำหรับลูกค้า)</p>
-          <p className="text-lg font-semibold">{formatCurrency(estimatedTotal)}</p>
+          <p className="text-xl font-bold text-primary">{formatCurrency(estimatedTotal)}</p>
         </div>
         <p className="mt-1 text-xs text-muted-foreground">
           ราคาจริงอาจมีการปรับโดยร้านเมื่อตรวจสอบคำสั่งซื้อ
         </p>
       </div>
 
-      <div className="space-y-3">
-        <Link
-          to="/liff/menu"
-          className="inline-flex w-full items-center justify-center rounded-full border border-primary/40 px-4 py-2 text-sm font-semibold text-primary"
-        >
-          เลือกเมนูเพิ่ม
-        </Link>
-        <Link
-          to="/liff/confirm"
-          className="inline-flex w-full items-center justify-center rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground"
-        >
-          ไปยืนยันคำสั่งซื้อ
-        </Link>
+      <div className="fixed inset-x-0 bottom-0 z-40 border-t border-border/70 bg-background/90 backdrop-blur-md">
+        <div className="mx-auto flex max-w-md items-center gap-3 px-4 py-3">
+          <div className="leading-tight">
+            <p className="text-[11px] text-muted-foreground">ยอดรวม</p>
+            <p className="text-lg font-bold text-primary tabular-nums">{formatCurrency(estimatedTotal)}</p>
+          </div>
+          <Link to="/liff/confirm" className="bw-cta flex-1">
+            ไปยืนยันคำสั่งซื้อ
+            <ArrowRight className="h-4 w-4" aria-hidden />
+          </Link>
+        </div>
       </div>
     </div>
   );

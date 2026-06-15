@@ -172,7 +172,7 @@ export default function OrderSuccessPage() {
   return (
     <div className="mx-auto max-w-md space-y-5 px-4 py-6">
       {/* ── First view: success + key facts + next steps ── */}
-      <section className="rounded-2xl border bg-white p-5 shadow-sm">
+      <section className="bw-card p-5">
         <h1 className="text-2xl font-semibold">สั่งซื้อสำเร็จ</h1>
         <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
           <span>หมายเลขคำสั่งซื้อ: <span className="font-semibold text-foreground">{displayOrderNo || orderId}</span></span>
@@ -239,7 +239,7 @@ export default function OrderSuccessPage() {
 
       {/* ── Payment instruction card ── */}
       {!isPaid ? (
-        <section className="rounded-2xl border bg-white p-5 shadow-sm">
+        <section className="bw-card p-5">
           <p className="text-xs font-semibold text-primary/70">ช่องทางการชำระเงิน</p>
           {instructions?.enabled ? (
             <div className="mt-1 space-y-2 text-sm">
@@ -282,7 +282,7 @@ export default function OrderSuccessPage() {
 
       {/* ── Order item summary ── */}
       {order ? (
-        <section className="rounded-2xl border bg-white p-4 shadow-sm">
+        <section className="bw-card p-4">
           <h2 className="text-base font-semibold">รายการที่สั่ง</h2>
           <div className="mt-3 space-y-3">
             {order.items.map((item) => (
@@ -307,17 +307,11 @@ export default function OrderSuccessPage() {
       {/* ── Actions (priority order) ── */}
       <div className="space-y-3">
         {!isPaid ? (
-          <a
-            href={statusLink}
-            className="inline-flex w-full items-center justify-center rounded-full bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground"
-          >
+          <a href={statusLink} className="bw-cta">
             อัปโหลดสลิปการโอน
           </a>
         ) : null}
-        <a
-          href={statusLink}
-          className="inline-flex w-full items-center justify-center rounded-full border border-primary/40 px-4 py-2 text-sm font-semibold text-primary"
-        >
+        <a href={statusLink} className="bw-btn-outline">
           ดูสถานะออเดอร์
         </a>
         <Link

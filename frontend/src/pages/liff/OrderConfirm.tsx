@@ -176,18 +176,11 @@ export default function OrderConfirmPage() {
   if (!cartItems.length) {
     return (
       <div className="mx-auto max-w-md space-y-4 px-4 py-6">
-        <h1 className="text-2xl font-semibold">ยืนยันคำสั่งซื้อ</h1>
-        <div className="rounded-2xl border border-dashed bg-white/80 p-6 text-center shadow-sm">
-          <p className="text-base font-medium text-muted-foreground">
-            ไม่มีรายการให้ยืนยัน
-          </p>
-          <p className="mt-1 text-sm text-muted-foreground">
-            โปรดกลับไปเลือกเมนูและเพิ่มลงตะกร้าก่อน
-          </p>
-          <Link
-            to="/liff/menu"
-            className="mt-4 inline-flex w-full items-center justify-center rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground"
-          >
+        <h1 className="text-2xl font-bold">ยืนยันคำสั่งซื้อ</h1>
+        <div className="bw-card border-dashed p-8 text-center">
+          <p className="text-base font-semibold text-muted-foreground">ไม่มีรายการให้ยืนยัน</p>
+          <p className="mt-1 text-sm text-muted-foreground">โปรดกลับไปเลือกเมนูและเพิ่มลงตะกร้าก่อน</p>
+          <Link to="/liff/menu" className="bw-cta mt-4">
             ไปหน้าเมนู
           </Link>
         </div>
@@ -196,33 +189,27 @@ export default function OrderConfirmPage() {
   }
 
   return (
-    <div className="mx-auto max-w-md space-y-5 px-4 py-6">
+    <div className="mx-auto max-w-md space-y-5 px-4 py-5">
       <div className="space-y-1">
-        <h1 className="text-2xl font-semibold">ยืนยันคำสั่งซื้อ</h1>
-        <p className="text-sm text-muted-foreground">
-          โปรดตรวจสอบข้อมูลก่อนส่งให้ร้านค้า
-        </p>
+        <h1 className="text-2xl font-bold">ยืนยันคำสั่งซื้อ</h1>
+        <p className="text-sm text-muted-foreground">โปรดตรวจสอบข้อมูลก่อนส่งให้ร้านค้า</p>
       </div>
 
-      <section className="rounded-2xl border bg-white p-4 shadow-sm">
+      <section className="bw-card p-4">
         <div className="flex items-center justify-between">
           <div>
-            <p className="text-sm text-muted-foreground">ลูกค้า</p>
-            <p className="text-base font-semibold">
-              {identity?.displayName || "ลูกค้า LIFF"}
-            </p>
+            <p className="text-xs text-muted-foreground">ลูกค้า</p>
+            <p className="text-base font-bold">{identity?.displayName || "ลูกค้า LIFF"}</p>
           </div>
-          <Link to="/liff/cart" className="text-sm font-medium text-primary">
-            กลับไปแก้ไขตะกร้า
+          <Link to="/liff/cart" className="text-sm font-semibold text-primary">
+            แก้ไขตะกร้า
           </Link>
         </div>
-        {identityError ? (
-          <p className="mt-2 text-xs text-destructive">{identityError}</p>
-        ) : null}
-        <div className="mt-4 space-y-3">
+        {identityError ? <p className="mt-2 text-xs text-destructive">{identityError}</p> : null}
+        <div className="mt-4 space-y-3 border-t pt-3">
           {cartItems.map((item, index) => (
-            <div key={getCartItemKey(item, index)} className="flex items-center justify-between">
-              <div>
+            <div key={getCartItemKey(item, index)} className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
                 <p className="text-sm font-semibold">{item.name}</p>
                 <p className="text-xs text-muted-foreground">
                   x{item.quantity} · {formatCurrency(getCartItemUnitPrice(item))} / แก้ว (ประมาณ)
@@ -233,66 +220,61 @@ export default function OrderConfirmPage() {
                 {item.options?.addons?.map((addon, addonIndex) => (
                   <p key={`${addon.addon_id}-${addonIndex}`} className="text-xs text-muted-foreground">
                     เพิ่มช็อต x{addon.quantity} (+
-                    {formatCurrency((Number(addon.price ?? 0) || 0) * Math.max(1, addon.quantity))}
-                    /แก้ว)
+                    {formatCurrency((Number(addon.price ?? 0) || 0) * Math.max(1, addon.quantity))}/แก้ว)
                   </p>
                 ))}
                 {item.note ? (
                   <p className="text-xs text-muted-foreground">หมายเหตุ: {item.note}</p>
                 ) : null}
               </div>
-              <p className="text-sm font-semibold">
-                {formatCurrency(getCartItemLineTotal(item))}
-              </p>
+              <p className="text-sm font-bold">{formatCurrency(getCartItemLineTotal(item))}</p>
             </div>
           ))}
         </div>
         <div className="mt-4 flex items-center justify-between border-t pt-3">
           <p className="text-sm text-muted-foreground">ยอดรวมโดยประมาณ</p>
-          <p className="text-lg font-semibold">{formatCurrency(summary.total)}</p>
+          <p className="text-xl font-bold text-primary">{formatCurrency(summary.total)}</p>
         </div>
       </section>
 
-      <section className="space-y-4 rounded-2xl border bg-white p-4 shadow-sm">
-        <div className="space-y-1">
-          <label className="text-sm font-medium" htmlFor="phone">
+      <section className="bw-card space-y-4 p-4">
+        <div className="space-y-1.5">
+          <label className="text-sm font-semibold" htmlFor="phone">
             เบอร์โทรศัพท์ติดต่อ
           </label>
           <input
             id="phone"
             type="tel"
             inputMode="tel"
-            className="w-full rounded-xl border px-3 py-2 text-base focus:border-primary focus:outline-none"
+            className="bw-input"
             placeholder="08xxxxxxxx"
             value={phone}
             onChange={(event) => setPhone(event.target.value)}
           />
         </div>
 
-        <div className="space-y-1">
-          <label className="text-sm font-medium" htmlFor="pickup-time">
+        <div className="space-y-1.5">
+          <label className="text-sm font-semibold" htmlFor="pickup-time">
             เวลารับสินค้าโดยประมาณ
           </label>
           <input
             id="pickup-time"
             type="datetime-local"
-            className="w-full rounded-xl border px-3 py-2 text-base focus:border-primary focus:outline-none"
+            className="bw-input"
             value={pickupTime}
             onChange={(event) => setPickupTime(event.target.value)}
           />
-          <p className="text-xs text-muted-foreground">
-            แนะนำให้เลือกเวลาอย่างน้อย 30 นาทีจากตอนนี้
-          </p>
+          <p className="text-xs text-muted-foreground">แนะนำให้เลือกเวลาอย่างน้อย 30 นาทีจากตอนนี้</p>
         </div>
 
-        <div className="space-y-1">
-          <label className="text-sm font-medium" htmlFor="order-note">
+        <div className="space-y-1.5">
+          <label className="text-sm font-semibold" htmlFor="order-note">
             หมายเหตุเพิ่มเติม (ถ้ามี)
           </label>
           <textarea
             id="order-note"
             rows={3}
-            className="w-full rounded-xl border px-3 py-2 text-base focus:border-primary focus:outline-none"
+            className="bw-input"
             placeholder="ตัวอย่าง: ไม่ใส่ผักชี"
             value={orderNote}
             onChange={(event) => setOrderNote(event.target.value)}
@@ -300,14 +282,14 @@ export default function OrderConfirmPage() {
         </div>
       </section>
 
-      <section className="space-y-3 rounded-2xl border border-primary/30 bg-primary/5 p-4 text-sm text-muted-foreground">
+      <section className="space-y-3 rounded-2xl border border-primary/25 bg-primary/5 p-4 text-sm text-muted-foreground">
         <p>
           ร้านจะใช้ข้อมูลที่ระบุ รวมถึงชื่อ เบอร์โทร รายการสั่งซื้อ เวลารับสินค้า และหลักฐานการชำระเงิน เพื่อรับออเดอร์ ตรวจสอบการชำระเงิน แจ้งสถานะ นัดหมายเวลารับ และให้บริการหลังการขายเท่านั้น
         </p>
         <label className="flex items-start gap-3 text-sm font-medium text-foreground">
           <input
             type="checkbox"
-            className="mt-0.5 h-4 w-4 rounded border-primary text-primary focus:ring-primary"
+            className="mt-0.5 h-5 w-5 rounded border-primary text-primary focus:ring-primary"
             checked={pdpaAccepted}
             onChange={(event) => setPdpaAccepted(event.target.checked)}
           />
@@ -329,12 +311,7 @@ export default function OrderConfirmPage() {
         </div>
       ) : null}
 
-      <button
-        type="button"
-        onClick={confirm}
-        disabled={disableSubmit}
-        className="inline-flex w-full items-center justify-center rounded-full bg-primary px-4 py-3 text-base font-semibold text-primary-foreground disabled:opacity-60"
-      >
+      <button type="button" onClick={confirm} disabled={disableSubmit} className="bw-cta">
         {submitting ? "กำลังส่งคำสั่งซื้อ..." : "ยืนยันคำสั่งซื้อ"}
       </button>
     </div>

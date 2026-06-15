@@ -35,6 +35,7 @@ import OrderConfirmPage from "./pages/liff/OrderConfirm";
 import OrderSuccessPage from "./pages/liff/OrderSuccess";
 import OrderStatusPage from "./pages/order/OrderStatusPage";
 import PrivacyNoticePage from "./pages/PrivacyNotice";
+import CustomerThemeLayout from "./components/customer/CustomerThemeLayout";
 
 import AdminDashboardPage from "./pages/admin/AdminDashboard";
 import AdminOrdersPage from "./pages/admin/AdminOrders";
@@ -236,14 +237,14 @@ function AppRoutes() {
       />
       <Route path="/app/settings" element={<ProtectedRoute><BusinessRoute><Settings /></BusinessRoute></ProtectedRoute>} />
 
-      <Route path="/order" element={<CustomerMenuPage />} />
-      <Route path="/order/status" element={<OrderStatusPage />} />
-      <Route path="/privacy" element={<PrivacyNoticePage />} />
-      <Route path="/liff/menu" element={<CustomerMenuPage />} />
-      <Route path="/liff/menu/:id" element={<MenuDetailPage />} />
-      <Route path="/liff/cart" element={<CartPage />} />
-      <Route path="/liff/confirm" element={<OrderConfirmPage />} />
-      <Route path="/liff/success" element={<OrderSuccessPage />} />
+      <Route path="/order" element={<CustomerThemeLayout><CustomerMenuPage /></CustomerThemeLayout>} />
+      <Route path="/order/status" element={<CustomerThemeLayout showCart={false}><OrderStatusPage /></CustomerThemeLayout>} />
+      <Route path="/privacy" element={<CustomerThemeLayout showCart={false}><PrivacyNoticePage /></CustomerThemeLayout>} />
+      <Route path="/liff/menu" element={<CustomerThemeLayout><CustomerMenuPage /></CustomerThemeLayout>} />
+      <Route path="/liff/menu/:id" element={<CustomerThemeLayout><MenuDetailPage /></CustomerThemeLayout>} />
+      <Route path="/liff/cart" element={<CustomerThemeLayout><CartPage /></CustomerThemeLayout>} />
+      <Route path="/liff/confirm" element={<CustomerThemeLayout showCart={false}><OrderConfirmPage /></CustomerThemeLayout>} />
+      <Route path="/liff/success" element={<CustomerThemeLayout showCart={false}><OrderSuccessPage /></CustomerThemeLayout>} />
 
       <Route path="*" element={<NotFound />} />
     </Routes>

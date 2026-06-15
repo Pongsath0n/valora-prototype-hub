@@ -185,7 +185,7 @@ export default function OrderStatusPage() {
     }
 
     return (
-      <div className="rounded-2xl border bg-white p-5 shadow-sm">
+      <div className="bw-card p-5">
         <div className="flex flex-col gap-1">
           <p className="text-xs font-semibold text-primary/70">ช่องทางการชำระเงิน</p>
           <h3 className="text-xl font-semibold">{instructions.method_label}</h3>
@@ -404,7 +404,7 @@ export default function OrderStatusPage() {
 
       <section
         className={cn(
-          "rounded-2xl border bg-white p-5 shadow-sm transition-all duration-500",
+          "bw-card p-5 transition-all duration-500",
           animated ? "opacity-100 translate-y-0" : "opacity-0 translate-y-2",
         )}
       >
@@ -467,7 +467,7 @@ export default function OrderStatusPage() {
             {!isPaid ? renderInstructionCard() : null}
           </div>
 
-          <div className="rounded-2xl border bg-white p-5 shadow-sm">
+          <div className="bw-card p-5">
             <h2 className="text-base font-semibold">อัปโหลดสลิปการโอน</h2>
             {uploadState === "success" ? (
               <p className="mt-2 rounded-xl bg-emerald-50 px-4 py-2 text-sm text-emerald-700">
@@ -523,7 +523,7 @@ export default function OrderStatusPage() {
                 <button
                   type="submit"
                   disabled={uploadState === "uploading" || !selectedFile}
-                  className="inline-flex w-full items-center justify-center rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-60"
+                  className="bw-cta"
                 >
                   {uploadState === "uploading"
                     ? "กำลังอัปโหลด..."
@@ -542,7 +542,7 @@ export default function OrderStatusPage() {
             )}
           </div>
 
-          <div className="rounded-2xl border bg-white p-5 shadow-sm">
+          <div className="bw-card p-5">
             <h2 className="text-base font-semibold">สถานะการชำระเงิน</h2>
             <div className="mt-3 grid gap-3 md:grid-cols-2">
               <div className="rounded-xl bg-muted/40 p-3 text-sm">
@@ -570,7 +570,7 @@ export default function OrderStatusPage() {
 
       {/* 3) Order item summary */}
       {statusData ? (
-        <section className="rounded-2xl border bg-white p-5 shadow-sm">
+        <section className="bw-card p-5">
           <h2 className="text-base font-semibold">สรุปรายการสินค้า</h2>
           <p className="text-sm text-muted-foreground">
             เวลารับโดยประมาณ: {statusData.pickup_time ? new Date(statusData.pickup_time).toLocaleString("th-TH") : "-"}
@@ -611,7 +611,7 @@ export default function OrderStatusPage() {
 
       {/* 4) Simple progress timeline */}
       {statusData ? (
-        <section className="rounded-2xl border bg-white p-5 shadow-sm">
+        <section className="bw-card p-5">
           <h2 className="text-base font-semibold">ความคืบหน้า</h2>
           <ol className="relative mt-3 space-y-1">
             {timelineSteps.map((step, idx) => (
@@ -660,7 +660,7 @@ export default function OrderStatusPage() {
 
       {/* Manual search — only when the visitor has no direct status link/order loaded */}
       {showSearchForm ? (
-        <section className="rounded-2xl border bg-white p-5 shadow-sm">
+        <section className="bw-card p-5">
           <h2 className="text-base font-semibold">ค้นหาสถานะด้วยเลขออเดอร์</h2>
           <p className="text-sm text-muted-foreground">
             กรอกเลขออเดอร์และเบอร์โทรศัพท์ที่ใช้สั่งซื้อเพื่อดึงข้อมูลล่าสุด
@@ -694,7 +694,7 @@ export default function OrderStatusPage() {
             </div>
             <button
               type="submit"
-              className="inline-flex w-full items-center justify-center rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-60"
+              className="bw-cta"
               disabled={loading}
             >
               {loading ? "กำลังตรวจสอบ..." : "ดึงสถานะล่าสุด"}
@@ -705,10 +705,7 @@ export default function OrderStatusPage() {
 
       {/* 5) Secondary actions */}
       <div className="flex flex-wrap gap-3">
-        <Link
-          to="/liff/menu"
-          className="flex-1 rounded-full border border-primary/40 px-4 py-2 text-center text-sm font-semibold text-primary"
-        >
+        <Link to="/liff/menu" className="bw-btn-outline flex-1">
           สั่งเพิ่ม
         </Link>
       </div>
