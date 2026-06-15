@@ -1,11 +1,11 @@
 import { Link } from "react-router-dom";
-import { ArrowRight, CheckCircle2, LayoutDashboard, MessageCircle, Sparkles } from "lucide-react";
+import { ArrowRight, CheckCircle2, MessageCircle, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 const trustPoints = [
-  "ลูกค้าสั่งเองได้ ไม่ต้องสมัครหรือล็อกอิน",
-  "เห็นต้นทุน–กำไรต่อเมนูจริง",
-  "เปิดร้านผ่าน LINE OA ได้ทันที",
+  "เห็นต้นทุน–กำไรจริงต่อเมนู",
+  "ลูกค้าสั่งและชำระเงินเองผ่านลิงก์",
+  "ไม่ต้องเริ่มจาก POS ขนาดใหญ่",
 ];
 
 const metrics = [
@@ -54,52 +54,58 @@ export default function LandingHero() {
         <div className="mx-auto max-w-3xl text-center">
           <p className="mb-5 inline-flex items-center gap-2 rounded-full border border-accent/30 bg-accent/10 px-3 py-1 text-xs font-medium text-foreground">
             <Sparkles className="h-3.5 w-3.5 text-accent" aria-hidden />
-            ระบบรับออเดอร์ออนไลน์สำหรับร้านเล็กที่ขายผ่าน LINE OA
+            ระบบสั่งซื้อ + วางแผนกำไร สำหรับร้านกาแฟและ SME ขนาดเล็ก
           </p>
 
           <h1
             id="landing-hero-heading"
-            className="text-4xl font-bold tracking-tight text-foreground md:text-5xl lg:text-6xl"
-            style={{ lineHeight: 1.25 }}
+            className="text-3xl font-bold tracking-tight text-foreground md:text-4xl lg:text-5xl"
+            style={{ lineHeight: 1.3 }}
           >
-            ลูกค้าสั่งเอง <span className="text-accent">โอนเอง อัปโหลดสลิปเอง</span>
-            <br className="hidden sm:block" /> ร้านตรวจสลิปและดูกำไรในที่เดียว
+            ร้านเล็กไม่ควรรู้แค่ว่า “ขายได้เท่าไหร่”
+            <br className="hidden sm:block" /> แต่ควรรู้ว่า{" "}
+            <span className="text-accent">“ขายแล้วเหลือกำไรจริงกี่บาท”</span>
           </h1>
 
           <p className="mx-auto mt-6 max-w-2xl text-base text-muted-foreground md:text-lg">
-            ลูกค้ากดลิงก์จาก LINE OA สั่งสินค้า โอนเงิน อัปโหลดสลิป และติดตามสถานะได้เอง
-            ส่วนร้านตรวจสลิป จัดคิว และติดตามยอดขาย/กำไรต่อเมนูได้ในหลังบ้านเดียว
+            Valora ช่วยให้ลูกค้าสั่งและชำระเงินเองผ่านลิงก์ ร้านตรวจสลิปและจัดคิวได้ง่าย
+            และเจ้าของร้านเห็นต้นทุน–กำไรจริงของแต่ละเมนู — โดยไม่ต้องเริ่มจากระบบ POS ขนาดใหญ่
           </p>
 
           <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
             <Button asChild size="lg" className="w-full sm:w-auto">
-              <Link
-                to="/order"
+              <a
+                href="#workflow"
                 className="inline-flex items-center gap-2"
-                aria-label="เปิดเมนูร้าน — ไปยังหน้าลูกค้า"
+                aria-label="ดู Workflow ของระบบ"
               >
-                เปิดเมนูร้าน
+                ดู Workflow ของระบบ
                 <ArrowRight className="h-4 w-4" aria-hidden />
-              </Link>
+              </a>
             </Button>
             <Button asChild size="lg" variant="outline" className="w-full sm:w-auto">
-              <Link
-                to="/client-access"
+              <a
+                href="#snapshots"
                 className="inline-flex items-center gap-2"
-                aria-label="เข้าสู่ระบบร้านค้า"
+                aria-label="ดูตัวอย่างหน้าจอระบบ"
               >
-                <LayoutDashboard className="h-4 w-4" aria-hidden />
-                เข้าสู่ระบบร้านค้า
-              </Link>
+                ดูตัวอย่างหน้าจอระบบ
+              </a>
             </Button>
           </div>
 
-          <div className="mt-3">
-            <Link
-              to="/order/status"
-              className="text-sm font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+          <div className="mt-4 flex flex-wrap items-center justify-center gap-x-5 gap-y-1 text-sm">
+            <a
+              href="#profit"
+              className="font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
             >
-              เช็กสถานะออเดอร์ที่สั่งไว้
+              ดูวิธีคำนวณกำไร
+            </a>
+            <Link
+              to="/client-access"
+              className="font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+            >
+              เข้าสู่ระบบร้านค้า
             </Link>
           </div>
 
@@ -123,6 +129,9 @@ export default function LandingHero() {
             className="pointer-events-none absolute inset-x-6 -top-6 h-24 rounded-full bg-accent/20 blur-3xl"
           />
           <div className="relative mx-auto max-w-5xl rounded-2xl border bg-card p-3 shadow-xl md:p-4">
+            <span className="absolute right-5 top-5 z-10 rounded-full border border-border bg-background/90 px-3 py-1 text-[11px] font-semibold text-muted-foreground shadow-sm">
+              ภาพจำลอง
+            </span>
             <div className="rounded-xl border bg-background p-5 md:p-8">
               <div className="flex items-center justify-between border-b pb-4">
                 <div className="flex items-center gap-3">

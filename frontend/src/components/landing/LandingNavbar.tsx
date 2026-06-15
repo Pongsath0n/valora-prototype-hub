@@ -5,9 +5,10 @@ import LogoBrand from "@/components/LogoBrand";
 import { Button } from "@/components/ui/button";
 
 const navLinks = [
-  { href: "#features", label: "ฟีเจอร์" },
-  { href: "#workflow", label: "ขั้นตอนใช้งาน" },
-  { href: "#use-cases", label: "เหมาะกับใคร" },
+  { href: "#pain", label: "ปัญหา" },
+  { href: "#solution", label: "วิธีแก้" },
+  { href: "#profit", label: "กำไรต่อเมนู" },
+  { href: "#workflow", label: "Workflow" },
   { href: "#transparency", label: "ความโปร่งใส" },
 ];
 
@@ -54,9 +55,9 @@ export default function LandingNavbar() {
             </Link>
           </Button>
           <Button asChild size="sm">
-            <Link to="/order" aria-label="เปิดเมนูร้าน">
-              เปิดเมนูร้าน
-            </Link>
+            <a href="#workflow" aria-label="ดู Workflow ของระบบ">
+              ดู Workflow ของระบบ
+            </a>
           </Button>
         </div>
 
@@ -92,9 +93,9 @@ export default function LandingNavbar() {
                 </Link>
               </Button>
               <Button asChild size="sm" onClick={() => setOpen(false)}>
-                <Link to="/order" aria-label="เปิดเมนูร้าน">
-                  เปิดเมนูร้าน
-                </Link>
+                <a href="#workflow" aria-label="ดู Workflow ของระบบ">
+                  ดู Workflow ของระบบ
+                </a>
               </Button>
             </div>
           </nav>

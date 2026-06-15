@@ -37,7 +37,7 @@ const steps = [
 
 export default function SolutionSection() {
   return (
-    <section className="border-t py-20 md:py-24" aria-labelledby="solution-heading">
+    <section id="solution" className="border-t py-20 md:py-24" aria-labelledby="solution-heading">
       <div className="mx-auto max-w-6xl px-4">
         <div className="mx-auto max-w-2xl text-center">
           <p className="mb-4 inline-flex items-center gap-2 rounded-full border border-accent/30 bg-accent/10 px-3 py-1 text-xs font-medium text-foreground">
@@ -48,10 +48,11 @@ export default function SolutionSection() {
             id="solution-heading"
             className="text-3xl font-bold tracking-tight text-foreground md:text-4xl"
           >
-            ตั้งแต่ลูกค้ากดลิงก์สั่งจนปิดยอดวัน อยู่ในระบบเดียว
+            ตั้งแต่ลูกค้ากดลิงก์สั่ง จนเจ้าของเห็นกำไรของวัน อยู่ในระบบเดียว
           </h2>
           <p className="mt-4 text-base text-muted-foreground md:text-lg">
-            Valora ออกแบบโฟลว์ให้เจ้าของร้านคุมง่าย ลูกค้าใช้สะดวก ไม่ต้องสลับหน้าจอหลายตัว
+            ลูกค้าใช้สะดวก ร้านคุมง่าย พนักงานเห็นเฉพาะสิ่งที่ควรเห็น
+            และทุกออเดอร์เชื่อมไปถึงต้นทุน–กำไรจริงให้เจ้าของร้านโดยอัตโนมัติ
           </p>
         </div>
 

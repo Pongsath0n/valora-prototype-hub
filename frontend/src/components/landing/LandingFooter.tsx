@@ -3,10 +3,11 @@ import { Mail } from "lucide-react";
 import LogoBrand from "@/components/LogoBrand";
 
 const productLinks = [
-  { href: "#features", label: "ฟีเจอร์" },
-  { href: "#workflow", label: "ขั้นตอนใช้งาน" },
-  { href: "#use-cases", label: "เหมาะกับใคร" },
-  { href: "#transparency", label: "พูดตรงไปตรงมา" },
+  { href: "#pain", label: "ปัญหา" },
+  { href: "#solution", label: "วิธีแก้" },
+  { href: "#profit", label: "กำไรต่อเมนู" },
+  { href: "#workflow", label: "Workflow" },
+  { href: "#transparency", label: "ความโปร่งใส" },
 ];
 
 export default function LandingFooter() {
@@ -21,8 +22,8 @@ export default function LandingFooter() {
           <div>
             <LogoBrand size="sm" />
             <p className="mt-4 max-w-sm text-sm leading-relaxed text-muted-foreground">
-              ระบบรับออเดอร์ออนไลน์สำหรับร้านเล็กที่ขายผ่าน LINE OA
-              ลูกค้าสั่งเอง ร้านตรวจสลิปและเห็นกำไรจริงได้ในหลังบ้านเดียว
+              ระบบสั่งซื้อและวางแผนกำไรสำหรับร้านกาแฟและ SME ขนาดเล็ก
+              ที่ช่วยให้เจ้าของร้านเห็นต้นทุนและกำไรจริง โดยไม่ต้องเริ่มจากระบบ POS ขนาดใหญ่
             </p>
           </div>
 
@@ -50,12 +51,12 @@ export default function LandingFooter() {
                 </Link>
               </li>
               <li>
-                <Link
-                  to="/order"
+                <a
+                  href="#snapshots"
                   className="text-foreground/80 transition-colors hover:text-foreground"
                 >
-                  เปิดเมนูร้าน
-                </Link>
+                  ดูตัวอย่างหน้าจอระบบ
+                </a>
               </li>
             </ul>
           </nav>
