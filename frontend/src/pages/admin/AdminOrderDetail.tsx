@@ -6,6 +6,12 @@ import StatusBadge from "@/components/shared/StatusBadge";
 import DataTable, { type Column } from "@/components/shared/DataTable";
 import { storeAdminApi, type ApiOrder, type ApiOrderItem, type ApiPayment } from "@/services/storeAdminApi";
 import { PaymentSlipPreviewModal } from "@/components/admin/PaymentSlipPreviewModal";
+import { CancelOrderDialog } from "@/components/admin/CancelOrderDialog";
+import {
+  friendlyCancelError,
+  isClearlyUncancellableByStaff,
+  STAFF_CANCEL_BLOCKED_HINT,
+} from "@/lib/orderCancel";
 import { formatOrderStatus, orderStatusTone, formatPaymentStatus, paymentStatusTone, formatTHB } from "@/lib/format";
 import { useProfileRole } from "@/contexts/RoleContext";
 
@@ -128,6 +134,8 @@ export default function AdminOrderDetailPage() {
   const [previewOpen, setPreviewOpen] = useState(false);
   const [activePayment, setActivePayment] = useState<ApiPayment | null>(null);
   const [modalRejectReason, setModalRejectReason] = useState("");
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const [cancelSubmitting, setCancelSubmitting] = useState(false);
 
   const refresh = async () => {
     if (!id) return;
@@ -221,7 +229,8 @@ export default function AdminOrderDetailPage() {
       if (res.mock_notification) setInfo(res.mock_notification);
       await refresh();
     } catch (err: any) {
-      setError(err?.message || "อัปเดตสถานะไม่สำเร็จ");
+      const raw = err?.message;
+      setError(friendlyCancelError(raw) || raw || "อัปเดตสถานะไม่สำเร็จ");
     }
   };
 
@@ -229,9 +238,19 @@ export default function AdminOrderDetailPage() {
     await handleStatusUpdate({ status: next });
   };
 
+  // Real cancellation is sent only after the Staff confirms in the dialog.
   const handleCancel = async () => {
     await handleStatusUpdate({ status: "cancelled", cancelled_reason: "cancelled_by_admin" });
   };
+
+  const confirmCancel = async () => {
+    setCancelSubmitting(true);
+    await handleCancel();
+    setCancelSubmitting(false);
+    setCancelOpen(false);
+  };
+
+  const cancelBlocked = isClearlyUncancellableByStaff(order.status);
 
   const handleApprovePayment = async (paymentId: string) => {
     setError("");
@@ -326,12 +345,16 @@ export default function AdminOrderDetailPage() {
           ))}
           <button
             type="button"
-            onClick={handleCancel}
-            className="px-3 py-1.5 rounded border text-sm text-destructive border-destructive/40 hover:bg-destructive/10"
+            onClick={() => setCancelOpen(true)}
+            disabled={cancelBlocked}
+            className="px-3 py-1.5 rounded border text-sm text-destructive border-destructive/40 hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent"
           >
             Cancel Order
           </button>
         </div>
+        {cancelBlocked ? (
+          <p className="text-xs text-muted-foreground">{STAFF_CANCEL_BLOCKED_HINT}</p>
+        ) : null}
       </div>
 
       <DataTable columns={itemColumns} rows={orderItems} />
@@ -396,6 +419,15 @@ export default function AdminOrderDetailPage() {
         onReject={(payment) => handleRejectFromModal(payment)}
         rejectReason={modalRejectReason}
         onRejectReasonChange={setModalRejectReason}
+      />
+      <CancelOrderDialog
+        open={cancelOpen}
+        order={order}
+        submitting={cancelSubmitting}
+        onConfirm={() => void confirmCancel()}
+        onClose={() => {
+          if (!cancelSubmitting) setCancelOpen(false);
+        }}
       />
     </AdminLayout>
   );

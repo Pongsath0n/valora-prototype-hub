@@ -12,6 +12,8 @@ import {
 } from "@/services/storeAdminApi";
 import { saveBlobAsFile } from "@/lib/download";
 import { PaymentSlipPreviewModal } from "@/components/admin/PaymentSlipPreviewModal";
+import { CancelOrderDialog } from "@/components/admin/CancelOrderDialog";
+import { friendlyCancelError, isClearlyUncancellableByStaff } from "@/lib/orderCancel";
 import {
   formatOrderStatus,
   orderStatusTone,
@@ -126,14 +128,10 @@ function friendlyError(message: string): string {
   if (message === "insufficient_role") {
     return "สิทธิ์ไม่เพียงพอสำหรับการแก้ไขข้อมูล";
   }
-  if (message === "staff_cannot_cancel_paid_order") {
-    return "สตาฟไม่สามารถยกเลิกออเดอร์ที่ชำระเงินแล้วได้";
-  }
-  if (message === "order_already_archived") {
-    return "ออเดอร์นี้ถูกยกเลิกหรือปิดไปแล้ว";
-  }
-  if (message === "order_already_completed") {
-    return "ออเดอร์นี้เสร็จสิ้นแล้วและไม่สามารถยกเลิกได้";
+  // Cancellation-specific backend enums (single source of friendly copy).
+  const cancelMessage = friendlyCancelError(message);
+  if (cancelMessage) {
+    return cancelMessage;
   }
   return message;
 }
@@ -193,6 +191,8 @@ export default function AdminOrdersPage() {
   const [modalRejectReason, setModalRejectReason] = useState("");
   const [exportingOrders, setExportingOrders] = useState(false);
   const [exportingPayments, setExportingPayments] = useState(false);
+  const [pendingCancel, setPendingCancel] = useState<ApiOrder | null>(null);
+  const [cancelSubmitting, setCancelSubmitting] = useState(false);
 
   const applyOrderStatusOptimistic = (orderId: string, nextStatus: string) => {
     setRows((prev) =>
@@ -366,6 +366,21 @@ export default function AdminOrdersPage() {
     } catch (err: any) {
       setError(friendlyError(err?.message || "อัปเดตสถานะไม่สำเร็จ"));
     }
+  };
+
+  // Real order cancellation is gated behind an explicit confirmation dialog.
+  // The queue dropdown only *requests* a cancellation here; nothing is sent
+  // until the Staff confirms in CancelOrderDialog.
+  const requestCancel = (order: ApiOrder) => {
+    setPendingCancel(order);
+  };
+
+  const confirmCancel = async () => {
+    if (!pendingCancel) return;
+    setCancelSubmitting(true);
+    await handleStatusChange(pendingCancel, "cancelled");
+    setCancelSubmitting(false);
+    setPendingCancel(null);
   };
 
   const handleApprovePayment = async (paymentId: string) => {
@@ -738,7 +753,13 @@ export default function AdminOrdersPage() {
               key: "actions",
               header: "จัดการ",
               render: (r) => {
-                const options = nextStatusByCurrent[r.status] || [];
+                const rawOptions = nextStatusByCurrent[r.status] || [];
+                // Hide the cancel option for statuses Staff clearly cannot cancel
+                // (owner-approved rule). Other transitions are left untouched.
+                // Backend remains the final authority regardless of this filter.
+                const options = isClearlyUncancellableByStaff(r.status)
+                  ? rawOptions.filter((s) => s !== "cancelled")
+                  : rawOptions;
                 if (options.length === 0) return <span className="text-muted-foreground">-</span>;
                 return (
                   <select
@@ -746,9 +767,16 @@ export default function AdminOrdersPage() {
                     defaultValue=""
                     aria-label="เลือกการดำเนินการถัดไป"
                     onChange={(e) => {
-                      if (!e.target.value) return;
-                      void handleStatusChange(r, e.target.value);
+                      const value = e.target.value;
+                      if (!value) return;
+                      // Reset the select first so it stays usable whether the
+                      // user confirms, cancels, or the request fails.
                       e.currentTarget.value = "";
+                      if (value === "cancelled") {
+                        requestCancel(r);
+                        return;
+                      }
+                      void handleStatusChange(r, value);
                     }}
                   >
                     <option value="">เลือกการดำเนินการ</option>
@@ -771,6 +799,15 @@ export default function AdminOrdersPage() {
         onReject={(payment) => handleRejectFromModal(payment)}
         rejectReason={modalRejectReason}
         onRejectReasonChange={setModalRejectReason}
+      />
+      <CancelOrderDialog
+        open={pendingCancel !== null}
+        order={pendingCancel}
+        submitting={cancelSubmitting}
+        onConfirm={() => void confirmCancel()}
+        onClose={() => {
+          if (!cancelSubmitting) setPendingCancel(null);
+        }}
       />
     </AdminLayout>
   );
