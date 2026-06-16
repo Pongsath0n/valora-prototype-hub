@@ -181,7 +181,7 @@ export function PaymentSlipPreviewModal({
                   </div>
                 ) : null}
                 <div className="flex justify-between">
-                  <dt className="text-muted-foreground">ยอดที่ลูกค้าโอน</dt>
+                  <dt className="text-muted-foreground">ยอดที่ลูกค้าแจ้ง (จากสลิป)</dt>
                   <dd
                     className={`font-semibold tabular-nums ${
                       amountMatch.kind === "mismatch"
@@ -219,6 +219,9 @@ export function PaymentSlipPreviewModal({
 
             <div className="rounded-xl border p-4 text-sm">
               <h3 className="text-base font-semibold">การดำเนินการ</h3>
+              <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                โปรดตรวจสอบยอดเงิน วันที่ เวลา และบัญชีผู้รับเงินจากสลิปก่อนอนุมัติ
+              </p>
               <label className="mt-3 block text-sm font-medium text-foreground">
                 เหตุผลการปฏิเสธ (บังคับเมื่อ Reject)
               </label>

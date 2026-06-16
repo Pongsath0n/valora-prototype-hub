@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Area, AreaChart, CartesianGrid, Line, XAxis, YAxis } from "recharts";
 import AppLayout from "@/components/AppLayout";
 import DataTable, { type Column } from "@/components/shared/DataTable";
@@ -48,13 +48,69 @@ const STATUS_LABELS: Record<string, string> = {
   rejected: "ปฏิเสธ",
 };
 
+type DashboardState = {
+  data: DashboardSummaryResponse | null;
+  error: string | null;
+  loading: boolean;
+  refreshing: boolean;
+  lastUpdated: string | null;
+};
+
 export default function DashboardPage() {
   const { checking, accessDenied } = useRoleGuard(DASHBOARD_ALLOWED_ROLES);
-  const [state, setState] = useState<{ data: DashboardSummaryResponse | null; error: string | null; loading: boolean }>({
+  const [state, setState] = useState<DashboardState>({
     data: null,
     error: null,
     loading: true,
+    refreshing: false,
+    lastUpdated: null,
   });
+  const isMountedRef = useRef(true);
+
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
+  const loadSummary = useCallback(
+    async (options?: { silent?: boolean }) => {
+      const silent = Boolean(options?.silent);
+      setState((prev) => ({
+        ...prev,
+        error: null,
+        ...(silent
+          ? { refreshing: true }
+          : {
+              loading: true,
+              data: prev.data,
+            }),
+      }));
+
+      try {
+        const res = await storeAdminApi.getDashboardSummary();
+        if (!isMountedRef.current) return;
+        setState({
+          data: res,
+          error: null,
+          loading: false,
+          refreshing: false,
+          lastUpdated: new Date().toISOString(),
+        });
+      } catch (err: any) {
+        if (!isMountedRef.current) return;
+        const message = err?.message || "โหลดข้อมูลไม่สำเร็จ";
+        setState((prev) => ({
+          ...prev,
+          error: message,
+          loading: silent ? prev.loading : false,
+          refreshing: false,
+          data: silent ? prev.data : null,
+        }));
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     if (checking) return;
@@ -63,24 +119,8 @@ export default function DashboardPage() {
       return;
     }
 
-    let cancelled = false;
-    setState({ data: null, error: null, loading: true });
-    storeAdminApi
-      .getDashboardSummary()
-      .then((res) => {
-        if (!cancelled) {
-          setState({ data: res, error: null, loading: false });
-        }
-      })
-      .catch((err) => {
-        if (!cancelled) {
-          setState({ data: null, error: err.message || "โหลดข้อมูลไม่สำเร็จ", loading: false });
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [checking, accessDenied]);
+    void loadSummary();
+  }, [checking, accessDenied, loadSummary]);
 
   if (checking || state.loading) {
     return (
@@ -103,7 +143,7 @@ export default function DashboardPage() {
     );
   }
 
-  if (state.error) {
+  if (!state.data && state.error) {
     return (
       <AppLayout>
         <div className="rounded-2xl border border-destructive/40 bg-destructive/5 p-6">
@@ -126,6 +166,7 @@ export default function DashboardPage() {
   const summary = state.data;
   const timezoneDisplay = summary.store_timezone_display || buildTimezoneDisplay(summary);
   const trendData = (summary.seven_day_trend ?? []).map((point) => ({ ...point }));
+  const lastUpdatedLabel = state.lastUpdated ? dateTimeFormatter.format(new Date(state.lastUpdated)) : null;
   const financialCards = [
     {
       label: "ยอดขายที่ชำระแล้ววันนี้",
@@ -232,27 +273,50 @@ export default function DashboardPage() {
             <p className="mt-1 text-sm text-muted-foreground">
               ข้อมูลจริงจากออเดอร์และการชำระเงินของร้าน • เขตเวลา: {timezoneDisplay}
             </p>
+            {lastUpdatedLabel ? (
+              <p className="mt-1 text-xs text-muted-foreground">
+                ข้อมูลอัปเดตล่าสุด: {lastUpdatedLabel}
+                {state.refreshing ? " • กำลังรีเฟรช..." : null}
+              </p>
+            ) : null}
           </div>
-          <div className="flex flex-col gap-2 sm:flex-row">
-            <CTAButton to="/app/planning" variant="primary">
-              วางแผนกำไร
-            </CTAButton>
-            <CTAButton to="/store-admin/orders" variant="secondary">
-              จัดการออเดอร์และตรวจสลิป
-            </CTAButton>
+          <div>
+            <button
+              type="button"
+              onClick={() => loadSummary({ silent: true })}
+              disabled={state.refreshing}
+              className="inline-flex items-center justify-center rounded-2xl border border-input bg-background px-4 py-2 text-sm font-semibold text-foreground shadow-sm transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-70"
+            >
+              {state.refreshing ? "กำลังรีเฟรช..." : "รีเฟรชข้อมูล"}
+            </button>
           </div>
         </div>
 
         <Link
           to="/app/planning"
-          className="block rounded-2xl border border-primary/30 bg-primary/5 p-5 shadow-sm transition hover:border-primary/60"
+          className="block rounded-2xl border border-primary/30 bg-primary/5 p-5 shadow-md transition hover:border-primary/60"
         >
-          <p className="text-xs font-semibold uppercase tracking-[0.3em] text-primary/70">หัวใจของ Valora</p>
-          <h2 className="mt-1 text-lg font-semibold text-foreground">การวางแผนกำไร (Profit Planning)</h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            จำลองราคา ต้นทุน วันเปิดขาย และเป้ากำไร เพื่อหาจุดคุ้มทุนและยอดขายที่ต้องทำ — เริ่มวางแผนได้จากที่นี่
+          <p className="text-xs font-semibold uppercase tracking-[0.3em] text-primary/70">Profit Planning</p>
+          <h2 className="mt-1 text-2xl font-semibold text-foreground">วางแผนกำไรของร้าน</h2>
+          <p className="mt-2 text-sm text-muted-foreground">
+            ดูต้นทุนต่อเมนู ราคาขาย และกำไรต่อแก้ว เพื่อช่วยตัดสินใจก่อนปรับราคา ทำโปรโมชัน หรือเพิ่มเมนูใหม่
           </p>
+          <ul className="mt-3 space-y-1.5 text-sm text-foreground/90">
+            <li>• ดูว่าแต่ละเมนูเหลือกำไรกี่บาท</li>
+            <li>• ตรวจต้นทุนวัตถุดิบและบรรจุภัณฑ์ต่อแก้ว</li>
+            <li>• ทดลองปรับราคาเพื่อดูผลต่อกำไร</li>
+            <li>• ใช้ประกอบการตัดสินใจก่อนขายจริง</li>
+          </ul>
+          <div className="mt-4 inline-flex items-center gap-2 rounded-2xl bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground shadow-sm">
+            คำนวณกำไรต่อเมนู
+          </div>
         </Link>
+
+        {state.data && state.error ? (
+          <div className="rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
+            ไม่สามารถรีเฟรชข้อมูลล่าสุดได้: {state.error} • แสดงข้อมูลก่อนหน้าอยู่
+          </div>
+        ) : null}
 
         <section className="space-y-4">
           <div>
@@ -432,21 +496,6 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
       <h2 className="text-lg font-semibold text-foreground">{title}</h2>
       <div className="mt-4">{children}</div>
     </div>
-  );
-}
-
-function CTAButton({ to, children, variant }: { to: string; children: ReactNode; variant: "primary" | "secondary" }) {
-  const classes =
-    variant === "primary"
-      ? "bg-primary text-primary-foreground border border-primary"
-      : "border border-input bg-transparent text-foreground";
-  return (
-    <Link
-      to={to}
-      className={`inline-flex items-center justify-center rounded-2xl px-4 py-2 text-sm font-semibold shadow-sm transition hover:-translate-y-0.5 ${classes}`}
-    >
-      {children}
-    </Link>
   );
 }
 

@@ -418,7 +418,7 @@ export default function AdminOrderDetailPage() {
                       <p className="font-semibold tabular-nums">{formatTHBExact(order.total_amount)}</p>
                     </div>
                     <div className="rounded-lg border bg-muted/30 px-3 py-2">
-                      <p className="text-xs text-muted-foreground">ยอดที่ลูกค้าโอน</p>
+                      <p className="text-xs text-muted-foreground">ยอดที่ลูกค้าแจ้ง (จากสลิป)</p>
                       <p
                         className={`font-semibold tabular-nums ${
                           match.kind === "mismatch"
@@ -461,6 +461,9 @@ export default function AdminOrderDetailPage() {
                   {/* Approve / reject — separated, with a lightweight approve confirm */}
                   {isPending ? (
                     <div className="space-y-3 border-t pt-3">
+                      <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                        โปรดตรวจสอบยอดเงิน วันที่ เวลา และบัญชีผู้รับเงินจากสลิปก่อนอนุมัติ
+                      </p>
                       <div className="space-y-2">
                         {confirmingApproveId === payment.id ? (
                           <div className="flex flex-col gap-2 rounded-lg border border-emerald-200 bg-emerald-50 p-3 sm:flex-row sm:items-center sm:justify-between">
