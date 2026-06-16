@@ -200,26 +200,57 @@ def normalize_order_status(value: Optional[str]) -> str:
 
 def normalize_payment_status(value: Optional[str]) -> str:
     status = str(value or "").strip().lower()
-    if status == "pending":
-        return "pending_review"
     return status
+
+
+def _has_submitted_payment_slip(payment_summary: Optional[Dict[str, Any]]) -> bool:
+    if not payment_summary:
+        return False
+    slip_flag = payment_summary.get("slip_submitted")
+    has_flag = bool(slip_flag)
+    if has_flag:
+        return True
+    return bool(
+        payment_summary.get("slip_storage_path")
+        or payment_summary.get("slip_file_name")
+        or payment_summary.get("slip_url")
+        or payment_summary.get("submitted_at")
+    )
 
 
 def _staff_can_cancel_operational_order(
     current_status: Optional[str],
     payment_status: Optional[str],
     cancelled_at: Optional[str],
+    *,
+    latest_payment: Optional[Dict[str, Any]] = None,
 ) -> Tuple[bool, Optional[str]]:
     normalized_status = normalize_order_status(current_status)
     normalized_payment = normalize_payment_status(payment_status)
+    latest_payment_status = normalize_payment_status(latest_payment.get("status")) if isinstance(latest_payment, dict) else ""
+    effective_payment_status = latest_payment_status or normalized_payment
+    latest_pending_review = bool(latest_payment_status) and latest_payment_status in PENDING_REVIEW_PAYMENT_STATUSES
+    top_level_pending_review = normalized_payment in PENDING_REVIEW_PAYMENT_STATUSES
+    effective_pending_review = effective_payment_status in PENDING_REVIEW_PAYMENT_STATUSES
+    has_slip = _has_submitted_payment_slip(latest_payment)
 
     if cancelled_at or normalized_status in CANCELLED_ORDER_STATUSES:
         return False, "order_already_archived"
     if normalized_status == "completed":
         return False, "order_already_completed"
-    if normalized_status == "paid" or normalized_payment in CONFIRMED_PAYMENT_STATUSES:
+    if normalized_status == "paid" or effective_payment_status in CONFIRMED_PAYMENT_STATUSES:
         return False, "staff_cannot_cancel_paid_order"
-    if normalized_payment in PENDING_REVIEW_PAYMENT_STATUSES:
+    if normalized_status == "waiting_payment_review":
+        if has_slip:
+            return False, "insufficient_role_for_status"
+        if latest_pending_review:
+            return False, "insufficient_role_for_status"
+        if not latest_payment and top_level_pending_review:
+            return True, None
+        if effective_pending_review:
+            return False, "insufficient_role_for_status"
+        return True, None
+    if effective_pending_review:
         return False, "insufficient_role_for_status"
     if normalized_status not in _STAFF_CANCEL_OPERATIONAL_STATUSES:
         return False, "insufficient_role_for_status"
@@ -4389,10 +4420,13 @@ def update_order_status(order_id: str, payload: OrderStatusUpdate, authorization
 
     if normalized_role == "staff":
         if next_status_value == "cancelled":
+            latest_payment_map = _load_latest_payments(ctx["client"], [str(current.get("id") or order_id)])
+            latest_payment = latest_payment_map.get(str(current.get("id") or order_id))
             allowed, denial_reason = _staff_can_cancel_operational_order(
                 current_status_normalized,
                 current_payment_status,
                 current.get("cancelled_at"),
+                latest_payment=latest_payment,
             )
             if not allowed:
                 raise HTTPException(
