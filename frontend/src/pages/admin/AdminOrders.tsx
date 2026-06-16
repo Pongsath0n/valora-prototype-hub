@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import AdminLayout from "@/components/admin/AdminLayout";
 import DataTable from "@/components/shared/DataTable";
 import StatusBadge from "@/components/shared/StatusBadge";
-import { Download, Search } from "lucide-react";
+import { Download, Search, ClipboardList, Inbox, AlertTriangle } from "lucide-react";
 import {
   storeAdminApi,
   type ApiOrder,
@@ -17,6 +17,7 @@ import {
   orderStatusTone,
   formatPaymentStatus,
   paymentStatusTone,
+  formatNextStatusAction,
   formatTHB,
   formatDateTime,
 } from "@/lib/format";
@@ -81,6 +82,40 @@ const nextStatusByCurrent: Record<string, string[]> = {
   ready: ["completed", "cancelled"],
 };
 
+/**
+ * A short, human-readable "what to do next" hint for a queued order, derived
+ * entirely from already-loaded order/payment status. `attention` marks orders
+ * that need immediate Staff action (slip waiting for review).
+ */
+type QueueHint = { label: string; tone: "attention" | "info" | "muted" };
+
+function getQueueHint(order: ApiOrder): QueueHint | null {
+  const payment = normalizeStatus(order.payment_status);
+  const status = normalizeStatus(order.status);
+  if (payment === "waiting_payment_review" || payment === "pending_review") {
+    return { label: "ต้องตรวจสลิป", tone: "attention" };
+  }
+  if (status === "pending_payment") {
+    return { label: "รอลูกค้าชำระเงิน", tone: "muted" };
+  }
+  if (status === "accepted") {
+    return { label: "พร้อมเริ่มเตรียม", tone: "info" };
+  }
+  if (status === "preparing") {
+    return { label: "กำลังเตรียม", tone: "info" };
+  }
+  if (status === "ready" || status === "ready_for_pickup") {
+    return { label: "รอลูกค้ามารับ", tone: "info" };
+  }
+  return null;
+}
+
+const queueHintClasses: Record<QueueHint["tone"], string> = {
+  attention: "text-amber-700",
+  info: "text-blue-700",
+  muted: "text-muted-foreground",
+};
+
 function friendlyError(message: string): string {
   if (message === "missing_token" || message === "invalid_token" || message === "unauthorized") {
     return "เซสชันหมดอายุหรือยังไม่ได้เข้าสู่ระบบ กรุณาเข้าสู่ระบบใหม่";
@@ -102,6 +137,40 @@ function friendlyError(message: string): string {
   }
   return message;
 }
+
+function QueueLoadingState() {
+  return (
+    <div className="rounded-xl border bg-card p-4" role="status" aria-live="polite">
+      <div className="mb-3 flex items-center gap-2 text-sm text-muted-foreground">
+        <ClipboardList className="h-4 w-4 animate-pulse" />
+        กำลังโหลดคิวออเดอร์...
+      </div>
+      <div className="space-y-2">
+        {[0, 1, 2, 3].map((i) => (
+          <div key={i} className="h-10 animate-pulse rounded-lg bg-muted/60" />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function QueueEmptyState({ title, hint }: { title: string; hint: string }) {
+  return (
+    <div className="flex flex-col items-center justify-center rounded-xl border border-dashed bg-card px-6 py-12 text-center">
+      <Inbox className="mb-3 h-8 w-8 text-muted-foreground" />
+      <p className="text-sm font-medium text-foreground">{title}</p>
+      <p className="mt-1 text-xs text-muted-foreground">{hint}</p>
+    </div>
+  );
+}
+
+const emptyStateCopy: Record<TabKey, { title: string; hint: string }> = {
+  queue: { title: "ยังไม่มีออเดอร์ในคิว", hint: "ออเดอร์ใหม่จะปรากฏที่นี่โดยอัตโนมัติเมื่อมีลูกค้าสั่ง" },
+  payments: { title: "ไม่มีสลิปรอตรวจสอบ", hint: "เมื่อมีลูกค้าส่งสลิปการชำระเงิน รายการจะแสดงที่นี่" },
+  preparing: { title: "ยังไม่มีออเดอร์ที่กำลังเตรียม", hint: "ออเดอร์ที่ยืนยันแล้วจะย้ายมาที่นี่เพื่อเริ่มเตรียม" },
+  ready: { title: "ยังไม่มีออเดอร์พร้อมรับ", hint: "ออเดอร์ที่เตรียมเสร็จจะแสดงที่นี่เพื่อรอลูกค้ามารับ" },
+  completed: { title: "ยังไม่มีออเดอร์ที่เสร็จสิ้น", hint: "ออเดอร์ที่ปิดงานแล้วจะถูกเก็บไว้ที่นี่" },
+};
 
 export default function AdminOrdersPage() {
   const [rows, setRows] = useState<ApiOrder[]>([]);
@@ -460,7 +529,12 @@ export default function AdminOrdersPage() {
         </div>
       </div>
 
-      {error ? <div className="stat-card mb-4 text-sm text-destructive">{error}</div> : null}
+      {error ? (
+        <div className="stat-card mb-4 flex items-start gap-2 border-destructive/40 text-sm text-destructive" role="alert">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>{error}</span>
+        </div>
+      ) : null}
       {info ? <div className="stat-card mb-4 text-sm text-foreground">{info}</div> : null}
 
       {activeTab === "payments" ? (
@@ -481,92 +555,120 @@ export default function AdminOrdersPage() {
         </div>
       ) : null}
 
-      {activeTab === "payments" ? (
-        <DataTable
-          columns={[
-            {
-              key: "order_no",
-              header: "เลขออเดอร์",
-              render: (r) => (
-                <Link to={`/store-admin/orders/${r.order_id}`} className="underline font-mono text-xs">
-                  {r.order_no || r.order_id}
-                </Link>
-              ),
-            },
-            {
-              key: "customer_name",
-              header: "ลูกค้า",
-              render: (r) => (
-                <div className="flex flex-col">
-                  <span>{r.customer_name || "-"}</span>
-                  <span className="text-xs text-muted-foreground">{r.customer_phone || "-"}</span>
-                </div>
-              ),
-            },
-            { key: "amount", header: "ยอดชำระ", render: (r) => formatTHB(r.amount || 0) },
-            { key: "method", header: "วิธีชำระ" },
-            {
-              key: "slip",
-              header: "หลักฐาน",
-              render: (r) => (
-                <button
-                  type="button"
-                  className="underline"
-                  onClick={() => openPaymentPreview(r)}
-                  disabled={!r.slip_submitted && !r.slip_storage_path && !r.slip_url}
-                >
-                  ตรวจสลิป
-                </button>
-              ),
-            },
-            {
-              key: "submitted_at",
-              header: "ส่งเมื่อ",
-              render: (r) =>
-                r.submitted_at
-                  ? formatDateTime(r.submitted_at)
-                  : r.slip_submitted
-                    ? "แนบแล้ว"
-                    : "-",
-            },
-            {
-              key: "status",
-              header: "สถานะชำระเงิน",
-              render: (r) => (
-                <div className="flex flex-col gap-1">
-                  <StatusBadge label={formatPaymentStatus(r.status)} tone={paymentStatusTone(r.status)} />
-                  {r.order_status ? (
-                    <StatusBadge label={`ออเดอร์: ${formatOrderStatus(r.order_status)}`} tone={orderStatusTone(r.order_status)} />
-                  ) : null}
-                  {r.order_payment_status ? (
-                    <StatusBadge label={`ชำระ: ${formatPaymentStatus(r.order_payment_status)}`} tone={paymentStatusTone(r.order_payment_status)} />
-                  ) : null}
-                </div>
-              ),
-            },
-            {
-              key: "actions",
-              header: "จัดการ",
-              render: (r) => (
-                <div className="flex flex-col gap-1 text-sm">
-                  <button type="button" className="underline text-left" onClick={() => openPaymentPreview(r)}>เปิดหน้าตรวจสอบ</button>
-                </div>
-              ),
-            },
-          ]}
-          rows={paymentQueue}
-        />
+      {loading ? (
+        <QueueLoadingState />
+      ) : activeTab === "payments" ? (
+        paymentQueue.length === 0 && !error ? (
+          <QueueEmptyState title={emptyStateCopy.payments.title} hint={emptyStateCopy.payments.hint} />
+        ) : (
+          <DataTable
+            columns={[
+              {
+                key: "order_no",
+                header: "เลขออเดอร์",
+                render: (r) => (
+                  <Link to={`/store-admin/orders/${r.order_id}`} className="underline font-mono text-xs">
+                    {r.order_no || r.order_id}
+                  </Link>
+                ),
+              },
+              {
+                key: "customer_name",
+                header: "ลูกค้า",
+                render: (r) => (
+                  <div className="flex flex-col">
+                    <span>{r.customer_name || "-"}</span>
+                    <span className="text-xs text-muted-foreground">{r.customer_phone || "-"}</span>
+                  </div>
+                ),
+              },
+              {
+                key: "amount",
+                header: "ยอดที่ต้องตรวจ",
+                className: "whitespace-nowrap",
+                render: (r) => <span className="font-semibold tabular-nums">{formatTHB(r.amount || 0)}</span>,
+              },
+              { key: "method", header: "วิธีชำระ", className: "hidden md:table-cell" },
+              {
+                key: "slip",
+                header: "หลักฐาน",
+                render: (r) => {
+                  const hasSlip = Boolean(r.slip_submitted || r.slip_storage_path || r.slip_url);
+                  return (
+                    <button
+                      type="button"
+                      className="underline disabled:no-underline disabled:text-muted-foreground"
+                      onClick={() => openPaymentPreview(r)}
+                      disabled={!hasSlip}
+                    >
+                      {hasSlip ? "ตรวจสลิป" : "ยังไม่มีสลิป"}
+                    </button>
+                  );
+                },
+              },
+              {
+                key: "submitted_at",
+                header: "ส่งเมื่อ",
+                className: "hidden lg:table-cell whitespace-nowrap",
+                render: (r) =>
+                  r.submitted_at
+                    ? formatDateTime(r.submitted_at)
+                    : r.slip_submitted
+                      ? "แนบแล้ว"
+                      : "-",
+              },
+              {
+                key: "status",
+                header: "สถานะชำระเงิน",
+                render: (r) => (
+                  <div className="flex flex-col gap-1">
+                    <StatusBadge label={formatPaymentStatus(r.status)} tone={paymentStatusTone(r.status)} />
+                    {r.order_status ? (
+                      <StatusBadge label={`ออเดอร์: ${formatOrderStatus(r.order_status)}`} tone={orderStatusTone(r.order_status)} />
+                    ) : null}
+                    {r.order_payment_status ? (
+                      <StatusBadge label={`ชำระ: ${formatPaymentStatus(r.order_payment_status)}`} tone={paymentStatusTone(r.order_payment_status)} />
+                    ) : null}
+                  </div>
+                ),
+              },
+              {
+                key: "actions",
+                header: "จัดการ",
+                render: (r) => (
+                  <div className="flex flex-col gap-1 text-sm">
+                    <button type="button" className="underline text-left" onClick={() => openPaymentPreview(r)}>เปิดหน้าตรวจสอบ</button>
+                  </div>
+                ),
+              },
+            ]}
+            rows={paymentQueue}
+          />
+        )
+      ) : filteredOrders.length === 0 && !error ? (
+        <QueueEmptyState title={emptyStateCopy[activeTab].title} hint={emptyStateCopy[activeTab].hint} />
       ) : (
         <DataTable
           columns={[
             {
               key: "id",
               header: "เลขออเดอร์",
-              render: (r) => (
-                <Link to={`/store-admin/orders/${r.id}`} className="underline">
-                  {r.order_no || r.id}
-                </Link>
-              ),
+              render: (r) => {
+                const hint = getQueueHint(r);
+                return (
+                  <div className="flex items-center gap-2">
+                    {hint?.tone === "attention" ? (
+                      <span
+                        className="inline-block h-2 w-2 shrink-0 rounded-full bg-amber-500"
+                        aria-label="ต้องการการตรวจสอบ"
+                      />
+                    ) : null}
+                    <Link to={`/store-admin/orders/${r.id}`} className="underline font-medium">
+                      {r.order_no || r.id}
+                    </Link>
+                  </div>
+                );
+              },
             },
             {
               key: "customer_name",
@@ -578,39 +680,60 @@ export default function AdminOrdersPage() {
                 </div>
               ),
             },
-            { key: "pickup_time", header: "เวลารับ", render: (r) => (r.pickup_time ? formatDateTime(r.pickup_time) : "-") },
-            { key: "channel_name", header: "ช่องทาง", render: (r) => r.channel_name || "-" },
-            {
-              key: "payment_status",
-              header: "สถานะชำระเงิน",
-              render: (r) => <StatusBadge label={formatPaymentStatus(r.payment_status)} tone={paymentStatusTone(r.payment_status)} />,
-            },
             {
               key: "status",
-              header: "สถานะออเดอร์",
-              render: (r) => <StatusBadge label={formatOrderStatus(r.status)} tone={orderStatusTone(r.status)} />,
-            },
-            {
-              key: "latest_payment",
-              header: "ชำระล่าสุด",
+              header: "สถานะ / ขั้นถัดไป",
               render: (r) => {
-                const latest = r.latest_payment;
-                if (!latest) {
-                  return <span className="text-xs text-muted-foreground">-</span>;
-                }
-                const amount = typeof latest.amount === "number" ? formatTHB(latest.amount) : "-";
+                const hint = getQueueHint(r);
                 return (
-                  <div className="flex flex-col text-xs">
-                    <span>สถานะ: {formatPaymentStatus(latest.status)}</span>
-                    <span>ยอด: {amount}</span>
-                    <span className={latest.slip_submitted ? "text-emerald-600" : "text-muted-foreground"}>
-                      {latest.slip_submitted ? "มีสลิป" : "ยังไม่แนบสลิป"}
-                    </span>
+                  <div className="flex flex-col gap-1">
+                    <StatusBadge label={formatOrderStatus(r.status)} tone={orderStatusTone(r.status)} />
+                    {hint ? (
+                      <span className={`text-xs font-medium ${queueHintClasses[hint.tone]}`}>{hint.label}</span>
+                    ) : null}
                   </div>
                 );
               },
             },
-            { key: "total_amount", header: "ยอดรวม", render: (r) => formatTHB(r.total_amount || 0) },
+            {
+              key: "payment_status",
+              header: "การชำระเงิน",
+              render: (r) => {
+                const latest = r.latest_payment;
+                const hasSlip = Boolean(latest?.slip_submitted);
+                return (
+                  <div className="flex flex-col gap-1">
+                    <StatusBadge label={formatPaymentStatus(r.payment_status)} tone={paymentStatusTone(r.payment_status)} />
+                    <span className={`text-xs ${hasSlip ? "text-emerald-600" : "text-muted-foreground"}`}>
+                      {hasSlip ? "มีสลิปแนบ" : "ยังไม่แนบสลิป"}
+                    </span>
+                    {latest && typeof latest.amount === "number" ? (
+                      <span className="text-xs text-muted-foreground tabular-nums">ยอดสลิป: {formatTHB(latest.amount)}</span>
+                    ) : null}
+                  </div>
+                );
+              },
+            },
+            {
+              key: "total_amount",
+              header: "ยอดรวม",
+              className: "whitespace-nowrap",
+              render: (r) => (
+                <span className="font-semibold text-foreground tabular-nums">{formatTHB(r.total_amount || 0)}</span>
+              ),
+            },
+            {
+              key: "pickup_time",
+              header: "เวลารับ",
+              className: "hidden lg:table-cell whitespace-nowrap",
+              render: (r) => (r.pickup_time ? formatDateTime(r.pickup_time) : "-"),
+            },
+            {
+              key: "channel_name",
+              header: "ช่องทาง",
+              className: "hidden lg:table-cell",
+              render: (r) => r.channel_name || "-",
+            },
             {
               key: "actions",
               header: "จัดการ",
@@ -619,17 +742,18 @@ export default function AdminOrdersPage() {
                 if (options.length === 0) return <span className="text-muted-foreground">-</span>;
                 return (
                   <select
-                    className="border rounded px-2 py-1"
+                    className="border rounded px-2 py-1 text-sm"
                     defaultValue=""
+                    aria-label="เลือกการดำเนินการถัดไป"
                     onChange={(e) => {
                       if (!e.target.value) return;
                       void handleStatusChange(r, e.target.value);
                       e.currentTarget.value = "";
                     }}
                   >
-                    <option value="">เลือกสถานะถัดไป</option>
+                    <option value="">เลือกการดำเนินการ</option>
                     {options.map((s) => (
-                      <option key={s} value={s}>{s}</option>
+                      <option key={s} value={s}>{formatNextStatusAction(s)}</option>
                     ))}
                   </select>
                 );
@@ -639,7 +763,6 @@ export default function AdminOrdersPage() {
           rows={filteredOrders}
         />
       )}
-      {loading ? <p className="text-sm text-muted-foreground mt-3">กำลังโหลด...</p> : null}
       <PaymentSlipPreviewModal
         payment={activePayment}
         isOpen={previewOpen}

@@ -161,6 +161,28 @@ export function paymentStatusTone(status: string | null | undefined): StatusTone
   return getPaymentStatusDisplay(status).tone;
 }
 
+/**
+ * Friendly Thai labels for the "next status" action dropdown so Staff see an
+ * action verb instead of a raw backend enum (e.g. "waiting_payment_review").
+ * The enum value is still sent to the backend unchanged; only the label shown
+ * to the user is mapped here.
+ */
+const NEXT_STATUS_ACTION_MAP: Record<string, string> = {
+  waiting_payment_review: "ส่งเข้าตรวจสลิป",
+  pending_review: "ส่งเข้าตรวจสลิป",
+  accepted: "ยืนยันรับออเดอร์",
+  preparing: "เริ่มเตรียม",
+  ready: "เปลี่ยนเป็นพร้อมรับ",
+  ready_for_pickup: "เปลี่ยนเป็นพร้อมรับ",
+  completed: "ปิดออเดอร์ (เสร็จสิ้น)",
+  cancelled: "ยกเลิกออเดอร์",
+};
+
+export function formatNextStatusAction(status: string | null | undefined): string {
+  const key = normalizeStatus(status);
+  return NEXT_STATUS_ACTION_MAP[key] ?? formatOrderStatus(status);
+}
+
 export function formatBooleanStatus(value: boolean | null | undefined, options?: { trueLabel?: string; falseLabel?: string }): string {
   const { trueLabel = "ใช้งาน", falseLabel = "ปิดใช้งาน" } = options ?? {};
   return value ? trueLabel : falseLabel;
