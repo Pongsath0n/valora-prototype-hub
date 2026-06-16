@@ -83,15 +83,7 @@ _MANAGERIAL_ROLES: Set[str] = set(_BUSINESS_ROLES)
 _OPERATOR_ROLES: Set[str] = {"owner", "admin", "manager", "staff"}
 _PAYMENT_REVIEW_ROLES: Set[str] = set(_OPERATOR_ROLES)
 _STAFF_ORDER_STATUS_ALLOWED: Set[str] = {"accepted", "preparing", "ready", "completed"}
-_STAFF_CANCEL_OPERATIONAL_STATUSES: Set[str] = {
-    "pending_payment",
-    "waiting_payment_review",
-    "pending_review",
-    "accepted",
-    "preparing",
-    "ready",
-    "ready_for_pickup",
-}
+_STAFF_CANCEL_OPERATIONAL_STATUSES: Set[str] = {"pending_payment", "draft"}
 _ORDER_FINANCIAL_FIELDS: Set[str] = {"total_cost", "gross_profit"}
 _ORDER_ITEM_FINANCIAL_FIELDS: Set[str] = {"unit_cost", "line_cost", "line_profit", "total_cost", "option_cost_total"}
 SWEETNESS_LEVELS: Tuple[int, ...] = (0, 25, 50, 75, 100)
@@ -227,6 +219,8 @@ def _staff_can_cancel_operational_order(
         return False, "order_already_completed"
     if normalized_status == "paid" or normalized_payment in CONFIRMED_PAYMENT_STATUSES:
         return False, "staff_cannot_cancel_paid_order"
+    if normalized_payment in PENDING_REVIEW_PAYMENT_STATUSES:
+        return False, "insufficient_role_for_status"
     if normalized_status not in _STAFF_CANCEL_OPERATIONAL_STATUSES:
         return False, "insufficient_role_for_status"
     return True, None
