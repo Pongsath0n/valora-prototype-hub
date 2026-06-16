@@ -5,9 +5,14 @@ import type {
   PaymentSlipPreviewResponse,
 } from "@/services/storeAdminApi";
 import { storeAdminApi } from "@/services/storeAdminApi";
+import StatusBadge from "@/components/shared/StatusBadge";
+import { formatPaymentStatus, formatTHB, paymentStatusTone } from "@/lib/format";
+import { compareAmountToOrder, paymentSlipStatus } from "@/lib/paymentReview";
 
 export type PaymentSlipPreviewModalProps = {
   payment: ApiPayment | null;
+  /** Already-loaded order total, used only to show a match indicator. */
+  orderTotal?: number | null;
   isOpen: boolean;
   onClose: () => void;
   onApprove: (payment: ApiPayment) => Promise<void> | void;
@@ -18,6 +23,7 @@ export type PaymentSlipPreviewModalProps = {
 
 export function PaymentSlipPreviewModal({
   payment,
+  orderTotal,
   isOpen,
   onClose,
   onApprove,
@@ -25,6 +31,7 @@ export function PaymentSlipPreviewModal({
   rejectReason,
   onRejectReasonChange,
 }: PaymentSlipPreviewModalProps) {
+  // Staff payment/slip review modal.
   const [preview, setPreview] = useState<PaymentSlipPreviewResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>("");
@@ -95,6 +102,9 @@ export function PaymentSlipPreviewModal({
 
   if (!isOpen || !payment) return null;
 
+  const amountMatch = compareAmountToOrder(orderTotal, payment);
+  const slipStatus = paymentSlipStatus(payment);
+
   const handleRefresh = () => setRefreshSignal((prev) => prev + 1);
 
   const runAction = async (type: "approve" | "reject") => {
@@ -150,6 +160,11 @@ export function PaymentSlipPreviewModal({
           <div className="grid gap-4 md:grid-cols-2">
             <div className="rounded-xl border p-4 text-sm">
               <h3 className="text-base font-semibold">ข้อมูลการชำระเงิน</h3>
+              {orderTotal !== undefined && orderTotal !== null ? (
+                <div className="mt-3">
+                  <StatusBadge label={amountMatch.label} tone={amountMatch.tone} />
+                </div>
+              ) : null}
               <dl className="mt-3 space-y-2">
                 <div className="flex justify-between">
                   <dt className="text-muted-foreground">ออเดอร์</dt>
@@ -159,9 +174,25 @@ export function PaymentSlipPreviewModal({
                   <dt className="text-muted-foreground">ลูกค้า</dt>
                   <dd>{payment.customer_name || "-"}</dd>
                 </div>
+                {orderTotal !== undefined && orderTotal !== null ? (
+                  <div className="flex justify-between">
+                    <dt className="text-muted-foreground">ยอดออเดอร์</dt>
+                    <dd className="font-semibold tabular-nums">{formatTHB(Number(orderTotal))}</dd>
+                  </div>
+                ) : null}
                 <div className="flex justify-between">
-                  <dt className="text-muted-foreground">ยอดโอน</dt>
-                  <dd className="font-semibold">฿{Number(payment.amount || 0).toFixed(2)}</dd>
+                  <dt className="text-muted-foreground">ยอดที่ลูกค้าโอน</dt>
+                  <dd
+                    className={`font-semibold tabular-nums ${
+                      amountMatch.kind === "mismatch"
+                        ? "text-red-600"
+                        : amountMatch.kind === "match"
+                          ? "text-emerald-600"
+                          : ""
+                    }`}
+                  >
+                    ฿{Number(payment.amount || 0).toFixed(2)}
+                  </dd>
                 </div>
                 <div className="flex justify-between">
                   <dt className="text-muted-foreground">ส่งเมื่อ</dt>
@@ -171,9 +202,17 @@ export function PaymentSlipPreviewModal({
                   <dt className="text-muted-foreground">ไฟล์</dt>
                   <dd>{preview?.file_name || payment.slip_file_name || "-"}</dd>
                 </div>
-                <div className="flex justify-between">
+                <div className="flex items-center justify-between">
                   <dt className="text-muted-foreground">สถานะ</dt>
-                  <dd className="capitalize">{payment.status}</dd>
+                  <dd>
+                    <StatusBadge label={formatPaymentStatus(payment.status)} tone={paymentStatusTone(payment.status)} />
+                  </dd>
+                </div>
+                <div className="flex items-center justify-between">
+                  <dt className="text-muted-foreground">สลิป/หลักฐาน</dt>
+                  <dd>
+                    <StatusBadge label={slipStatus.label} tone={slipStatus.tone} />
+                  </dd>
                 </div>
               </dl>
             </div>

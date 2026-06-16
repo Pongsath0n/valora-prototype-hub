@@ -110,7 +110,7 @@ describe("AdminOrdersPage filter tabs", () => {
     expect(screen.queryByText("R001")).not.toBeInTheDocument();
   });
 
-  it("queue tab sorts most recently updated order first", async () => {
+  it("queue tab sorts oldest order first (FIFO)", async () => {
     mockedListOrders.mockResolvedValue({
       items: [
         { id: "ord_old", status: "pending_payment", payment_status: "pending", order_no: "OLD01", total_amount: 100, subtotal: 100, discount_amount: 0, channel_fee: 0, total_cost: 0, gross_profit: 0, updated_at: "2024-01-01T00:00:00Z", created_at: "2024-01-01T00:00:00Z" },
@@ -120,13 +120,13 @@ describe("AdminOrdersPage filter tabs", () => {
     mockedListPayments.mockResolvedValue({ payment_queue: [] });
     renderPage();
 
-    await waitFor(() => expect(screen.getByText("NEW01")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("OLD01")).toBeInTheDocument());
     const rows = screen.getAllByRole("row");
-    expect(rows[1].textContent).toContain("NEW01");
-    expect(rows[2].textContent).toContain("OLD01");
+    expect(rows[1].textContent).toContain("OLD01");
+    expect(rows[2].textContent).toContain("NEW01");
   });
 
-  it("queue tab places newer payment-review order before older pending orders", async () => {
+  it("queue tab keeps older order before newer payment-review order (FIFO)", async () => {
     mockedListOrders.mockResolvedValue({
       items: [
         { id: "ord_old", status: "pending_payment", payment_status: "pending", order_no: "OLD01", total_amount: 100, subtotal: 100, discount_amount: 0, channel_fee: 0, total_cost: 0, gross_profit: 0, created_at: "2024-01-01T00:00:00Z", updated_at: "2024-01-01T00:00:00Z" },
@@ -141,8 +141,25 @@ describe("AdminOrdersPage filter tabs", () => {
 
     await waitFor(() => expect(screen.getByText("NEW01")).toBeInTheDocument());
     const rows = screen.getAllByRole("row");
-    expect(rows[1].textContent).toContain("NEW01");
-    expect(rows[2].textContent).toContain("OLD01");
+    expect(rows[1].textContent).toContain("OLD01");
+    expect(rows[2].textContent).toContain("NEW01");
+  });
+
+  it("payments tab excludes a cancelled order's payment", async () => {
+    mockedListOrders.mockResolvedValue({ items: [] });
+    mockedListPayments.mockResolvedValue({
+      payment_queue: [
+        { id: "pay_live", order_id: "ord_live", order_no: "LIVE01", amount: 120, status: "pending_review", slip_submitted: true, customer_name: "Active", order_status: "waiting_payment_review", created_at: "2024-01-01T00:00:00Z", store_id: "store_1" },
+        { id: "pay_cancel", order_id: "ord_cancel", order_no: "CXL01", amount: 80, status: "pending_review", slip_submitted: true, customer_name: "Cancelled", order_status: "cancelled", created_at: "2024-01-02T00:00:00Z", store_id: "store_1" },
+      ],
+    });
+    renderPage();
+
+    const paymentsTab = screen.getByRole("button", { name: "รอตรวจสลิป" });
+    fireEvent.click(paymentsTab);
+
+    await waitFor(() => expect(screen.getByText("LIVE01")).toBeInTheDocument());
+    expect(screen.queryByText("CXL01")).not.toBeInTheDocument();
   });
 
   it("does not duplicate rows when order exists in both orders and paymentQueue", async () => {

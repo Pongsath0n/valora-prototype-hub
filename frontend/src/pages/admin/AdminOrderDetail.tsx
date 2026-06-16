@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, CheckCircle2, FileImage, ImageOff, Receipt, XCircle } from "lucide-react";
 import AdminLayout from "@/components/admin/AdminLayout";
 import StatusBadge from "@/components/shared/StatusBadge";
 import DataTable, { type Column } from "@/components/shared/DataTable";
@@ -12,6 +12,12 @@ import {
   isClearlyUncancellableByStaff,
   STAFF_CANCEL_BLOCKED_HINT,
 } from "@/lib/orderCancel";
+import {
+  compareAmountToOrder,
+  friendlyPaymentError,
+  paymentHasSlip,
+  paymentSlipStatus,
+} from "@/lib/paymentReview";
 import { formatOrderStatus, orderStatusTone, formatPaymentStatus, paymentStatusTone, formatTHB } from "@/lib/format";
 import { useProfileRole } from "@/contexts/RoleContext";
 
@@ -136,6 +142,11 @@ export default function AdminOrderDetailPage() {
   const [modalRejectReason, setModalRejectReason] = useState("");
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelSubmitting, setCancelSubmitting] = useState(false);
+  // Lightweight confirmation guard for inline payment approval (human-error
+  // protection only — the backend remains the authority on whether approval is
+  // allowed). Holds the payment id currently awaiting an "are you sure" confirm.
+  const [confirmingApproveId, setConfirmingApproveId] = useState<string | null>(null);
+  const [actionPaymentId, setActionPaymentId] = useState<string | null>(null);
 
   const refresh = async () => {
     if (!id) return;
@@ -254,24 +265,31 @@ export default function AdminOrderDetailPage() {
 
   const handleApprovePayment = async (paymentId: string) => {
     setError("");
+    setConfirmingApproveId(null);
+    setActionPaymentId(paymentId);
     try {
       const res = await storeAdminApi.approvePayment(paymentId, {});
       if (res.mock_notification) setInfo(res.mock_notification);
       await refresh();
     } catch (err: any) {
-      setError(err?.message || "อนุมัติไม่สำเร็จ");
+      setError(friendlyPaymentError(err?.message));
+    } finally {
+      setActionPaymentId(null);
     }
   };
 
   const handleRejectPayment = async (paymentId: string, providedReason?: string) => {
     setError("");
+    setActionPaymentId(paymentId);
     try {
       const reason = providedReason?.trim() || rejectReasonByPaymentId[paymentId] || "rejected_by_admin";
       const res = await storeAdminApi.rejectPayment(paymentId, { reason });
       if (res.message) setInfo(res.message);
       await refresh();
     } catch (err: any) {
-      setError(err?.message || "ปฏิเสธไม่สำเร็จ");
+      setError(friendlyPaymentError(err?.message));
+    } finally {
+      setActionPaymentId(null);
     }
   }
 
@@ -359,60 +377,166 @@ export default function AdminOrderDetailPage() {
 
       <DataTable columns={itemColumns} rows={orderItems} />
 
-      <div className="stat-card">
-        <h2 className="section-title mb-2">การชำระเงิน</h2>
-        <DataTable
-          columns={[
-            { key: "id", header: "Payment ID" },
-            { key: "amount", header: "จำนวนเงิน", render: (r) => formatTHB(r.amount || 0) },
-            { key: "method", header: "วิธีชำระ" },
-            {
-              key: "slip",
-              header: "หลักฐาน",
-              render: (r) => (
-                <button
-                  type="button"
-                  className="underline"
-                  onClick={() => openPaymentPreview(r)}
-                  disabled={!r.slip_submitted && !r.slip_storage_path && !r.slip_url}
-                >
-                  ตรวจสลิป
-                </button>
-              ),
-            },
-            {
-              key: "status",
-              header: "สถานะ",
-              render: (r) => <StatusBadge label={formatPaymentStatus(r.status)} tone={paymentStatusTone(r.status)} />,
-            },
-            {
-              key: "actions",
-              header: "จัดการ",
-              render: (r) => (
-                <div className="flex flex-col gap-1">
-                  {(r.status === "pending" || r.status === "pending_review") ? (
-                    <>
-                      <button type="button" className="underline text-left" onClick={() => handleApprovePayment(r.id)}>อนุมัติ</button>
-                      <input
-                        className="border rounded px-2 py-1 text-xs"
-                        placeholder="เหตุผลการปฏิเสธ"
-                        value={rejectReasonByPaymentId[r.id] || ""}
-                        onChange={(e) => setRejectReasonByPaymentId((prev) => ({ ...prev, [r.id]: e.target.value }))}
-                      />
-                      <button type="button" className="underline text-left text-destructive" onClick={() => handleRejectPayment(r.id)}>ปฏิเสธ</button>
-                    </>
+      <div className="stat-card space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="section-title">การชำระเงิน</h2>
+          <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-1.5 text-sm">
+            <Receipt className="h-4 w-4 text-muted-foreground" />
+            <span className="text-muted-foreground">ยอดออเดอร์</span>
+            <span className="font-semibold tabular-nums text-foreground">{formatTHBExact(order.total_amount)}</span>
+          </div>
+        </div>
+
+        {payments.length === 0 ? (
+          <div className="rounded-xl border border-dashed bg-muted/20 px-4 py-8 text-center text-sm text-muted-foreground">
+            ยังไม่มีรายการชำระเงินสำหรับออเดอร์นี้
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {payments.map((payment) => {
+              const hasSlip = paymentHasSlip(payment);
+              const slip = paymentSlipStatus(payment);
+              const match = compareAmountToOrder(order.total_amount, payment);
+              const isPending = payment.status === "pending" || payment.status === "pending_review";
+              const isBusy = actionPaymentId === payment.id;
+              const rejectReason = rejectReasonByPaymentId[payment.id] || "";
+              return (
+                <div key={payment.id} className="rounded-xl border bg-card p-4 space-y-4">
+                  {/* Status + amount-match summary, easy to scan */}
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <StatusBadge label={formatPaymentStatus(payment.status)} tone={paymentStatusTone(payment.status)} />
+                      <StatusBadge label={slip.label} tone={slip.tone} />
+                    </div>
+                    <StatusBadge label={match.label} tone={match.tone} />
+                  </div>
+
+                  {/* Amount comparison — order total vs what the customer transferred */}
+                  <div className="grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
+                    <div className="rounded-lg border bg-muted/30 px-3 py-2">
+                      <p className="text-xs text-muted-foreground">ยอดออเดอร์</p>
+                      <p className="font-semibold tabular-nums">{formatTHBExact(order.total_amount)}</p>
+                    </div>
+                    <div className="rounded-lg border bg-muted/30 px-3 py-2">
+                      <p className="text-xs text-muted-foreground">ยอดที่ลูกค้าโอน</p>
+                      <p
+                        className={`font-semibold tabular-nums ${
+                          match.kind === "mismatch"
+                            ? "text-red-600"
+                            : match.kind === "match"
+                              ? "text-emerald-600"
+                              : "text-foreground"
+                        }`}
+                      >
+                        {hasSlip ? formatTHBExact(payment.amount) : "—"}
+                      </p>
+                    </div>
+                    <div className="rounded-lg border bg-muted/30 px-3 py-2">
+                      <p className="text-xs text-muted-foreground">วิธีชำระ</p>
+                      <p className="font-medium">{payment.method || "—"}</p>
+                    </div>
+                    <div className="rounded-lg border bg-muted/30 px-3 py-2">
+                      <p className="text-xs text-muted-foreground">สลิป/หลักฐาน</p>
+                      <p className="font-medium">{slip.label}</p>
+                    </div>
+                  </div>
+
+                  {payment.reject_reason ? (
+                    <p className="text-xs text-muted-foreground">
+                      เหตุผลการปฏิเสธก่อนหน้า: <span className="text-foreground">{payment.reject_reason}</span>
+                    </p>
+                  ) : null}
+
+                  {/* Slip viewer — clearly labelled present/absent */}
+                  <button
+                    type="button"
+                    onClick={() => openPaymentPreview(payment)}
+                    disabled={!hasSlip}
+                    className="inline-flex w-full items-center justify-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
+                  >
+                    {hasSlip ? <FileImage className="h-4 w-4" /> : <ImageOff className="h-4 w-4" />}
+                    {hasSlip ? "ดูสลิป / ตรวจสอบหลักฐาน" : "ยังไม่มีสลิปให้ตรวจสอบ"}
+                  </button>
+
+                  {/* Approve / reject — separated, with a lightweight approve confirm */}
+                  {isPending ? (
+                    <div className="space-y-3 border-t pt-3">
+                      <div className="space-y-2">
+                        {confirmingApproveId === payment.id ? (
+                          <div className="flex flex-col gap-2 rounded-lg border border-emerald-200 bg-emerald-50 p-3 sm:flex-row sm:items-center sm:justify-between">
+                            <span className="text-sm text-emerald-800">
+                              ยืนยันอนุมัติการชำระเงินนี้? โปรดตรวจสอบว่ายอดและสลิปถูกต้อง
+                            </span>
+                            <div className="flex gap-2">
+                              <button
+                                type="button"
+                                onClick={() => setConfirmingApproveId(null)}
+                                disabled={isBusy}
+                                className="rounded-lg border bg-white px-3 py-1.5 text-sm font-medium hover:bg-muted disabled:opacity-50"
+                              >
+                                ยกเลิก
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => void handleApprovePayment(payment.id)}
+                                disabled={isBusy}
+                                className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
+                              >
+                                <CheckCircle2 className="h-4 w-4" />
+                                {isBusy ? "กำลังอนุมัติ..." : "ยืนยันอนุมัติ"}
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setConfirmingApproveId(payment.id)}
+                            disabled={isBusy}
+                            className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700 hover:bg-emerald-100 disabled:opacity-50 sm:w-auto"
+                          >
+                            <CheckCircle2 className="h-4 w-4" /> อนุมัติการชำระเงิน
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="space-y-2">
+                        <label className="block text-sm font-medium text-foreground">
+                          เหตุผลการปฏิเสธ <span className="text-muted-foreground">(บังคับเมื่อกดปฏิเสธ)</span>
+                        </label>
+                        <textarea
+                          className="w-full rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                          rows={2}
+                          placeholder="เช่น ยอดเงินไม่ตรง / สลิปหมดอายุ / อ่านสลิปไม่ได้"
+                          value={rejectReason}
+                          onChange={(e) =>
+                            setRejectReasonByPaymentId((prev) => ({ ...prev, [payment.id]: e.target.value }))
+                          }
+                        />
+                        <button
+                          type="button"
+                          onClick={() => void handleRejectPayment(payment.id)}
+                          disabled={isBusy || !rejectReason.trim()}
+                          className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-destructive/40 px-3 py-2 text-sm font-semibold text-destructive hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
+                        >
+                          <XCircle className="h-4 w-4" />
+                          {isBusy ? "กำลังปฏิเสธ..." : "ปฏิเสธการชำระเงิน"}
+                        </button>
+                      </div>
+                    </div>
                   ) : (
-                    <span className="text-xs text-muted-foreground">-</span>
+                    <p className="border-t pt-3 text-xs text-muted-foreground">
+                      รายการนี้ตรวจสอบแล้ว ไม่มีการดำเนินการที่ต้องทำ
+                    </p>
                   )}
                 </div>
-              ),
-            },
-          ]}
-          rows={payments}
-        />
+              );
+            })}
+          </div>
+        )}
       </div>
       <PaymentSlipPreviewModal
         payment={activePayment}
+        orderTotal={order.total_amount}
         isOpen={previewOpen}
         onClose={closePaymentPreview}
         onApprove={(payment) => handleApproveFromModal(payment)}

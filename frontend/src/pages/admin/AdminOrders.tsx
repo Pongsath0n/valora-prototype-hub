@@ -15,6 +15,12 @@ import { PaymentSlipPreviewModal } from "@/components/admin/PaymentSlipPreviewMo
 import { CancelOrderDialog } from "@/components/admin/CancelOrderDialog";
 import { friendlyCancelError, isClearlyUncancellableByStaff } from "@/lib/orderCancel";
 import {
+  compareOrdersFifo,
+  comparePaymentsFifo,
+  isCancelledOrArchivedOrder,
+  shouldShowPaymentInReviewQueue,
+} from "@/lib/orderQueue";
+import {
   formatOrderStatus,
   orderStatusTone,
   formatPaymentStatus,
@@ -62,6 +68,10 @@ const statusTabs: { key: TabKey; label: string; filter: string[] }[] = [
   { key: "completed", label: "เสร็จสิ้น", filter: ["completed", "paid"] },
 ];
 
+// Active operation tabs where cancelled/archived orders must never appear and
+// where Staff process orders oldest-first (FIFO).
+const ACTIVE_OPERATION_TABS: TabKey[] = ["queue", "preparing", "ready"];
+
 const normalizeStatus = (value: string | null | undefined): string => (value ?? "").toLowerCase();
 
 const doesTabContainStatus = (tabKey: TabKey, status: string | null | undefined): boolean => {
@@ -69,11 +79,6 @@ const doesTabContainStatus = (tabKey: TabKey, status: string | null | undefined)
   if (!tab) return false;
   const normalized = normalizeStatus(status);
   return tab.filter.some((value) => value === normalized);
-};
-
-const isArchivedStatus = (status: string | null | undefined): boolean => {
-  const normalized = normalizeStatus(status);
-  return normalized === "cancelled" || normalized === "voided";
 };
 
 const nextStatusByCurrent: Record<string, string[]> = {
@@ -299,13 +304,16 @@ export default function AdminOrdersPage() {
     const query = searchText.trim().toLowerCase();
     const tab = statusTabs.find((t) => t.key === activeTab);
     const baseRows = rows;
+    const isActiveOperationTab = ACTIVE_OPERATION_TABS.includes(activeTab);
     const base = tab
       ? baseRows.filter((r) => {
+          // Cancelled / voided / archived orders are excluded from every active
+          // operation tab so they never clutter live work queues.
+          if (isActiveOperationTab && isCancelledOrArchivedOrder(r)) {
+            return false;
+          }
           const statusMatch = tab.filter.includes(r.status);
           if (activeTab === "queue") {
-            if (r.archived || isArchivedStatus(r.status)) {
-              return false;
-            }
             const isTerminal = ["completed", "cancelled", "rejected"].includes(r.status);
             const paymentMatch = ["waiting_payment_review", "pending_review"].includes(r.payment_status);
             return (statusMatch || paymentMatch) && !isTerminal;
@@ -326,35 +334,19 @@ export default function AdminOrdersPage() {
         })
       : base;
 
-    if (activeTab === "queue") {
-      return [...searched].sort((a, b) => {
-        const aUpdated = a.updated_at ? new Date(a.updated_at).getTime() : 0;
-        const bUpdated = b.updated_at ? new Date(b.updated_at).getTime() : 0;
-        if (aUpdated !== bUpdated) return bUpdated - aUpdated;
-
-        const aSubmitted = a.latest_payment?.submitted_at ? new Date(a.latest_payment.submitted_at).getTime() : 0;
-        const bSubmitted = b.latest_payment?.submitted_at ? new Date(b.latest_payment.submitted_at).getTime() : 0;
-        if (aSubmitted !== bSubmitted) return bSubmitted - aSubmitted;
-
-        const aCreated = a.created_at ? new Date(a.created_at).getTime() : 0;
-        const bCreated = b.created_at ? new Date(b.created_at).getTime() : 0;
-        if (aCreated !== bCreated) return bCreated - aCreated;
-
-        const aPickup = a.pickup_time ? new Date(a.pickup_time).getTime() : 0;
-        const bPickup = b.pickup_time ? new Date(b.pickup_time).getTime() : 0;
-        return bPickup - aPickup;
-      });
-    }
-
-    if (["preparing", "ready"].includes(activeTab)) {
-      return [...searched].sort((a, b) => {
-        const aTs = a.pickup_time ? new Date(a.pickup_time).getTime() : Number.MAX_SAFE_INTEGER;
-        const bTs = b.pickup_time ? new Date(b.pickup_time).getTime() : Number.MAX_SAFE_INTEGER;
-        return aTs - bTs;
-      });
+    // FIFO: oldest received order first, then order_no ascending. Active
+    // operation queues are intentionally NOT sorted newest-first.
+    if (isActiveOperationTab) {
+      return [...searched].sort(compareOrdersFifo);
     }
     return searched;
   }, [rows, activeTab, searchText]);
+
+  // "รอตรวจสลิป" queue: drop cancelled/archived and non-review payments, then
+  // order FIFO so the earliest-submitted slip is reviewed first.
+  const visiblePaymentQueue = useMemo(() => {
+    return paymentQueue.filter(shouldShowPaymentInReviewQueue).sort(comparePaymentsFifo);
+  }, [paymentQueue]);
 
   const handleStatusChange = async (order: ApiOrder, nextStatus: string) => {
     setError("");
@@ -573,7 +565,7 @@ export default function AdminOrdersPage() {
       {loading ? (
         <QueueLoadingState />
       ) : activeTab === "payments" ? (
-        paymentQueue.length === 0 && !error ? (
+        visiblePaymentQueue.length === 0 && !error ? (
           <QueueEmptyState title={emptyStateCopy.payments.title} hint={emptyStateCopy.payments.hint} />
         ) : (
           <DataTable
@@ -657,7 +649,7 @@ export default function AdminOrdersPage() {
                 ),
               },
             ]}
-            rows={paymentQueue}
+            rows={visiblePaymentQueue}
           />
         )
       ) : filteredOrders.length === 0 && !error ? (
