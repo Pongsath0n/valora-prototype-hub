@@ -1,4 +1,4 @@
-import { NavLink } from "react-router-dom";
+import { NavLink, useNavigate } from "react-router-dom";
 import {
   Activity,
   BarChart3,
@@ -21,6 +21,7 @@ import LogoBrand from "@/components/LogoBrand";
 // PortalSwitcher pill links removed from the Owner sidebar — they duplicated the
 // main grouped navigation. PortalSwitcher remains available for other surfaces.
 import { useProfileRole } from "@/contexts/RoleContext";
+import { useAuth } from "@/contexts/AuthContext";
 import type { AppRole } from "@/lib/guards";
 
 type OwnerNavItem = {
@@ -131,6 +132,8 @@ function NavItem({ path, icon: Icon, title }: { path: string; icon: React.Elemen
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const navigate = useNavigate();
+  const { signOut } = useAuth();
   const { role, loading } = useProfileRole();
   const resolvedSections = OWNER_NAV_SECTIONS.map((section) => ({
     title: section.title,
@@ -140,6 +143,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       return item.roles.includes(role as AppRole);
     }),
   })).filter((section) => section.items.length);
+
+  async function handleLogout() {
+    await signOut();
+    navigate("/login", { replace: true });
+  }
 
   return (
     <div className="min-h-screen flex w-full bg-background">
@@ -178,13 +186,14 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           {utilityNav.map((item) => (
             <NavItem key={item.path} {...item} />
           ))}
-          <NavLink
-            to="/"
-            className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-sidebar-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground transition-colors cursor-pointer"
+          <button
+            type="button"
+            onClick={() => void handleLogout()}
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-sidebar-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground transition-colors cursor-pointer text-left"
           >
             <LogOut className="w-4 h-4 flex-shrink-0" />
             <span>ออกจากระบบ</span>
-          </NavLink>
+          </button>
         </div>
       </aside>
 
@@ -249,6 +258,17 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                   {item.title}
                 </NavLink>
               ))}
+              <button
+                type="button"
+                onClick={() => {
+                  setSidebarOpen(false);
+                  void handleLogout();
+                }}
+                className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-sidebar-foreground hover:bg-sidebar-accent/60 transition-colors text-left"
+              >
+                <LogOut className="w-4 h-4" />
+                ออกจากระบบ
+              </button>
             </div>
           </aside>
         </div>

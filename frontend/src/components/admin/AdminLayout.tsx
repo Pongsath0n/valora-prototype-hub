@@ -127,7 +127,7 @@ export default function AdminLayout({
 
   async function handleLogout() {
     await signOut();
-    navigate("/", { replace: true });
+    navigate("/login", { replace: true });
   }
 
   return (

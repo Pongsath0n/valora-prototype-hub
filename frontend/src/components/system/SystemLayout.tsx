@@ -73,7 +73,7 @@ export default function SystemLayout({
 
   async function handleLogout() {
     await signOut();
-    navigate("/", { replace: true });
+    navigate("/login", { replace: true });
   }
 
   return (
