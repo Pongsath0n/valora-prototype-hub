@@ -46,7 +46,7 @@ export default function LandingCTA() {
                 className="w-full border-primary-foreground/30 bg-transparent text-primary-foreground hover:bg-primary-foreground/10 hover:text-primary-foreground sm:w-auto"
               >
                 <Link
-                  to="/client-access"
+                  to="/login"
                   className="inline-flex items-center gap-2"
                   aria-label="เข้าสู่ระบบร้านค้า"
                 >

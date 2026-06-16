@@ -20,7 +20,7 @@ export function useRoleGuard(allowedRoles?: AppRole[]) {
     }
 
     if (!user) {
-      navigate("/client-access", { replace: true });
+      navigate("/login", { replace: true });
       return;
     }
 

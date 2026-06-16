@@ -149,7 +149,7 @@ async function captureRoute(page, route) {
   const bodyText = (await page.textContent("body")) || "";
   const isVercel404 = detectVercel404(httpStatus, bodyText);
   const isBlank = detectBlank(bodyText);
-  const redirectedToLogin = /\/client-access/.test(finalUrl) && route.protected;
+  const redirectedToLogin = /\/login/.test(finalUrl) && route.protected;
 
   const screenshotPath = path.join(screenshotDir, `${route.name}.png`);
   await page.screenshot({ path: screenshotPath, fullPage: true });
@@ -191,7 +191,7 @@ async function checkNavigationLinks() {
   };
   const hasOrderLink = await findLink("/order");
   const hasLegacyLiffLink = await findLink("/liff/menu");
-  const hasClientAccess = await findLink("/client-access");
+  const hasLoginLink = await findLink("/login");
   await browser.close();
   return {
     pageStatus: res ? res.status() : null,
@@ -199,7 +199,7 @@ async function checkNavigationLinks() {
     links: {
       order: hasOrderLink,
       liffMenu: hasLegacyLiffLink,
-      clientAccess: hasClientAccess,
+      login: hasLoginLink,
     },
   };
 }
@@ -234,7 +234,7 @@ async function generateReports(data) {
   lines.push("| --- | --- | --- |");
   lines.push(`| /order | ${data.navigation.links.order ? "yes" : "no"} | primary customer CTA |`);
   lines.push(`| /liff/menu | ${data.navigation.links.liffMenu ? "yes" : "no"} | legacy alias link |`);
-  lines.push(`| /client-access | ${data.navigation.links.clientAccess ? "yes" : "no"} | admin/login CTA |`);
+  lines.push(`| /login | ${data.navigation.links.login ? "yes" : "no"} | admin/login CTA |`);
 
   lines.push("\n## Backend Endpoints");
   lines.push("| Endpoint | Status | OK | Notes |");
@@ -283,7 +283,7 @@ async function main() {
 
   const routes = [
     { name: "01-landing", path: "/", category: "public" },
-    { name: "02-client-access", path: "/client-access", category: "public" },
+    { name: "02-login", path: "/login", category: "public" },
     { name: "10-order-menu", path: "/order", category: "customer" },
     { name: "16-order-status", path: "/order/status", category: "customer" },
     { name: "11-legacy-liff-menu", path: "/liff/menu", category: "customer" },

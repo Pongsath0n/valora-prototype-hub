@@ -50,7 +50,7 @@ export default function LandingNavbar() {
 
         <div className="hidden items-center gap-2 md:flex">
           <Button asChild variant="ghost" size="sm">
-            <Link to="/client-access" aria-label="เข้าสู่ระบบร้านค้า">
+            <Link to="/login" aria-label="เข้าสู่ระบบร้านค้า">
               เข้าสู่ระบบร้านค้า
             </Link>
           </Button>
@@ -88,7 +88,7 @@ export default function LandingNavbar() {
             ))}
             <div className="mt-2 grid grid-cols-2 gap-2">
               <Button asChild variant="outline" size="sm" onClick={() => setOpen(false)}>
-                <Link to="/client-access" aria-label="เข้าสู่ระบบร้านค้า">
+                <Link to="/login" aria-label="เข้าสู่ระบบร้านค้า">
                   เข้าสู่ระบบร้านค้า
                 </Link>
               </Button>

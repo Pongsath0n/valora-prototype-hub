@@ -93,7 +93,7 @@ export function ScenarioLegacyRedirect() {
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
   if (loading) return <div className="min-h-screen flex items-center justify-center">กำลังโหลด...</div>;
-  if (!user) return <Navigate to="/client-access" replace />;
+  if (!user) return <Navigate to="/login" replace />;
   return <>{children}</>;
 }
 
@@ -138,10 +138,11 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/" element={<Landing />} />
-      <Route path="/client-access" element={<Login />} />
+      <Route path="/login" element={<Login />} />
+      <Route path="/client-access" element={<Navigate to="/login" replace />} />
 
       <Route path="/onboarding" element={<ProtectedRoute><Onboarding /></ProtectedRoute>} />
-      <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+      <Route path="/dashboard" element={<Navigate to="/app/dashboard" replace />} />
       {/* Store Admin Dashboard */}
       <Route path="/store-admin" element={<AdminRoute><AdminDashboardPage /></AdminRoute>} />
       <Route path="/store-admin/menus" element={<ManagerRoute><AdminProductsPage /></ManagerRoute>} />

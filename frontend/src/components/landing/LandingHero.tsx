@@ -102,7 +102,7 @@ export default function LandingHero() {
               ดูวิธีคำนวณกำไร
             </a>
             <Link
-              to="/client-access"
+              to="/login"
               className="font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
             >
               เข้าสู่ระบบร้านค้า

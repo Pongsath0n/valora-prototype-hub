@@ -44,7 +44,7 @@ export default function LandingFooter() {
               ))}
               <li>
                 <Link
-                  to="/client-access"
+                  to="/login"
                   className="text-foreground/80 transition-colors hover:text-foreground"
                 >
                   เข้าสู่ระบบ
