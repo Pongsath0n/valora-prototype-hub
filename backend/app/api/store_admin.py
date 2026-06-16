@@ -28,7 +28,12 @@ else:  # pragma: no cover - zoneinfo unavailable
 
 from app.core.config import settings
 from app.core.supabase import SupabaseConfigurationError, get_supabase_admin_client
-from app.services.cost_engine import build_order_item_record, mask_option_costs, prepare_order_item_snapshot
+from app.services.cost_engine import (
+    _calculate_recipe_cost,
+    build_order_item_record,
+    mask_option_costs,
+    prepare_order_item_snapshot,
+)
 from app.services.order_item_columns import (
     order_item_select_clause,
     order_items_has_column,
@@ -100,6 +105,9 @@ _MENU_IMAGE_EXTENSION_MAP: Dict[str, str] = {
     "image/png": "png",
     "image/webp": "webp",
 }
+
+_PLANNING_MIX_LOOKBACK_DAYS = 30
+_PLANNING_MAX_MIX_ORDERS = 500
 
 CsvAccessor = Union[str, Callable[[Dict[str, Any]], Any]]
 CsvColumn = Tuple[str, CsvAccessor]
@@ -3300,6 +3308,315 @@ def _load_order_items_map(client: Client, order_ids: List[str]) -> Dict[str, Lis
         key = str(order_id)
         items_map.setdefault(key, []).append(mapped)
     return items_map
+
+
+# ─── Planning Baseline Helpers ─────────────────────────────────────────────
+
+
+def _fetch_store_identity(client: Client, store_id: str) -> Dict[str, Optional[str]]:
+    try:
+        resp = client.table("stores").select("name, timezone").eq("id", store_id).limit(1).execute()
+    except Exception:
+        return {"name": None, "timezone": _normalize_timezone_name(None)}
+
+    err = getattr(resp, "error", None)
+    if err:
+        return {"name": None, "timezone": _normalize_timezone_name(None)}
+
+    rows = getattr(resp, "data", None) or []
+    row = rows[0] if rows else {}
+    name = row.get("name")
+    tz_value = row.get("timezone")
+    return {"name": name, "timezone": _normalize_timezone_name(tz_value)}
+
+
+def _load_planning_products(client: Client, store_id: str) -> List[Dict[str, Any]]:
+    select_cols = (
+        "id, store_id, name, category_id, base_price, is_active, is_special, product_categories(name)"
+    )
+    products_resp = (
+        client.table("products")
+        .select(select_cols)
+        .eq("store_id", store_id)
+        .order("created_at", desc=False)
+        .execute()
+    )
+    err = getattr(products_resp, "error", None)
+    if err and _is_missing_column(err, "is_active"):
+        select_cols = "id, store_id, name, category_id, base_price, product_categories(name)"
+        products_resp = (
+            client.table("products")
+            .select(select_cols)
+            .eq("store_id", store_id)
+            .order("created_at", desc=False)
+            .execute()
+        )
+        err = getattr(products_resp, "error", None)
+    if err:
+        raise HTTPException(status_code=500, detail="product_query_failed")
+
+    rows = getattr(products_resp, "data", None) or []
+    mapped = [_map_product(row) for row in rows]
+    return [product for product in mapped if product.get("is_active", True)]
+
+
+def _summarize_ingredient_breakdown(breakdown: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], bool, bool]:
+    summarized: List[Dict[str, Any]] = []
+    missing_ingredient = False
+    missing_cost = False
+
+    for item in breakdown:
+        ingredient_id = item.get("ingredient_id")
+        ingredient_name = item.get("ingredient_name")
+        quantity_used = _parse_float(item.get("quantity_used"))
+        unit = item.get("unit") or item.get("ingredient_unit")
+        cost_per_unit = _parse_float(item.get("cost_per_unit"))
+        line_cost = _parse_float(item.get("line_cost"))
+        cost_type = item.get("cost_type")
+
+        if ingredient_id and not ingredient_name:
+            missing_ingredient = True
+        if ingredient_name and cost_per_unit <= 0:
+            missing_cost = True
+
+        summarized.append(
+            {
+                "ingredient_id": ingredient_id,
+                "name": ingredient_name,
+                "cost_type": cost_type,
+                "quantity_used": quantity_used,
+                "unit": unit,
+                "cost_per_unit": cost_per_unit,
+                "line_cost": line_cost,
+            }
+        )
+
+    return summarized, missing_ingredient, missing_cost
+
+
+def _safe_collect_product_addons_for_planning(client: Client, store_id: str, product_id: str) -> List[Dict[str, Any]]:
+    try:
+        return _collect_product_addons(client, store_id, product_id)
+    except HTTPException as exc:
+        if exc.status_code == status.HTTP_404_NOT_FOUND:
+            return []
+        logger.warning(
+            "planning_addon_fetch_failed store=%s product=%s detail=%s",
+            _short_identifier(store_id),
+            _short_identifier(product_id),
+            getattr(exc, "detail", "unknown"),
+        )
+        return []
+    except Exception as exc:  # pragma: no cover - defensive guard
+        logger.warning(
+            "planning_addon_fetch_failed store=%s product=%s error=%s",
+            _short_identifier(store_id),
+            _short_identifier(product_id),
+            _safe_error_detail(exc),
+        )
+        return []
+
+
+def _summarize_addons(client: Client, store_id: str, product_id: str) -> List[Dict[str, Any]]:
+    addons: List[Dict[str, Any]] = []
+    addon_rows = _safe_collect_product_addons_for_planning(client, store_id, product_id)
+    for addon in addon_rows:
+        if addon.get("is_active") is False:
+            continue
+        addon_id = str(addon.get("id")) if addon.get("id") else None
+        if not addon_id:
+            continue
+        unit_cost = _parse_float(addon.get("unit_cost"))
+        price_delta = _parse_float(addon.get("price"))
+        has_recipe = bool(addon.get("has_recipe"))
+        if not has_recipe:
+            cost_status = "missing_addon_recipe"
+        elif unit_cost <= 0:
+            cost_status = "estimated"
+        else:
+            cost_status = "complete"
+        addons.append(
+            {
+                "addon_id": addon_id,
+                "name": addon.get("name"),
+                "price_delta": price_delta,
+                "current_unit_cost": unit_cost,
+                "cost_status": cost_status,
+            }
+        )
+    return addons
+
+
+def _build_planning_product_entry(
+    client: Client,
+    store_id: str,
+    product: Dict[str, Any],
+    mix_percent: Optional[float],
+) -> Dict[str, Any]:
+    product_id = str(product.get("id"))
+    base_price = _parse_float(product.get("base_price"))
+    base_cost, breakdown, base_status = _calculate_recipe_cost(client, store_id, product_id)
+    ingredient_breakdown, missing_ingredient, missing_cost = _summarize_ingredient_breakdown(breakdown)
+
+    cost_status = base_status
+    recipe_complete = cost_status == "complete"
+    if cost_status == "complete":
+        if not ingredient_breakdown:
+            cost_status = "missing_recipe"
+            recipe_complete = False
+        elif missing_ingredient:
+            cost_status = "missing_ingredient"
+            recipe_complete = False
+        elif missing_cost:
+            cost_status = "missing_ingredient_cost"
+            recipe_complete = False
+        elif base_cost <= 0:
+            cost_status = "estimated"
+            recipe_complete = False
+
+    gross_profit = base_price - base_cost
+    gross_margin_percent: Optional[float]
+    if base_price > 0:
+        gross_margin_percent = (gross_profit / base_price) * 100
+    else:
+        gross_margin_percent = None
+
+    addons = _summarize_addons(client, store_id, product_id)
+
+    return {
+        "product_id": product_id,
+        "name": product.get("name"),
+        "category": product.get("category_name"),
+        "is_active": True,
+        "base_price": base_price,
+        "current_unit_cost": base_cost,
+        "gross_profit": gross_profit,
+        "gross_margin_percent": gross_margin_percent,
+        "cost_status": cost_status,
+        "recipe_complete": recipe_complete,
+        "ingredient_breakdown": ingredient_breakdown,
+        "addons": addons,
+        "historical_mix_percent": mix_percent,
+    }
+
+
+def _collect_recent_mix(
+    client: Client,
+    store_id: str,
+    lookback_days: int,
+) -> Tuple[Dict[str, float], str]:
+    since_dt = datetime.utcnow() - timedelta(days=lookback_days)
+    since_iso = since_dt.isoformat()
+    resp = (
+        client.table("orders")
+        .select("id, status, payment_status, created_at")
+        .eq("store_id", store_id)
+        .gte("created_at", since_iso)
+        .order("created_at", desc=True)
+        .limit(_PLANNING_MAX_MIX_ORDERS)
+        .execute()
+    )
+    err = getattr(resp, "error", None)
+    if err:
+        return {}, "unavailable"
+
+    rows = getattr(resp, "data", None) or []
+    confirmed_orders: List[Dict[str, Any]] = []
+    for row in rows:
+        order_status_value = row.get("status") or row.get("order_status")
+        payment_status_value = row.get("payment_status")
+        if is_confirmed_sales_order(
+            row,
+            order_status=order_status_value,
+            payment_status=payment_status_value,
+        ):
+            confirmed_orders.append(row)
+
+    order_ids = [str(row.get("id")) for row in confirmed_orders if row.get("id")]
+    if not order_ids:
+        return {}, "unavailable"
+
+    items_map = _load_order_items_map(client, order_ids)
+    totals: Dict[str, int] = {}
+    total_qty = 0
+    for order_id in order_ids:
+        for item in items_map.get(order_id, []):
+            product_id = item.get("product_id")
+            if not product_id:
+                continue
+            qty = int(item.get("quantity") or 0)
+            if qty <= 0:
+                continue
+            pid = str(product_id)
+            totals[pid] = totals.get(pid, 0) + qty
+            total_qty += qty
+
+    if total_qty == 0:
+        return {}, "unavailable"
+
+    mix_map = {pid: (qty / total_qty) * 100 for pid, qty in totals.items()}
+    return mix_map, "order_items"
+
+
+def _build_planning_payload(client: Client, store_id: str, lookback_days: int) -> Dict[str, Any]:
+    store_identity = _fetch_store_identity(client, store_id)
+    store_timezone = store_identity.get("timezone")
+    tzinfo = _resolve_timezone(store_timezone)
+    timezone_display = _format_timezone_offset(tzinfo)
+    generated_at = datetime.utcnow().replace(tzinfo=timezone.utc).isoformat()
+
+    mix_map, mix_source = _collect_recent_mix(client, store_id, lookback_days)
+    products = _load_planning_products(client, store_id)
+    items = []
+    for product in products:
+        mix_percent = mix_map.get(product.get("id")) if mix_map else None
+        items.append(_build_planning_product_entry(client, store_id, product, mix_percent))
+
+    warnings: List[str] = []
+    if mix_source != "order_items":
+        warnings.append("historical_mix_unavailable")
+
+    return {
+        "store": {
+            "id": store_id,
+            "name": store_identity.get("name"),
+            "timezone": store_timezone,
+            "timezone_display": timezone_display,
+            "generated_at": generated_at,
+        },
+        "baseline": {
+            "lookback_days": lookback_days,
+            "mix_source": mix_source,
+            "price_source": "products.base_price",
+            "cost_source": "recipes.ingredients.cost_engine",
+        },
+        "items": items,
+        "warnings": warnings,
+    }
+
+
+@router.get("/planning/baseline")
+def get_planning_baseline(authorization: Optional[str] = Header(None), store_id: Optional[str] = None) -> Dict[str, Any]:
+    ctx = _get_ctx(authorization)
+    store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
+    _require_manager(role)
+
+    try:
+        payload = _build_planning_payload(
+            ctx["client"],
+            store_id_resolved,
+            _PLANNING_MIX_LOOKBACK_DAYS,
+        )
+        return payload
+    except HTTPException:
+        raise
+    except Exception as exc:  # pragma: no cover - defensive guard
+        logger.exception(
+            "planning_baseline_build_failed store=%s error=%s",
+            _short_identifier(store_id_resolved),
+            _safe_error_detail(exc),
+        )
+        raise HTTPException(status_code=500, detail=f"planning_baseline_failed:{_safe_error_detail(exc)}")
 
 
 def _initialize_sales_summary() -> Dict[str, Any]:
