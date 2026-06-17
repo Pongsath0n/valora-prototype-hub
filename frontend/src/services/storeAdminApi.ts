@@ -362,6 +362,58 @@ export type DashboardSummaryResponse = {
   seven_day_trend: DashboardTrendPoint[];
 };
 
+export type PlanningBaselineIngredientLine = {
+  ingredient_id?: string | null;
+  name?: string | null;
+  quantity_used?: number | null;
+  unit?: string | null;
+  cost_per_unit?: number | null;
+  line_cost?: number | null;
+  cost_type?: string | null;
+};
+
+export type PlanningBaselineAddon = {
+  addon_id?: string | null;
+  name?: string | null;
+  price_delta?: number | null;
+  current_unit_cost?: number | null;
+  cost_status?: string | null;
+};
+
+export type PlanningBaselineItem = {
+  product_id: string;
+  name?: string | null;
+  category?: string | null;
+  is_active?: boolean;
+  base_price: number;
+  current_unit_cost: number;
+  gross_profit?: number | null;
+  gross_margin_percent?: number | null;
+  cost_status?: string | null;
+  recipe_complete?: boolean;
+  ingredient_breakdown?: PlanningBaselineIngredientLine[];
+  addons?: PlanningBaselineAddon[];
+  historical_mix_percent?: number | null;
+};
+
+export type PlanningBaselineResponse = {
+  store: {
+    id: string;
+    name?: string | null;
+    timezone?: string | null;
+    timezone_display?: string | null;
+    generated_at?: string | null;
+  };
+  baseline: {
+    lookback_days: number;
+    mix_source?: string | null;
+    price_source?: string | null;
+    cost_source?: string | null;
+  };
+  items: PlanningBaselineItem[];
+  warnings: string[];
+};
+
 export type SalesReportSummary = {
   order_count: number;
   total_sales_confirmed: number;
@@ -650,6 +702,10 @@ export const storeAdminApi = {
 
   async getDashboardSummary(): Promise<DashboardSummaryResponse> {
     return request("/api/store-admin/dashboard-summary");
+  },
+
+  async getPlanningBaseline(): Promise<PlanningBaselineResponse> {
+    return request("/api/store-admin/planning/baseline");
   },
 
   async getSalesReport(filters: SalesReportFiltersPayload): Promise<SalesReportResponse> {
