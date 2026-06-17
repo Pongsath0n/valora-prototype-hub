@@ -16,6 +16,9 @@ export type ApiSalesChannel = {
   created_at?: string;
 };
 
+export const INGREDIENT_BASE_UNITS = ["g", "ml", "pcs", "set", "bottle"] as const;
+export type IngredientBaseUnit = (typeof INGREDIENT_BASE_UNITS)[number];
+
 export type ApiChannelPrice = {
   id: string;
   store_id: string;
@@ -122,7 +125,55 @@ export type ApiIngredient = {
   supplier_name?: string | null;
   is_active?: boolean;
   cost_type?: string | null;
+  cost_source?: string | null;
+  last_purchase_at?: string | null;
+  cost_updated_at?: string | null;
   created_at?: string;
+};
+
+export type StockIntake = {
+  id: string;
+  store_id: string;
+  ingredient_id: string;
+  ingredient_name?: string | null;
+  ingredient_unit?: string | null;
+  quantity: number;
+  normalized_quantity: number;
+  purchase_unit: string;
+  conversion_factor: number;
+  total_cost: number;
+  unit_cost_snapshot?: number | null;
+  supplier_name?: string | null;
+  payment_status: "paid" | "unpaid";
+  paid_at?: string | null;
+  due_date?: string | null;
+  note?: string | null;
+  receipt_url?: string | null;
+  receipt_storage_path?: string | null;
+  created_at?: string | null;
+  created_by?: string | null;
+  movement_id?: string | null;
+  movement_type?: string | null;
+};
+
+export type CreateStockIntakePayload = {
+  ingredient_id: string;
+  quantity: number;
+  purchase_unit: string;
+  conversion_factor: number;
+  total_cost: number;
+  supplier_name?: string;
+  payment_status: "paid" | "unpaid";
+  paid_at?: string;
+  due_date?: string;
+  note?: string;
+  receipt_url?: string;
+  receipt_storage_path?: string;
+};
+
+export type StockIntakeResponse = {
+  intake: StockIntake;
+  ingredient: ApiIngredient;
 };
 
 export type ApiRecipe = {
@@ -177,7 +228,7 @@ export type ProductPayload = {
 
 export type IngredientPayload = {
   name: string;
-  unit: string;
+  unit: IngredientBaseUnit;
   cost_per_unit: number;
   current_stock: number;
   low_stock_threshold: number;
@@ -582,6 +633,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return body as T;
 }
 
+type StockIntakeListResponse = { items: StockIntake[]; store_id: string };
+
 export const storeAdminApi = {
   async getMe(): Promise<{
     user_id: string;
@@ -768,6 +821,50 @@ export const storeAdminApi = {
 
   async deleteIngredient(id: string): Promise<{ status: string }> {
     return request<{ status: string }>(`/api/store-admin/ingredients/${id}`, { method: "DELETE" });
+  },
+
+  async listStockIntakes(params?: { ingredient_id?: string; limit?: number }): Promise<StockIntake[]> {
+    const search = new URLSearchParams();
+    if (params?.ingredient_id) search.set("ingredient_id", params.ingredient_id);
+    if (params?.limit) search.set("limit", String(params.limit));
+    const path = `/api/store-admin/stock-intakes${search.size ? `?${search.toString()}` : ""}`;
+    const data = await request<StockIntakeListResponse>(path);
+    return data.items ?? [];
+  },
+
+  async getStockIntake(id: string): Promise<StockIntakeResponse> {
+    return request<StockIntakeResponse>(`/api/store-admin/stock-intakes/${id}`);
+  },
+
+  async createStockIntake(payload: CreateStockIntakePayload): Promise<StockIntakeResponse> {
+    return request<StockIntakeResponse>(`/api/store-admin/stock-intakes`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async uploadStockIntakeReceipt(intakeId: string, file: File, storeId: string): Promise<StockIntake> {
+    const token = await getAccessToken();
+    const formData = new FormData();
+    formData.append("file", file);
+
+    const search = new URLSearchParams();
+    if (storeId) search.set("store_id", storeId);
+    const path = `/api/store-admin/stock-intakes/${intakeId}/receipt${search.size ? `?${search}` : ""}`;
+
+    const res = await fetch(`${BACKEND_BASE}${path}`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      body: formData,
+    });
+    const body = await res.json().catch(() => null);
+    if (!res.ok) {
+      const reason = (body as any)?.detail || (body as any)?.error || res.statusText;
+      throw new Error(typeof reason === "string" ? reason : "receipt_upload_failed");
+    }
+    return body as StockIntake;
   },
 
   // Recipes

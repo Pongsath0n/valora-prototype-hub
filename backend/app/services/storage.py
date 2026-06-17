@@ -46,11 +46,11 @@ def _get_storage_client(bucket: str) -> tuple[Client, Any]:
     return client, storage_client
 
 
-def upload_payment_slip(bucket: str, path: str, data: bytes, content_type: str) -> Dict[str, Any]:
+def upload_payment_slip(bucket: str, path: str, data: bytes, content_type: str, *, error_prefix: str = "payment_slip") -> Dict[str, Any]:
     if not bucket:
-        raise StorageUploadError("payment_slip_storage_not_configured")
+        raise StorageUploadError(f"{error_prefix}_storage_not_configured")
     if not path:
-        raise StorageUploadError("payment_slip_storage_path_missing")
+        raise StorageUploadError(f"{error_prefix}_storage_path_missing")
 
     client, storage_client = _get_storage_client(bucket)
     size_bytes = len(data or b"")
@@ -82,7 +82,7 @@ def upload_payment_slip(bucket: str, path: str, data: bytes, content_type: str) 
             _short_path(path),
             str(exc)[:300],
         )
-        raise StorageUploadError("payment_slip_upload_failed") from exc
+        raise StorageUploadError(f"{error_prefix}_upload_failed") from exc
 
     public_url = None
     try:
@@ -158,12 +158,12 @@ def upload_public_asset(bucket: str, path: str, data: bytes, content_type: str) 
     return UploadedFile(path=path, file_name=path.split("/")[-1], public_url=public_url).as_dict()
 
 
-def create_signed_slip_url(bucket: str, path: str, expires_in: int = 60) -> Dict[str, Any]:
+def create_signed_slip_url(bucket: str, path: str, expires_in: int = 60, *, error_prefix: str = "payment_slip") -> Dict[str, Any]:
     """Create a short-lived signed URL for a private payment slip."""
     if not bucket:
-        raise StorageUploadError("payment_slip_storage_not_configured")
+        raise StorageUploadError(f"{error_prefix}_storage_not_configured")
     if not path:
-        raise StorageUploadError("payment_slip_storage_path_missing")
+        raise StorageUploadError(f"{error_prefix}_storage_path_missing")
 
     _, storage_client = _get_storage_client(bucket)
     ttl = max(1, int(expires_in or 1))
@@ -176,7 +176,7 @@ def create_signed_slip_url(bucket: str, path: str, expires_in: int = 60) -> Dict
             _short_path(path),
             str(exc)[:300],
         )
-        raise StorageUploadError("payment_slip_signed_url_failed") from exc
+        raise StorageUploadError(f"{error_prefix}_signed_url_failed") from exc
 
     signed_url: Optional[str] = None
     if isinstance(signed_resp, dict):
@@ -185,7 +185,7 @@ def create_signed_slip_url(bucket: str, path: str, expires_in: int = 60) -> Dict
         signed_url = signed_resp
 
     if not signed_url:
-        raise StorageUploadError("payment_slip_signed_url_failed")
+        raise StorageUploadError(f"{error_prefix}_signed_url_failed")
 
     logger.info(
         "storage_signed_url_issued bucket=%s key=%s ttl=%s",

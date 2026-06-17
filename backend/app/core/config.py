@@ -36,6 +36,8 @@ class Settings(BaseSettings):
     payment_slip_bucket: str = Field(default="payment-slips", alias="PAYMENT_SLIP_BUCKET")
     menu_image_bucket: str = Field(default="menu-images", alias="MENU_IMAGE_BUCKET")
     menu_image_max_mb: float = Field(default=5.0, alias="MENU_IMAGE_MAX_MB")
+    purchase_receipt_bucket: str = Field(default="purchase-receipts", alias="PURCHASE_RECEIPT_BUCKET")
+    purchase_receipt_max_mb: float = Field(default=5.0, alias="PURCHASE_RECEIPT_MAX_MB")
 
 
 settings = Settings()

@@ -26,6 +26,14 @@ STORAGE_BUCKETS = (
         "required": True,
         "notes": "รูปเมนูและสินทรัพย์ร้านค้าสาธารณะ",
     },
+    {
+        "key": "purchase_receipts",
+        "label": "Purchase Receipt Bucket",
+        "attr": "purchase_receipt_bucket",
+        "mode": "private",
+        "required": True,
+        "notes": "เก็บใบเสร็จซื้อวัตถุดิบและสต็อก",
+    },
 )
 
 router = APIRouter()

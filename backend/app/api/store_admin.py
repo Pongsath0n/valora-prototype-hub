@@ -43,7 +43,7 @@ from app.services.order_item_columns import (
 from app.services.order_totals import recalculate_order_totals, resolve_channel_fee
 from app.services.notification_sender import send_line_notification
 from app.services.order_numbers import generate_order_number
-from app.services.storage import StorageUploadError, create_signed_slip_url, upload_public_asset
+from app.services.storage import StorageUploadError, create_signed_slip_url, upload_payment_slip, upload_public_asset
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +105,11 @@ _MENU_IMAGE_EXTENSION_MAP: Dict[str, str] = {
     "image/png": "png",
     "image/webp": "webp",
 }
+
+_PURCHASE_COST_SOURCE = "purchase_derived"
+_STOCK_INTAKE_PAYMENT_STATUSES: Set[str] = {"paid", "unpaid"}
+_PURCHASE_RECEIPT_ALLOWED_TYPES: Set[str] = {"image/jpeg", "image/jpg", "image/png", "image/webp"}
+_INGREDIENT_BASE_UNITS: Set[str] = {"g", "ml", "pcs", "set", "bottle"}
 
 _PLANNING_MIX_LOOKBACK_DAYS = 30
 _PLANNING_MAX_MIX_ORDERS = 500
@@ -406,6 +411,56 @@ class IngredientUpdate(BaseModel):
     low_stock_threshold: Optional[float] = None
     supplier_name: Optional[str] = None
     is_active: Optional[bool] = None
+
+
+class StockIntakeCreate(BaseModel):
+    ingredient_id: str
+    quantity: float
+    purchase_unit: str
+    conversion_factor: float
+    total_cost: float
+    supplier_name: Optional[str] = None
+    payment_status: Literal["paid", "unpaid"] = "paid"
+    paid_at: Optional[str] = None
+    due_date: Optional[str] = None
+    note: Optional[str] = None
+    receipt_url: Optional[str] = None
+    receipt_storage_path: Optional[str] = None
+
+
+class StockIntakeSummary(BaseModel):
+    id: str
+    store_id: str
+    ingredient_id: str
+    quantity: float
+    normalized_quantity: float
+    purchase_unit: str
+    conversion_factor: float
+    total_cost: float
+    unit_cost_snapshot: Optional[float] = None
+    supplier_name: Optional[str] = None
+    payment_status: Literal["paid", "unpaid"]
+    paid_at: Optional[str] = None
+    due_date: Optional[str] = None
+    note: Optional[str] = None
+    receipt_url: Optional[str] = None
+    receipt_storage_path: Optional[str] = None
+    created_at: Optional[str] = None
+    created_by: Optional[str] = None
+    ingredient_name: Optional[str] = None
+    ingredient_unit: Optional[str] = None
+    movement_id: Optional[str] = None
+    movement_type: Optional[str] = None
+
+
+class StockIntakeResponse(BaseModel):
+    intake: StockIntakeSummary
+    ingredient: Dict[str, Any]
+
+
+class StockIntakeListResponse(BaseModel):
+    items: List[StockIntakeSummary]
+    store_id: str
 
 
 class RecipeCreate(BaseModel):
@@ -1946,6 +2001,11 @@ def _menu_image_limit_bytes() -> int:
     return int(max(1.0, max_mb) * 1024 * 1024)
 
 
+def _purchase_receipt_limit_bytes() -> int:
+    max_mb = float(settings.purchase_receipt_max_mb or 5.0)
+    return int(max(1.0, max_mb) * 1024 * 1024)
+
+
 def _normalize_mime_type(value: Optional[str]) -> str:
     return str(value or "").strip().lower()
 
@@ -1960,6 +2020,23 @@ def _resolve_menu_image_extension(filename: Optional[str], content_type: str) ->
         if ext in {"jpg", "jpeg", "png", "webp"}:
             return "jpg" if ext == "jpeg" else ext
     return "jpg"
+
+
+def _safe_receipt_filename(filename: Optional[str]) -> str:
+    base = os.path.splitext(str(filename or "").strip())[0]
+    if not base:
+        base = "receipt"
+    base = re.sub(r"[^A-Za-z0-9ก-๙_-]+", "-", base)
+    base = re.sub(r"-+", "-", base).strip("-_") or "receipt"
+    return base[:48]
+
+
+def _build_purchase_receipt_path(store_id: str, purchase_id: str, filename: Optional[str], content_type: str) -> str:
+    extension = _resolve_menu_image_extension(filename, content_type)
+    safe_name = _safe_receipt_filename(filename)
+    timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
+    suffix = uuid4().hex[:6]
+    return f"{store_id}/ingredient-purchases/{purchase_id}/{timestamp}-{suffix}-{safe_name}.{extension}"
 
 
 def _build_menu_image_path(store_id: str, product_id: str, extension: str) -> str:
@@ -1988,9 +2065,11 @@ def _sanitize_ingredient_payload(payload: IngredientCreate | IngredientUpdate, p
         data["name"] = name
 
     if "unit" in data or not partial:
-        unit = (data.get("unit") or "").strip()
+        unit = (data.get("unit") or "").strip().lower()
         if not unit:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="unit_required")
+        if unit not in _INGREDIENT_BASE_UNITS:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="unit_invalid")
         data["unit"] = unit
 
     if "cost_per_unit" in data:
@@ -2030,6 +2109,9 @@ def _map_ingredient(row: Dict[str, Any]) -> Dict[str, Any]:
         "supplier_name": row.get("supplier_name"),
         "is_active": bool(row.get("is_active")) if row.get("is_active") is not None else True,
         "cost_type": row.get("cost_type"),
+        "cost_source": row.get("cost_source"),
+        "last_purchase_at": row.get("last_purchase_at"),
+        "cost_updated_at": row.get("cost_updated_at"),
         "created_at": row.get("created_at"),
     }
 
@@ -2541,18 +2623,47 @@ def list_ingredients(authorization: Optional[str] = Header(None), store_id: Opti
         except Exception as exc:
             return None, exc
 
-    select_cols = "id, store_id, name, unit, cost_per_unit, stock_on_hand, low_stock_threshold, supplier_name, is_active, created_at"
-    resp, err = _query_ingredients(select_cols)
-    if err and _is_missing_column(err, "stock_on_hand"):
-        resp, err = _query_ingredients("id, store_id, name, unit, cost_per_unit, current_stock, low_stock_threshold, supplier_name, is_active, created_at")
-    if err and _is_missing_column(err, "is_active"):
-        resp, err = _query_ingredients("id, store_id, name, unit, cost_per_unit, stock_on_hand, current_stock, low_stock_threshold, supplier_name, created_at")
-        if err and _is_missing_column(err, "stock_on_hand"):
-            resp, err = _query_ingredients("id, store_id, name, unit, cost_per_unit, current_stock, low_stock_threshold, supplier_name, created_at")
-    if err and _is_missing_column(err, "supplier_name"):
-        resp, err = _query_ingredients("id, store_id, name, unit, cost_per_unit, stock_on_hand, current_stock, low_stock_threshold, created_at")
-        if err and _is_missing_column(err, "stock_on_hand"):
-            resp, err = _query_ingredients("id, store_id, name, unit, cost_per_unit, current_stock, low_stock_threshold, created_at")
+    stock_field = "stock_on_hand"
+    include_supplier = True
+    include_is_active = True
+    include_cost_metadata = True
+    attempts = 0
+    resp = None
+    err = None
+    while attempts < 8:
+        attempts += 1
+        columns = [
+            "id",
+            "store_id",
+            "name",
+            "unit",
+            "cost_per_unit",
+            stock_field,
+            "low_stock_threshold",
+        ]
+        if include_supplier:
+            columns.append("supplier_name")
+        if include_is_active:
+            columns.append("is_active")
+        if include_cost_metadata:
+            columns.extend(["cost_source", "last_purchase_at", "cost_updated_at"])
+        columns.append("created_at")
+        resp, err = _query_ingredients(", ".join(columns))
+        if not err:
+            break
+        if stock_field == "stock_on_hand" and _is_missing_column(err, "stock_on_hand"):
+            stock_field = "current_stock"
+            continue
+        if include_is_active and _is_missing_column(err, "is_active"):
+            include_is_active = False
+            continue
+        if include_supplier and _is_missing_column(err, "supplier_name"):
+            include_supplier = False
+            continue
+        if include_cost_metadata and any(_is_missing_column(err, fld) for fld in ("cost_source", "last_purchase_at", "cost_updated_at")):
+            include_cost_metadata = False
+            continue
+        break
     if err:
         raise HTTPException(status_code=500, detail="ingredient_query_failed")
 
@@ -2683,6 +2794,598 @@ def delete_ingredient(ingredient_id: str, authorization: Optional[str] = Header(
 
     ctx["client"].table("ingredients").delete().eq("id", ingredient_id).eq("store_id", store_id_resolved).execute()
     return {"status": "deleted"}
+
+
+# ─── Stock Intake ────────────────────────────────────────────────────────────
+
+
+def _normalize_optional_datetime_string(value: Optional[Union[str, datetime]], *, field: str) -> Optional[str]:
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value.astimezone(timezone.utc).isoformat()
+    parsed = _parse_iso_datetime(str(value))
+    if parsed is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"invalid_{field}")
+    return parsed.astimezone(timezone.utc).isoformat()
+
+
+def _normalize_optional_date_string(value: Optional[Union[str, datetime]], *, field: str) -> Optional[str]:
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value.date().isoformat()
+    raw = str(value).strip()
+    if not raw:
+        return None
+    try:
+        parsed_date = datetime.strptime(raw, "%Y-%m-%d").date()
+        return parsed_date.isoformat()
+    except Exception:
+        parsed_dt = _parse_iso_datetime(raw)
+        if parsed_dt is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"invalid_{field}")
+        return parsed_dt.date().isoformat()
+
+
+def _sanitize_stock_intake_payload(payload: StockIntakeCreate) -> Dict[str, Any]:
+    data = payload.model_dump(exclude_unset=True)
+    ingredient_id = (data.get("ingredient_id") or "").strip()
+    if not ingredient_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="ingredient_required")
+    quantity = _safe_float(data.get("quantity"))
+    if quantity <= 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="quantity_positive")
+    conversion_factor = _safe_float(data.get("conversion_factor"))
+    if conversion_factor <= 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="conversion_factor_positive")
+    purchase_unit = (data.get("purchase_unit") or "").strip()
+    if not purchase_unit:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="purchase_unit_required")
+    total_cost = _safe_float(data.get("total_cost"))
+    if total_cost < 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="total_cost_non_negative")
+    normalized_quantity = quantity * conversion_factor
+    if normalized_quantity <= 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="normalized_quantity_required")
+    payment_status = (data.get("payment_status") or "paid").strip().lower()
+    if payment_status not in _STOCK_INTAKE_PAYMENT_STATUSES:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="payment_status_invalid")
+
+    supplier_name = (data.get("supplier_name") or "").strip() or None
+    note = (data.get("note") or "").strip() or None
+    receipt_url = (data.get("receipt_url") or "").strip() or None
+    receipt_storage_path = (data.get("receipt_storage_path") or "").strip() or None
+
+    return {
+        "ingredient_id": ingredient_id,
+        "quantity": quantity,
+        "conversion_factor": conversion_factor,
+        "purchase_unit": purchase_unit,
+        "total_cost": total_cost,
+        "normalized_quantity": normalized_quantity,
+        "payment_status": payment_status,
+        "supplier_name": supplier_name,
+        "paid_at": _normalize_optional_datetime_string(data.get("paid_at"), field="paid_at"),
+        "due_date": _normalize_optional_date_string(data.get("due_date"), field="due_date"),
+        "note": note,
+        "receipt_url": receipt_url,
+        "receipt_storage_path": receipt_storage_path,
+    }
+
+
+def _get_ingredient_snapshot(client: Client, ingredient_id: str, store_id: str) -> Dict[str, Any]:
+    resp = client.table("ingredients").select("*").eq("id", ingredient_id).limit(1).execute()
+    err = getattr(resp, "error", None)
+    if err:
+        raise HTTPException(status_code=500, detail="ingredient_lookup_failed")
+    rows = getattr(resp, "data", None) or []
+    if not rows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="ingredient_not_found")
+    row = rows[0]
+    if str(row.get("store_id")) != str(store_id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="store_mismatch")
+    return row
+
+
+class StockIntakeReceiptUpdate(BaseModel):
+    receipt_url: Optional[str] = None
+    receipt_storage_path: Optional[str] = None
+
+
+def _stock_intake_select_clause(include_relations: bool = True) -> str:
+    columns = [
+        "id",
+        "store_id",
+        "ingredient_id",
+        "quantity",
+        "normalized_quantity",
+        "purchase_unit",
+        "conversion_factor",
+        "total_cost",
+        "unit_cost_snapshot",
+        "supplier_name",
+        "payment_status",
+        "paid_at",
+        "due_date",
+        "note",
+        "receipt_url",
+        "receipt_storage_path",
+        "created_at",
+        "created_by",
+    ]
+    if include_relations:
+        columns.append("ingredients(id, name, unit)")
+    return ", ".join(columns)
+
+
+def _attach_movement_metadata(client: Client, store_id: str, purchase_rows: List[Dict[str, Any]]) -> None:
+    purchase_ids = [str(row.get("id")) for row in purchase_rows if row.get("id")]
+    if not purchase_ids:
+        return
+    try:
+        resp = (
+            client.table("stock_movements")
+            .select("id, purchase_id, movement_type")
+            .eq("store_id", store_id)
+            .in_("purchase_id", purchase_ids)
+            .execute()
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="stock_movement_lookup_failed") from exc
+    err = getattr(resp, "error", None)
+    if err:
+        raise HTTPException(status_code=500, detail="stock_movement_lookup_failed")
+    rows = getattr(resp, "data", None) or []
+    movement_map: Dict[str, Dict[str, Any]] = {}
+    for movement in rows:
+        pid = movement.get("purchase_id")
+        if pid:
+            movement_map[str(pid)] = movement
+    for purchase in purchase_rows:
+        pid = purchase.get("id")
+        movement = movement_map.get(str(pid)) if pid else None
+        if movement:
+            purchase["movement_id"] = movement.get("id")
+            purchase["movement_type"] = movement.get("movement_type") or movement.get("type")
+
+
+def _map_stock_intake(row: Dict[str, Any]) -> StockIntakeSummary:
+    ingredient_rel = row.get("ingredients") if isinstance(row, dict) else None
+    quantity = _safe_float(row.get("quantity"))
+    conversion = _safe_float(row.get("conversion_factor")) or 1.0
+    normalized_quantity = _safe_float(row.get("normalized_quantity"))
+    if normalized_quantity <= 0:
+        normalized_quantity = quantity * conversion if conversion > 0 else quantity
+    return StockIntakeSummary(
+        id=str(row.get("id")),
+        store_id=str(row.get("store_id")),
+        ingredient_id=str(row.get("ingredient_id")),
+        quantity=quantity,
+        normalized_quantity=normalized_quantity,
+        purchase_unit=row.get("purchase_unit"),
+        conversion_factor=conversion,
+        total_cost=_safe_float(row.get("total_cost")),
+        unit_cost_snapshot=_safe_float(row.get("unit_cost_snapshot")),
+        supplier_name=row.get("supplier_name"),
+        payment_status=str(row.get("payment_status") or "paid"),
+        paid_at=row.get("paid_at"),
+        due_date=row.get("due_date"),
+        note=row.get("note"),
+        receipt_url=row.get("receipt_url"),
+        receipt_storage_path=row.get("receipt_storage_path"),
+        created_at=row.get("created_at"),
+        created_by=row.get("created_by"),
+        ingredient_name=(ingredient_rel or {}).get("name") if isinstance(ingredient_rel, dict) else None,
+        ingredient_unit=(ingredient_rel or {}).get("unit") if isinstance(ingredient_rel, dict) else None,
+        movement_id=str(row.get("movement_id")) if row.get("movement_id") else None,
+        movement_type=row.get("movement_type"),
+    )
+
+
+def _update_ingredient_from_purchase(
+    client: Client,
+    ingredient_id: str,
+    store_id: str,
+    *,
+    new_stock: float,
+    new_cost: float,
+    supplier_name: Optional[str],
+    timestamp_iso: str,
+    ingredient_row: Optional[Dict[str, Any]] = None,
+) -> None:
+    stock_column = "stock_on_hand"
+    if ingredient_row is not None and "stock_on_hand" not in ingredient_row:
+        stock_column = "current_stock"
+
+    payload: Dict[str, Any] = {
+        stock_column: new_stock,
+        "cost_per_unit": new_cost,
+        "cost_source": _PURCHASE_COST_SOURCE,
+        "last_purchase_at": timestamp_iso,
+        "cost_updated_at": timestamp_iso,
+    }
+    if supplier_name:
+        payload["supplier_name"] = supplier_name
+
+    def _exec(update_payload: Dict[str, Any]):
+        return client.table("ingredients").update(update_payload).eq("id", ingredient_id).eq("store_id", store_id).execute()
+
+    attempt = dict(payload)
+    resp = _exec(attempt)
+    err = getattr(resp, "error", None)
+    if err and _is_missing_column(err, "stock_on_hand"):
+        stock_value = attempt.pop("stock_on_hand", None)
+        if stock_value is not None:
+            attempt["current_stock"] = stock_value
+        resp = _exec(attempt)
+        err = getattr(resp, "error", None)
+    if err and any(_is_missing_column(err, col) for col in ("cost_source", "last_purchase_at", "cost_updated_at")):
+        trimmed = {k: v for k, v in attempt.items() if k not in {"cost_source", "last_purchase_at", "cost_updated_at"}}
+        resp = _exec(trimmed)
+        err = getattr(resp, "error", None)
+    if err:
+        raise HTTPException(status_code=500, detail="ingredient_purchase_update_failed")
+
+
+def _insert_stock_movement_record(
+    client: Client,
+    store_id: str,
+    ingredient_id: str,
+    *,
+    normalized_quantity: float,
+    ingredient_unit: Optional[str],
+    purchase_id: Optional[str],
+    unit_cost_snapshot: float,
+    created_by: Optional[str],
+) -> Dict[str, Any]:
+    payload: Dict[str, Any] = {
+        "store_id": store_id,
+        "ingredient_id": ingredient_id,
+        "movement_type": "in",
+        "quantity": normalized_quantity,
+        "unit": ingredient_unit,
+        "movement_reason": "stock_intake",
+        "purchase_id": purchase_id,
+        "unit_cost_snapshot": unit_cost_snapshot,
+        "created_by": created_by,
+    }
+
+    while True:
+        resp = client.table("stock_movements").insert(payload).execute()
+        err = getattr(resp, "error", None)
+        if not err:
+            rows = getattr(resp, "data", None) or []
+            return rows[0] if rows else payload
+        if "movement_reason" in payload and _is_missing_column(err, "movement_reason"):
+            reason_value = payload.pop("movement_reason", None) or "stock_intake"
+            payload["reason"] = reason_value
+            continue
+        if "unit" in payload and _is_missing_column(err, "unit"):
+            payload.pop("unit", None)
+            continue
+        if "purchase_id" in payload and _is_missing_column(err, "purchase_id"):
+            payload.pop("purchase_id", None)
+            continue
+        if "unit_cost_snapshot" in payload and _is_missing_column(err, "unit_cost_snapshot"):
+            payload.pop("unit_cost_snapshot", None)
+            continue
+        if "created_by" in payload and _is_missing_column(err, "created_by"):
+            payload.pop("created_by", None)
+            continue
+        raise HTTPException(status_code=500, detail="stock_movement_create_failed")
+
+
+def _update_purchase_receipt_fields(
+    client: Client,
+    purchase_id: str,
+    store_id: str,
+    *,
+    receipt_url: Optional[str],
+    receipt_storage_path: Optional[str],
+) -> None:
+    payload: Dict[str, Any] = {}
+    if receipt_url is not None:
+        payload["receipt_url"] = receipt_url
+    if receipt_storage_path is not None:
+        payload["receipt_storage_path"] = receipt_storage_path
+    if not payload:
+        return
+    resp = client.table("ingredient_purchases").update(payload).eq("id", purchase_id).eq("store_id", store_id).execute()
+    err = getattr(resp, "error", None)
+    if err:
+        raise HTTPException(status_code=500, detail="purchase_receipt_update_failed")
+
+
+@router.get("/stock-intakes")
+def list_stock_intakes(
+    authorization: Optional[str] = Header(None),
+    store_id: Optional[str] = None,
+    ingredient_id: Optional[str] = None,
+    limit: int = 50,
+) -> StockIntakeListResponse:
+    ctx = _get_ctx(authorization)
+    store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
+    _require_manager(role)
+
+    limit_value = max(1, min(limit, 100))
+    query = (
+        ctx["client"]
+        .table("ingredient_purchases")
+        .select(_stock_intake_select_clause(include_relations=True))
+        .eq("store_id", store_id_resolved)
+        .order("created_at", desc=True)
+        .limit(limit_value)
+    )
+    if ingredient_id:
+        query = query.eq("ingredient_id", ingredient_id)
+
+    resp = query.execute()
+    err = getattr(resp, "error", None)
+    if err:
+        raise HTTPException(status_code=500, detail="stock_intake_query_failed")
+    rows = getattr(resp, "data", None) or []
+    _attach_movement_metadata(ctx["client"], store_id_resolved, rows)
+    return StockIntakeListResponse(items=[_map_stock_intake(r) for r in rows], store_id=store_id_resolved)
+
+
+@router.get("/stock-intakes/{intake_id}")
+def get_stock_intake(intake_id: str, authorization: Optional[str] = Header(None), store_id: Optional[str] = None) -> StockIntakeResponse:
+    ctx = _get_ctx(authorization)
+    store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
+    _require_manager(role)
+
+    resp = (
+        ctx["client"].table("ingredient_purchases").select(_stock_intake_select_clause(include_relations=True)).eq("id", intake_id).eq("store_id", store_id_resolved).limit(1).execute()
+    )
+    err = getattr(resp, "error", None)
+    if err:
+        raise HTTPException(status_code=500, detail="stock_intake_lookup_failed")
+    rows = getattr(resp, "data", None) or []
+    if not rows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="stock_intake_not_found")
+    _attach_movement_metadata(ctx["client"], store_id_resolved, rows)
+    mapped = _map_stock_intake(rows[0])
+    ingredient_row = _get_ingredient_snapshot(ctx["client"], mapped.ingredient_id, store_id_resolved)
+    return StockIntakeResponse(intake=mapped, ingredient=_map_ingredient(ingredient_row))
+
+
+@router.post("/stock-intakes")
+def create_stock_intake(payload: StockIntakeCreate, authorization: Optional[str] = Header(None), store_id: Optional[str] = None) -> StockIntakeResponse:
+    ctx = _get_ctx(authorization)
+    store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
+    _require_manager(role)
+
+    try:
+        sanitized = _sanitize_stock_intake_payload(payload)
+        ingredient_row = _get_ingredient_snapshot(ctx["client"], sanitized["ingredient_id"], store_id_resolved)
+        old_stock = _safe_float(ingredient_row.get("stock_on_hand") or ingredient_row.get("current_stock"))
+        old_cost = _safe_float(ingredient_row.get("cost_per_unit"))
+        normalized_quantity = sanitized["normalized_quantity"]
+        purchase_unit_cost = sanitized["total_cost"] / normalized_quantity if normalized_quantity else 0
+        new_stock = old_stock + normalized_quantity
+        if new_stock <= 0:
+            new_stock = normalized_quantity
+        if old_stock <= 0:
+            new_cost = purchase_unit_cost
+        else:
+            new_cost = ((old_stock * old_cost) + sanitized["total_cost"]) / (old_stock + normalized_quantity)
+
+        purchase_payload: Dict[str, Any] = {
+            "store_id": store_id_resolved,
+            "ingredient_id": sanitized["ingredient_id"],
+            "quantity": sanitized["quantity"],
+            "normalized_quantity": normalized_quantity,
+            "purchase_unit": sanitized["purchase_unit"] or ingredient_row.get("unit"),
+            "conversion_factor": sanitized["conversion_factor"],
+            "total_cost": sanitized["total_cost"],
+            "unit_cost_snapshot": purchase_unit_cost,
+            "payment_status": sanitized["payment_status"],
+            "created_by": ctx.get("user_id"),
+        }
+
+        for optional_field in ("supplier_name", "paid_at", "due_date", "note", "receipt_url", "receipt_storage_path"):
+            value = sanitized.get(optional_field)
+            if value:
+                purchase_payload[optional_field] = value
+
+        def _insert_purchase(data: Dict[str, Any]) -> tuple[Optional[Any], Optional[Any]]:
+            try:
+                resp_local = ctx["client"].table("ingredient_purchases").insert(data).execute()
+                return resp_local, getattr(resp_local, "error", None)
+            except Exception as exc:
+                return None, exc
+
+        resp, err = _insert_purchase(dict(purchase_payload))
+        if err and _is_missing_column(err, "normalized_quantity"):
+            fallback = dict(purchase_payload)
+            fallback.pop("normalized_quantity", None)
+            resp, err = _insert_purchase(fallback)
+        optional_purchase_fields = [
+            "conversion_factor",
+            "unit_cost_snapshot",
+            "supplier_name",
+            "payment_status",
+            "paid_at",
+            "due_date",
+            "note",
+            "receipt_url",
+            "receipt_storage_path",
+            "created_by",
+        ]
+        if err and any(_is_missing_column(err, fld) for fld in optional_purchase_fields):
+            trimmed = {k: v for k, v in purchase_payload.items() if k not in optional_purchase_fields}
+            resp, err = _insert_purchase(trimmed)
+        if err:
+            raise HTTPException(status_code=500, detail={"error": "stock_intake_create_failed", "reason": _safe_error_detail(err)})
+        rows = getattr(resp, "data", None) if resp else []
+        purchase_row = rows[0] if rows else purchase_payload
+
+        timestamp_iso = datetime.utcnow().isoformat()
+        _update_ingredient_from_purchase(
+            ctx["client"],
+            sanitized["ingredient_id"],
+            store_id_resolved,
+            new_stock=new_stock,
+            new_cost=new_cost,
+            supplier_name=sanitized.get("supplier_name"),
+            timestamp_iso=timestamp_iso,
+            ingredient_row=ingredient_row,
+        )
+
+        ingredient_updated = _get_ingredient_snapshot(ctx["client"], sanitized["ingredient_id"], store_id_resolved)
+        unit_cost_snapshot = _safe_float(purchase_row.get("unit_cost_snapshot")) or purchase_unit_cost
+
+        movement_row = _insert_stock_movement_record(
+            ctx["client"],
+            store_id_resolved,
+            sanitized["ingredient_id"],
+            normalized_quantity=normalized_quantity,
+            ingredient_unit=ingredient_updated.get("unit"),
+            purchase_id=str(purchase_row.get("id")) if purchase_row.get("id") else None,
+            unit_cost_snapshot=unit_cost_snapshot,
+            created_by=ctx.get("user_id"),
+        )
+
+        purchase_row["ingredients"] = {
+            "id": ingredient_updated.get("id"),
+            "name": ingredient_updated.get("name"),
+            "unit": ingredient_updated.get("unit"),
+        }
+        if movement_row:
+            purchase_row["movement_id"] = movement_row.get("id")
+            purchase_row["movement_type"] = movement_row.get("movement_type") or movement_row.get("type") or "in"
+
+        return StockIntakeResponse(intake=_map_stock_intake(purchase_row), ingredient=_map_ingredient(ingredient_updated))
+    except HTTPException:
+        raise
+    except Exception as exc:  # pragma: no cover - diagnostic fallback
+        logger.exception(
+            "stock_intake_create_exception",
+            extra={
+                "store_id": store_id_resolved,
+                "ingredient_id": payload.ingredient_id,
+            },
+        )
+        raise HTTPException(status_code=500, detail={"error": "stock_intake_unhandled", "reason": _safe_error_detail(exc)})
+
+
+@router.post("/stock-intakes/{intake_id}/receipt")
+async def upload_stock_intake_receipt(
+    intake_id: str,
+    authorization: Optional[str] = Header(None),
+    store_id: Optional[str] = None,
+    file: UploadFile = File(...),
+) -> StockIntakeSummary:
+    ctx = _get_ctx(authorization)
+    store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
+    _require_manager(role)
+
+    resp = (
+        ctx["client"]
+        .table("ingredient_purchases")
+        .select(_stock_intake_select_clause(include_relations=True))
+        .eq("store_id", store_id_resolved)
+        .eq("id", intake_id)
+        .limit(1)
+        .execute()
+    )
+    err = getattr(resp, "error", None)
+    if err:
+        raise HTTPException(status_code=500, detail="stock_intake_lookup_failed")
+    rows = getattr(resp, "data", None) or []
+    if not rows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="stock_intake_not_found")
+    purchase_row = rows[0]
+
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="empty_file")
+
+    mime_type = _normalize_mime_type(file.content_type or "")
+    if mime_type not in _PURCHASE_RECEIPT_ALLOWED_TYPES:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="file_type_not_allowed")
+    if len(content) > _purchase_receipt_limit_bytes():
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="file_too_large")
+
+    storage_path = _build_purchase_receipt_path(store_id_resolved, intake_id, file.filename, mime_type)
+    try:
+        upload_payment_slip(
+            settings.purchase_receipt_bucket,
+            storage_path,
+            content,
+            mime_type or "application/octet-stream",
+            error_prefix="purchase_receipt",
+        )
+    except StorageUploadError as exc:
+        logger.error(
+            "stock_intake_receipt_upload_failed purchase=%s store=%s detail=%s",
+            _short_identifier(intake_id),
+            _short_identifier(store_id_resolved),
+            _safe_error_detail(exc),
+        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
+
+    receipt_url = None
+    try:
+        signed = create_signed_slip_url(
+            settings.purchase_receipt_bucket,
+            storage_path,
+            expires_in=60,
+            error_prefix="purchase_receipt",
+        )
+        receipt_url = signed.get("signed_url")
+    except StorageUploadError:
+        receipt_url = None
+
+    _update_purchase_receipt_fields(
+        ctx["client"],
+        intake_id,
+        store_id_resolved,
+        receipt_url=receipt_url,
+        receipt_storage_path=storage_path,
+    )
+
+    updated_row = dict(purchase_row)
+    updated_row["receipt_url"] = receipt_url
+    updated_row["receipt_storage_path"] = storage_path
+    return _map_stock_intake(updated_row)
+
+
+@router.get("/stock-intakes/{intake_id}/receipt-url")
+def generate_stock_intake_receipt_url(
+    intake_id: str,
+    authorization: Optional[str] = Header(None),
+    store_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    ctx = _get_ctx(authorization)
+    store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
+    _require_manager(role)
+
+    resp = (
+        ctx["client"].table("ingredient_purchases").select("id, store_id, receipt_storage_path").eq("id", intake_id).eq("store_id", store_id_resolved).limit(1).execute()
+    )
+    err = getattr(resp, "error", None)
+    if err:
+        raise HTTPException(status_code=500, detail="stock_intake_lookup_failed")
+    rows = getattr(resp, "data", None) or []
+    if not rows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="stock_intake_not_found")
+    storage_path = rows[0].get("receipt_storage_path")
+    if not storage_path:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="receipt_not_uploaded")
+
+    try:
+        signed = create_signed_slip_url(
+            settings.purchase_receipt_bucket,
+            storage_path,
+            expires_in=60,
+            error_prefix="purchase_receipt",
+        )
+    except StorageUploadError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    return signed
 
 
 # ─── Recipes ──────────────────────────────────────────────────────────────────
