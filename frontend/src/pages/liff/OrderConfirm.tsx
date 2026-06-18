@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 
 import {
   getCustomerIdentity,
@@ -8,6 +8,7 @@ import {
   type CustomerIdentity,
 } from "@/features/store/customerIdentity";
 import { customerApi, type CustomerOrderItemOptions } from "@/services/customerApi";
+import { useLineLinkToken } from "@/components/customer/CustomerThemeLayout";
 import {
   type CartItem,
   clearCart,
@@ -73,6 +74,8 @@ function buildItemOptionsPayload(item: CartItem): CustomerOrderItemOptions | und
 
 export default function OrderConfirmPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const { lineLinkToken, clearLineLinkToken } = useLineLinkToken();
   const [identity, setIdentity] = useState<CustomerIdentity | null>(null);
   const [identityError, setIdentityError] = useState<string | null>(null);
   const [phone, setPhone] = useState("");
@@ -82,6 +85,11 @@ export default function OrderConfirmPage() {
   const [formError, setFormError] = useState<string | null>(null);
   const [cartItems] = useState<CartItem[]>(() => readCart());
   const [pdpaAccepted, setPdpaAccepted] = useState(false);
+  const queryLineLinkToken = useMemo(() => {
+    const token = searchParams.get("line_link_token");
+    return token?.trim() || null;
+  }, [searchParams]);
+  const effectiveLineLinkToken = lineLinkToken || queryLineLinkToken;
 
   useEffect(() => {
     getCustomerIdentity()
@@ -148,7 +156,7 @@ export default function OrderConfirmPage() {
         ? resolvedIdentity?.lineUserId
         : undefined;
 
-      const order = await customerApi.createOrder({
+      const orderPayload: Parameters<typeof customerApi.createOrder>[0] = {
         customer: {
           name: manualIdentity.displayName || resolvedIdentity?.displayName || "ลูกค้า LIFF",
           phone: manualIdentity.phone || phone.trim(),
@@ -157,9 +165,17 @@ export default function OrderConfirmPage() {
         items,
         pickup_time: pickupDate.toISOString(),
         note: orderNote.trim() || undefined,
-      });
+      };
+      if (effectiveLineLinkToken) {
+        orderPayload.line_link_token = effectiveLineLinkToken;
+      }
+
+      const order = await customerApi.createOrder(orderPayload);
 
       clearCart();
+      if (effectiveLineLinkToken) {
+        clearLineLinkToken();
+      }
       setLastOrderMetadata({
         orderId: order.order_id,
         orderNo: order.order_no ?? order.order_number ?? null,

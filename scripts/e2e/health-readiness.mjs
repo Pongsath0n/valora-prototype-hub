@@ -70,14 +70,8 @@ function validateLineReady(body) {
     fail("line_ready_invalid", "LINE readiness body missing", { body });
   }
 
-  if ((body.mode || "").toLowerCase() !== "mock") {
-    fail("line_mode_invalid", `Expected LINE_SEND_MODE mock, got ${body.mode}`, { mode: body.mode });
-  }
-
-  if (body.real_send_enabled !== false) {
-    fail("line_real_send_enabled", "real_send_enabled must remain false in mock mode", { real_send_enabled: body.real_send_enabled });
-  }
-
+  const mode = String(body.mode || "").toLowerCase();
+  const realSendEnabled = Boolean(body.real_send_enabled);
   const checks = body.checks || {};
   const messaging = checks.messaging_api;
   const webhook = checks.webhook;
@@ -88,9 +82,27 @@ function validateLineReady(body) {
   ensureMasked(messaging?.variables, "messaging_api.variables");
   ensureMasked(webhook?.variables, "webhook.variables");
 
-  if (!sendMode || sendMode.status !== "mock") {
-    fail("line_send_mode_status", "Send mode status must be mock", { sendMode });
+  if (!sendMode) {
+    fail("line_send_mode_missing", "send_mode check missing", { checks });
   }
+
+  const sendModeStatus = String(sendMode.status || "").toLowerCase();
+  if (mode === "live") {
+    if (sendModeStatus !== "configured") {
+      fail("line_send_mode_status", "Send mode must be configured in live mode", { sendMode });
+    }
+    if (!realSendEnabled) {
+      fail("line_real_send_enabled", "real_send_enabled should be true when LINE mode is live", { real_send_enabled: body.real_send_enabled });
+    }
+  } else {
+    if (sendModeStatus !== "mock") {
+      fail("line_send_mode_status", "Send mode should be mock when LINE mode is not live", { sendMode });
+    }
+    if (realSendEnabled) {
+      fail("line_real_send_enabled", "real_send_enabled must be false when mode is not live", { real_send_enabled: body.real_send_enabled });
+    }
+  }
+
   if (!richMenu || richMenu.status !== "manual") {
     fail("line_rich_menu_status", "Rich Menu must be marked manual", { richMenu });
   }

@@ -32,6 +32,7 @@ def build_text_message_payload(to: str, text: str) -> Dict[str, Any]:
 
 
 def is_real_line_configured(settings: Any) -> bool:
+    """Legacy helper kept for compatibility; checks LINE Messaging credentials."""
     token = str(getattr(settings, "line_channel_access_token", "") or "").strip()
     secret = str(getattr(settings, "line_channel_secret", "") or "").strip()
     return bool(token and secret)
@@ -79,7 +80,7 @@ def push_line_message(
     *,
     to: Optional[str],
     text: str,
-    mode: str = "real_line",
+    mode: str = "live",
     settings: Any = None,
 ) -> Dict[str, Any]:
     """

@@ -287,13 +287,19 @@ def health_line_ready() -> Dict[str, Any]:
         },
     }
 
-    send_mode = (settings.line_send_mode or "mock").strip() or "mock"
-    send_mode_status = "mock" if send_mode.lower() != "real" else "configured"
+    raw_send_mode = (settings.line_send_mode or "mock").strip() or "mock"
+    send_mode = raw_send_mode.lower()
+    send_mode_status = "configured" if send_mode == "live" else "mock"
+    real_send_enabled = (
+        send_mode == "live"
+        and settings.line_push_enabled
+        and bool((settings.line_channel_access_token or "").strip())
+    )
 
     line_checks = {
         "send_mode": {
             "status": send_mode_status,
-            "mode": send_mode,
+            "mode": raw_send_mode,
             "notes": "mock = ปิดการส่ง LINE push จริง (ปลอดภัยก่อน Soft Launch)",
         },
         "messaging_api": {
@@ -330,8 +336,8 @@ def health_line_ready() -> Dict[str, Any]:
 
     return {
         "status": overall_status,
-        "mode": send_mode,
-        "real_send_enabled": False,
+        "mode": raw_send_mode,
+        "real_send_enabled": real_send_enabled,
         "checks": line_checks,
         "groups": groups,
     }

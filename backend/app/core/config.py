@@ -24,6 +24,12 @@ class Settings(BaseSettings):
     line_oa_basic_id: str = Field(default="", alias="LINE_OA_BASIC_ID")
     line_oa_channel_id: str = Field(default="", alias="LINE_OA_CHANNEL_ID")
     line_send_mode: str = Field(default="mock", alias="LINE_SEND_MODE")
+    line_webhook_enabled: bool = Field(default=False, alias="LINE_WEBHOOK_ENABLED")
+    line_push_enabled: bool = Field(default=False, alias="LINE_PUSH_ENABLED")
+    line_order_url: str = Field(default="", alias="LINE_ORDER_URL")
+    line_status_url: str = Field(default="", alias="LINE_STATUS_URL")
+    line_link_token_ttl_minutes: int = Field(default=30, alias="LINE_LINK_TOKEN_TTL_MINUTES")
+    line_store_id: str = Field(default="", alias="LINE_STORE_ID")
 
     payment_instructions_enabled: bool = Field(default=True, alias="PAYMENT_INSTRUCTIONS_ENABLED")
     payment_method_label: str = Field(default="โอนผ่านบัญชีธนาคาร", alias="PAYMENT_METHOD_LABEL")

@@ -15,6 +15,7 @@ from app.core.config import settings
 from app.core.supabase import SupabaseConfigurationError, get_supabase_admin_client
 from app.services.cost_engine import build_order_item_record, mask_option_costs, prepare_order_item_snapshot
 from app.services.order_item_columns import order_items_supports_store_scope, prune_order_item_columns
+from app.services.line_service import mark_line_link_token_used, resolve_line_link_token
 from app.services.order_totals import recalculate_order_totals
 from app.services.storage import StorageUploadError, upload_payment_slip as storage_upload_payment_slip
 from app.services.order_numbers import generate_order_number
@@ -42,6 +43,7 @@ class CustomerOrderCreatePayload(BaseModel):
     pickup_time: str
     note: Optional[str] = None
     store_id: Optional[str] = None
+    line_link_token: Optional[str] = None
 
 
 class CustomerOrderLookupPayload(BaseModel):
@@ -325,6 +327,109 @@ def _find_or_create_customer(client: Client, store_id: str, payload: CustomerPay
             continue
         logger.warning("customer_create_failed: %s", getattr(err, "message", str(err)))
         return None
+
+
+def _update_customer_contact_fields(client: Client, customer_id: str, *, name: Optional[str], phone: Optional[str]) -> None:
+    updates: Dict[str, Any] = {}
+    if name:
+        updates["display_name"] = name
+    if phone:
+        updates["phone"] = phone
+    if not updates:
+        return
+
+    while updates:
+        try:
+            resp = client.table("customers").update(updates).eq("id", customer_id).execute()
+            if getattr(resp, "error", None):
+                raise resp.error
+            return
+        except Exception as exc:
+            missing = _extract_missing_column(exc)
+            if missing and missing in updates:
+                updates.pop(missing, None)
+                continue
+            logger.debug("customer_contact_update_failed id=%s detail=%s", customer_id, getattr(exc, "message", str(exc)))
+            return
+
+
+def _ensure_customer_from_line_token(
+    client: Client,
+    store_id: str,
+    token_row: Dict[str, Any],
+    payload: CustomerPayload,
+) -> Optional[str]:
+    line_user_id = str(token_row.get("line_user_id") or "").strip()
+    if not line_user_id:
+        return None
+    existing_customer_id = str(token_row.get("customer_id") or "").strip() or None
+    display_name = str(payload.name or "").strip() or None
+    normalized_phone = _normalize_phone(payload.phone)
+
+    if existing_customer_id:
+        _update_customer_contact_fields(client, existing_customer_id, name=display_name, phone=normalized_phone)
+        return existing_customer_id
+
+    lookup = (
+        client.table("customers")
+        .select("id")
+        .eq("store_id", store_id)
+        .eq("line_user_id", line_user_id)
+        .limit(1)
+        .execute()
+    )
+    if getattr(lookup, "error", None):
+        logger.warning("customer_line_lookup_failed store=%s detail=%s", store_id, getattr(lookup.error, "message", lookup.error))
+    else:
+        rows = getattr(lookup, "data", None) or []
+        if rows:
+            customer_id = rows[0].get("id")
+            if customer_id:
+                _update_customer_contact_fields(client, customer_id, name=display_name, phone=normalized_phone)
+                return customer_id
+
+    create_data: Dict[str, Any] = {
+        "store_id": store_id,
+        "line_user_id": line_user_id,
+    }
+    if display_name:
+        create_data["display_name"] = display_name
+    if normalized_phone:
+        create_data["phone"] = normalized_phone
+
+    attempts = 0
+    while attempts < 5:
+        attempts += 1
+        try:
+            resp = client.table("customers").insert(create_data).execute()
+            err = getattr(resp, "error", None)
+        except Exception as exc:
+            resp = None
+            err = exc
+        if not err:
+            rows = getattr(resp, "data", None) or []
+            customer_id = rows[0].get("id") if rows else None
+            if customer_id:
+                return customer_id
+            break
+        if _is_unique_violation(err, "line_user_id"):
+            lookup = (
+                client.table("customers").select("id").eq("store_id", store_id).eq("line_user_id", line_user_id).limit(1).execute()
+            )
+            rows = getattr(lookup, "data", None) or []
+            if rows:
+                customer_id = rows[0].get("id")
+                if customer_id:
+                    _update_customer_contact_fields(client, customer_id, name=display_name, phone=normalized_phone)
+                    return customer_id
+            continue
+        missing = _extract_missing_column(err)
+        if missing and missing in create_data:
+            create_data.pop(missing, None)
+            continue
+        logger.warning("customer_line_create_failed store=%s detail=%s", store_id, getattr(err, "message", str(err)))
+        break
+    return None
 
 
 def _insert_order_items(client: Client, store_id: str, order_id: str, rows: List[Dict[str, Any]]) -> None:
@@ -1090,12 +1195,25 @@ def create_customer_order(payload: CustomerOrderCreatePayload) -> Dict[str, Any]
     total_cost = sum(float(snapshot.get("total_cost") or 0) for snapshot in item_snapshots)
     gross_profit = total_amount - total_cost
 
-    customer_id: Optional[str] = None
-    try:
-        customer_id = _find_or_create_customer(client, resolved_store_id, payload.customer)
-    except HTTPException as exc:
-        logger.warning("customer_upsert_skipped: %s", exc.detail)
-        customer_id = None
+    raw_line_link_token = str(payload.line_link_token or "").strip()
+    line_token_row: Optional[Dict[str, Any]] = None
+    line_token_customer_id: Optional[str] = None
+    if raw_line_link_token:
+        try:
+            line_token_row = resolve_line_link_token(client, raw_token=raw_line_link_token, store_id=resolved_store_id)
+        except Exception as exc:
+            logger.warning("line_link_token_resolve_failed store=%s detail=%s", resolved_store_id, exc)
+            line_token_row = None
+        if line_token_row:
+            line_token_customer_id = _ensure_customer_from_line_token(client, resolved_store_id, line_token_row, payload.customer)
+
+    customer_id: Optional[str] = line_token_customer_id
+    if not customer_id:
+        try:
+            customer_id = _find_or_create_customer(client, resolved_store_id, payload.customer)
+        except HTTPException as exc:
+            logger.warning("customer_upsert_skipped: %s", exc.detail)
+            customer_id = None
 
     order_data: Dict[str, Any] = {
         "store_id": resolved_store_id,
@@ -1172,6 +1290,12 @@ def create_customer_order(payload: CustomerOrderCreatePayload) -> Dict[str, Any]
         )
     except Exception as exc:  # pragma: no cover - non-critical
         logger.warning("customer_initial_order_log_failed: %s", getattr(exc, "message", str(exc)))
+
+    if line_token_customer_id and line_token_row:
+        try:
+            mark_line_link_token_used(client, line_token_row.get("id"))
+        except Exception as exc:  # pragma: no cover - best effort
+            logger.warning("line_link_token_mark_used_failed token=%s detail=%s", line_token_row.get("id"), exc)
 
     return {
         "order_id": order_id,

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { Coffee, ShoppingBag } from "lucide-react";
 
@@ -23,6 +23,17 @@ function readCartSummary(): { count: number; total: number } {
 /** Menu landing routes use a wider header to match the kiosk-style grid. */
 const WIDE_HEADER_ROUTES = new Set(["/order", "/liff/menu"]);
 
+type LineLinkTokenContextValue = {
+  lineLinkToken: string | null;
+  clearLineLinkToken: () => void;
+};
+
+const LineLinkTokenContext = createContext<LineLinkTokenContextValue | undefined>(undefined);
+
+export function useLineLinkToken(): LineLinkTokenContextValue {
+  return useContext(LineLinkTokenContext) ?? { lineLinkToken: null, clearLineLinkToken: () => undefined };
+}
+
 type CustomerThemeLayoutProps = {
   children: React.ReactNode;
   /** Show the cart summary pill in the header. Defaults to true. */
@@ -43,9 +54,14 @@ export default function CustomerThemeLayout({
   showCart = true,
   tagline = "สั่งกาแฟสดง่าย ๆ ไม่ต้องล็อกอิน",
 }: CustomerThemeLayoutProps) {
-  const { pathname } = useLocation();
+  const { pathname, search } = useLocation();
   const headerWidthClass = WIDE_HEADER_ROUTES.has(pathname) ? "max-w-[1120px]" : "max-w-md";
   const [summary, setSummary] = useState<{ count: number; total: number }>(() => readCartSummary());
+  const [lineLinkToken, setLineLinkToken] = useState<string | null>(() => {
+    const params = new URLSearchParams(search);
+    const initial = params.get("line_link_token");
+    return initial?.trim() || null;
+  });
 
   useEffect(() => {
     function refresh() {
@@ -60,9 +76,26 @@ export default function CustomerThemeLayout({
     };
   }, []);
 
+  useEffect(() => {
+    const params = new URLSearchParams(search);
+    const tokenParam = params.get("line_link_token");
+    if (tokenParam) {
+      setLineLinkToken(tokenParam.trim());
+    }
+  }, [search]);
+
+  const tokenContextValue = useMemo<LineLinkTokenContextValue>(
+    () => ({
+      lineLinkToken,
+      clearLineLinkToken: () => setLineLinkToken(null),
+    }),
+    [lineLinkToken],
+  );
+
   return (
-    <div className="brewway-customer bw-surface text-foreground">
-      <header className="sticky top-0 z-40 border-b border-border/70 bg-background/85 backdrop-blur-md">
+    <LineLinkTokenContext.Provider value={tokenContextValue}>
+      <div className="brewway-customer bw-surface text-foreground">
+        <header className="sticky top-0 z-40 border-b border-border/70 bg-background/85 backdrop-blur-md">
         <div className={`mx-auto flex ${headerWidthClass} items-center justify-between gap-3 px-4 py-3 sm:px-6`}>
           <Link to="/order" className="flex items-center gap-2.5">
             <span className="flex h-10 w-10 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-sm">
@@ -95,6 +128,7 @@ export default function CustomerThemeLayout({
       </header>
 
       <main className="pb-12">{children}</main>
-    </div>
+      </div>
+    </LineLinkTokenContext.Provider>
   );
 }

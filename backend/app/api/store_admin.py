@@ -5364,26 +5364,36 @@ def _get_order_row(client: Client, order_id: str, store_id: str) -> Dict[str, An
     return row
 
 
-def _get_order_customer_context(client: Client, store_id: str, order_id: str) -> Dict[str, Any]:
-    resp = (
-        client.table("orders")
-        .select("id, customer_id, customers(line_user_id)")
-        .eq("id", order_id)
-        .eq("store_id", store_id)
-        .limit(1)
-        .execute()
-    )
-    if getattr(resp, "error", None):
-        return {"customer_id": None, "line_user_id": None}
-    rows = getattr(resp, "data", None) or []
-    if not rows:
-        return {"customer_id": None, "line_user_id": None}
-    row = rows[0]
-    customer_rel = row.get("customers") if isinstance(row, dict) else None
-    return {
-        "customer_id": row.get("customer_id"),
-        "line_user_id": customer_rel.get("line_user_id") if isinstance(customer_rel, dict) else None,
-    }
+_NOTIFY_ORDER_STATUSES = {
+    "waiting_payment_review",
+    "accepted",
+    "preparing",
+    "ready",
+    "completed",
+    "cancelled",
+}
+
+
+def _notify_order_status_change(
+    client: Client,
+    order_id: str,
+    status_value: Optional[str],
+    extra_payload: Optional[Dict[str, Any]] = None,
+) -> None:
+    normalized = normalize_order_status(status_value)
+    if normalized not in _NOTIFY_ORDER_STATUSES:
+        return
+    payload = dict(extra_payload or {})
+    payload["status"] = normalized
+    try:
+        send_line_notification(client, order_id, None, None, normalized, payload)
+    except Exception as exc:  # pragma: no cover - best effort logging
+        logger.warning(
+            "order_status_notification_failed order=%s status=%s detail=%s",
+            order_id,
+            normalized,
+            _safe_error_detail(exc),
+        )
 
 
 @router.get("/orders")
@@ -5642,21 +5652,12 @@ def update_order(order_id: str, payload: OrderUpdate, authorization: Optional[st
             ctx.get("user_id"),
             data.get("note"),
         )
-        if str(new_status) == "ready":
-            mock_message = "เครื่องดื่มของคุณพร้อมแล้ว สามารถมารับได้เลยครับ"
-            customer_ctx = _get_order_customer_context(ctx["client"], store_id_resolved, order_id)
-            # TODO(LINE-Identity-Binding): After LIFF getProfile binds line_user_id
-            # to the order/customer, enable live push only for verified orders.
-            notification_result = send_line_notification(
-                ctx["client"],
-                order_id,
-                customer_ctx.get("customer_id"),
-                customer_ctx.get("line_user_id"),
-                "order_ready",
-                {"order_id": order_id, "message": mock_message},
-            )
-            if notification_result.get("send_status") != "skipped":
-                response["mock_notification"] = mock_message
+        _notify_order_status_change(
+            ctx["client"],
+            order_id,
+            str(new_status),
+            {"note": data.get("note")},
+        )
 
     return response
 
@@ -5789,24 +5790,14 @@ def update_order_status(order_id: str, payload: OrderStatusUpdate, authorization
         status_note,
     )
 
-    response: Dict[str, Any] = {"id": order_id, "status": next_status_value}
-    if next_status_value == "ready":
-        mock_message = "เครื่องดื่มของคุณพร้อมแล้ว สามารถมารับได้เลยครับ"
-        customer_ctx = _get_order_customer_context(ctx["client"], store_id_resolved, order_id)
-        # TODO(LINE-Identity-Binding): After LIFF getProfile binds line_user_id
-        # to the order/customer, enable live push only for verified orders.
-        notification_result = send_line_notification(
-            ctx["client"],
-            order_id,
-            customer_ctx.get("customer_id"),
-            customer_ctx.get("line_user_id"),
-            "order_ready",
-            {"order_id": order_id, "message": mock_message},
-        )
-        if notification_result.get("send_status") != "skipped":
-            response["mock_notification"] = mock_message
+    _notify_order_status_change(
+        ctx["client"],
+        order_id,
+        next_status_value,
+        {"note": status_note},
+    )
 
-    return response
+    return {"id": order_id, "status": next_status_value}
 
 
 @router.post("/orders/{order_id}/cancel")
@@ -5835,6 +5826,12 @@ def cancel_order(order_id: str, payload: OrderCancelPayload, authorization: Opti
         "cancelled",
         ctx.get("user_id"),
         (payload.reason or "").strip() or None,
+    )
+    _notify_order_status_change(
+        ctx["client"],
+        order_id,
+        "cancelled",
+        {"cancelled_reason": (payload.reason or "").strip() or None},
     )
     return {"id": order_id, "status": "cancelled"}
 
@@ -6227,6 +6224,8 @@ def _sync_order_payment_status(
             changed_by,
             note,
         )
+        if normalize_order_status(next_order_status) == "waiting_payment_review":
+            _notify_order_status_change(client, order_id, next_order_status, {"note": note})
 
 
 @router.get("/payments/{payment_id}/slip-preview")
@@ -6636,28 +6635,15 @@ def approve_payment(payment_id: str, payload: Optional[PaymentApprovePayload] = 
         note or None,
     )
 
-    mock_message = "ตรวจสอบการชำระเงินสำเร็จแล้ว กำลังเตรียมเครื่องดื่มให้คุณ"
-    customer_ctx = _get_order_customer_context(ctx["client"], store_id_resolved, order_id)
-    # TODO(LINE-Identity-Binding): After LIFF getProfile binds line_user_id
-    # to the order/customer, enable live push only for verified orders.
-    notification_result = send_line_notification(
+    send_line_notification(
         ctx["client"],
         order_id,
-        customer_ctx.get("customer_id"),
-        customer_ctx.get("line_user_id"),
+        None,
+        None,
         "payment_approved",
-        {"payment_id": payment_id, "order_id": order_id, "message": mock_message},
+        {"payment_id": payment_id, "note": note},
     )
-    if notification_result.get("send_status") != "skipped":
-        return {
-            "id": payment_id,
-            "status": "paid",
-            "mock_notification": mock_message,
-        }
-    return {
-        "id": payment_id,
-        "status": "paid",
-    }
+    return {"id": payment_id, "status": "paid"}
 
 
 @router.post("/payments/{payment_id}/reject")
@@ -6741,6 +6727,15 @@ def reject_payment(payment_id: str, payload: PaymentRejectPayload, authorization
         )
     else:
         logger.info("payment_reject_log_written payment=%s", payment_short)
+
+    send_line_notification(
+        ctx["client"],
+        order_id,
+        None,
+        None,
+        "payment_rejected",
+        {"reject_reason": (payload.reason or "").strip() or None},
+    )
 
     return {
         "id": payment_id,

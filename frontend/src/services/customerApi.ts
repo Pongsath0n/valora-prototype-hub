@@ -107,6 +107,7 @@ type CustomerOrderCreatePayload = {
   items: CustomerOrderItemPayload[];
   pickup_time: string;
   note?: string;
+  line_link_token?: string;
 };
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
