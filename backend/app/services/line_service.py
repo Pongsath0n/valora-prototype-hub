@@ -6,7 +6,9 @@ import hmac
 import json
 import logging
 import secrets
+import re
 import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
@@ -54,6 +56,45 @@ def _extract_missing_column(error: Any) -> Optional[str]:
         if len(parts) >= 3:
             return parts[1]
     return None
+
+
+_PLACEHOLDER_NAME_VALUES = {
+    "mock customer",
+    "test customer",
+    "customer test",
+    "customer liff",
+    "liff customer",
+    "ลูกค้า liff",
+}
+
+
+def _normalize_display_name(value: Optional[str]) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    return re.sub(r"\s+", " ", text)
+
+
+def sanitize_line_display_name(value: Optional[str]) -> Optional[str]:
+    normalized = _normalize_display_name(value)
+    if not normalized:
+        return None
+    lowered = normalized.lower()
+    if lowered in _PLACEHOLDER_NAME_VALUES:
+        return None
+    if lowered.startswith("test ") or lowered.startswith("mock "):
+        return None
+    return normalized
+
+
+def should_overwrite_display_name(current: Optional[str], candidate: Optional[str]) -> bool:
+    sanitized_candidate = sanitize_line_display_name(candidate)
+    if not sanitized_candidate:
+        return False
+    sanitized_current = sanitize_line_display_name(current)
+    if not sanitized_current:
+        return True
+    return sanitized_candidate != sanitized_current
 
 
 def create_line_link_token(
@@ -226,6 +267,56 @@ def _call_line_api(path: str, payload: Dict[str, Any]) -> Dict[str, Any]:
             "status": None,
             "error": _safe_error_message(exc),
         }
+
+
+def fetch_line_profile(line_user_id: str) -> Dict[str, Any]:
+    user_id = str(line_user_id or "").strip()
+    if not user_id:
+        return {"attempted": False, "reason": "missing_line_user_id", "display_name": None}
+    access_token = (settings.line_channel_access_token or "").strip()
+    if not access_token:
+        return {"attempted": False, "reason": "missing_access_token", "display_name": None}
+
+    encoded_user_id = urllib.parse.quote(user_id, safe="")
+    req = urllib.request.Request(
+        f"https://api.line.me/v2/bot/profile/{encoded_user_id}",
+        headers={"Authorization": f"Bearer {access_token}"},
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:  # nosec: B310 (trusted LINE endpoint)
+            body = resp.read().decode("utf-8")
+            try:
+                profile_data = json.loads(body) if body else {}
+            except json.JSONDecodeError:
+                profile_data = {}
+            return {
+                "attempted": True,
+                "status": resp.getcode(),
+                "display_name": sanitize_line_display_name(profile_data.get("displayName")),
+            }
+    except urllib.error.HTTPError as exc:
+        return {
+            "attempted": True,
+            "status": exc.code,
+            "display_name": None,
+            "error": _safe_error_message(exc),
+        }
+    except urllib.error.URLError as exc:
+        return {
+            "attempted": True,
+            "status": None,
+            "display_name": None,
+            "error": _safe_error_message(exc),
+        }
+
+
+def fetch_line_display_name(line_user_id: str) -> Dict[str, Any]:
+    profile_result = fetch_line_profile(line_user_id)
+    return {
+        "display_name": profile_result.get("display_name"),
+        "result": profile_result,
+    }
 
 
 def send_line_push(line_user_id: str, message_payload: Dict[str, Any]) -> Dict[str, Any]:

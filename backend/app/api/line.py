@@ -8,7 +8,14 @@ from supabase import Client
 
 from app.core.config import settings
 from app.core.supabase import SupabaseConfigurationError, get_supabase_admin_client
-from app.services.line_service import create_line_link_token, send_line_reply, verify_line_signature
+from app.services.line_service import (
+    create_line_link_token,
+    fetch_line_display_name,
+    sanitize_line_display_name,
+    should_overwrite_display_name,
+    send_line_reply,
+    verify_line_signature,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -72,11 +79,13 @@ def _upsert_line_customer(client: Client, store_id: str, line_user_id: str, disp
         )
         return None
     rows = getattr(resp, "data", None) or []
+    sanitized_name = sanitize_line_display_name(display_name)
     if rows:
         customer_id = rows[0].get("id")
-        if display_name and not rows[0].get("display_name"):
+        current_display = rows[0].get("display_name")
+        if sanitized_name and should_overwrite_display_name(current_display, sanitized_name):
             try:
-                client.table("customers").update({"display_name": display_name}).eq("id", customer_id).execute()
+                client.table("customers").update({"display_name": sanitized_name}).eq("id", customer_id).execute()
             except Exception as exc:  # pragma: no cover - best effort update
                 logger.debug("line_customer_display_update_failed id=%s detail=%s", customer_id, exc)
         return customer_id
@@ -85,8 +94,8 @@ def _upsert_line_customer(client: Client, store_id: str, line_user_id: str, disp
         "store_id": store_id,
         "line_user_id": line_user_id,
     }
-    if display_name:
-        insert_payload["display_name"] = display_name
+    if sanitized_name:
+        insert_payload["display_name"] = sanitized_name
     try:
         insert_resp = client.table("customers").insert(insert_payload).execute()
     except Exception as exc:
@@ -118,8 +127,19 @@ def _handle_binding_event(
     if not line_user_id:
         return {"handled": False, "reason": "missing_user_id"}
 
-    display_name = (source.get("displayName") or "").strip() or None
-    customer_id = _upsert_line_customer(client, store_id, line_user_id, display_name)
+    event_display_name = sanitize_line_display_name(source.get("displayName"))
+    profile_info = fetch_line_display_name(line_user_id)
+    profile_result = profile_info.get("result") or {}
+    profile_display_name = profile_info.get("display_name")
+    if profile_result.get("attempted") and not profile_display_name:
+        logger.debug(
+            "line_profile_fetch_skipped status=%s reason=%s",
+            profile_result.get("status"),
+            profile_result.get("reason") or profile_result.get("error"),
+        )
+
+    resolved_display_name = profile_display_name or event_display_name
+    customer_id = _upsert_line_customer(client, store_id, line_user_id, resolved_display_name)
     token_row = create_line_link_token(
         client,
         store_id=store_id,

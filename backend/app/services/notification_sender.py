@@ -8,6 +8,13 @@ from app.services.line_service import log_line_notification, send_line_push
 
 logger = logging.getLogger(__name__)
 
+_ALLOWED_MESSAGE_TYPES = {
+    "payment_approved",
+    "ready",
+    "payment_rejected",
+    "cancelled",
+}
+
 
 def mask_line_user_id(line_user_id: Optional[str]) -> Optional[str]:
     if not line_user_id:
@@ -54,14 +61,56 @@ _STATUS_TEMPLATES: Dict[str, str] = {
     "waiting_payment_review": "ร้านได้รับหลักฐานการชำระเงินแล้ว กำลังตรวจสอบ",
     "accepted": "ร้านรับออเดอร์แล้ว กำลังเตรียมเครื่องดื่มให้คุณ",
     "preparing": "ร้านกำลังจัดเตรียมเครื่องดื่มของคุณ",
-    "ready": "เครื่องดื่มของคุณพร้อมรับแล้ว",
+    "ready": "เครื่องดื่มของคุณพร้อมรับแล้ว\n\nสามารถมารับที่ร้านได้เลย",
     "completed": "ออเดอร์เสร็จเรียบร้อย ขอบคุณที่อุดหนุน",
-    "cancelled": "ออเดอร์ถูกยกเลิก หากมีข้อสงสัยติดต่อร้านได้เลย",
-    "payment_rejected": "หลักฐานการชำระเงินไม่ผ่าน กรุณาตรวจสอบยอดและส่งใหม่",
-    "payment_approved": "ร้านยืนยันการชำระเงินแล้ว กำลังเตรียมเครื่องดื่มให้คุณ",
+    "cancelled": "ออเดอร์นี้ถูกยกเลิกแล้ว\n\nหากต้องการสอบถามเพิ่มเติม สามารถติดต่อร้านผ่านช่องทางนี้ได้เลย",
+    "payment_rejected": "สลิปการชำระเงินยังไม่ผ่านการตรวจสอบ\n\nกรุณาตรวจสอบข้อมูลการชำระเงินอีกครั้ง หรือติดต่อร้านเพื่อให้ทีมงานช่วยตรวจสอบ",
+    "payment_approved": "ร้านได้รับการชำระเงินเรียบร้อยแล้ว\n\nกรุณารอสักครู่ ทางร้านกำลังจัดคิวและเตรียมเครื่องดื่มให้คุณ",
 }
 
-_AMOUNT_STATUS_TYPES = {"accepted", "preparing", "ready", "completed", "payment_approved"}
+_AMOUNT_STATUS_TYPES = {"waiting_payment_review", "accepted", "preparing"}
+
+
+def _normalize_message_type(message_type: Optional[str]) -> str:
+    return str(message_type or "").strip().lower()
+
+
+def _should_send_notification(message_type: str) -> bool:
+    return message_type in _ALLOWED_MESSAGE_TYPES
+
+
+def _has_success_notification(client: Client, order_id: str, message_type: str) -> bool:
+    try:
+        resp = (
+            client.table("line_notification_logs")
+            .select("id")
+            .eq("order_id", order_id)
+            .eq("message_type", message_type)
+            .eq("send_status", "success")
+            .limit(1)
+            .execute()
+        )
+    except Exception as exc:
+        logger.debug(
+            "line_notification_dedupe_check_failed order=%s type=%s detail=%s",
+            order_id,
+            message_type,
+            _safe_error_message(exc),
+        )
+        return False
+    rows = getattr(resp, "data", None) or []
+    return bool(rows)
+
+
+def _build_skip_result(message_type: str, reason: str, notification_message: Optional[str] = None) -> Dict[str, Any]:
+    return {
+        "mode": "mock",
+        "send_status": "skipped",
+        "message_type": message_type,
+        "line_user_id_masked": None,
+        "notification_message": notification_message,
+        "reason": reason,
+    }
 
 
 def _load_order_notification_context(client: Client, order_id: str) -> Dict[str, Any]:
@@ -97,8 +146,6 @@ def _build_message_text(message_type: str, ctx: Dict[str, Any], payload: Dict[st
         lines.append(f"ออเดอร์ {order_no}")
     lines.append(base_text)
 
-    if message_type == "payment_rejected" and payload.get("reject_reason"):
-        lines.append(f"เหตุผล: {payload['reject_reason']}")
     if message_type == "cancelled" and payload.get("cancelled_reason"):
         lines.append(f"เหตุผล: {payload['cancelled_reason']}")
 
@@ -142,11 +189,34 @@ def send_line_notification(
     message_type: str,
     message_payload: Dict[str, Any],
 ) -> Dict[str, Any]:
+    normalized_message_type = _normalize_message_type(message_type)
+    payload: Dict[str, Any] = dict(message_payload or {})
+    force_send = bool(payload.pop("force_send", False))
+
+    if not normalized_message_type:
+        logger.debug("line notification skipped: unknown message type order=%s", order_id)
+        return _build_skip_result("", "invalid_message_type")
+
+    if not _should_send_notification(normalized_message_type):
+        logger.debug(
+            "line notification skipped by policy order=%s type=%s",
+            order_id,
+            normalized_message_type,
+        )
+        return _build_skip_result(normalized_message_type, "policy_blocked")
+
+    if not force_send and _has_success_notification(client, order_id, normalized_message_type):
+        logger.debug(
+            "line notification deduped order=%s type=%s",
+            order_id,
+            normalized_message_type,
+        )
+        return _build_skip_result(normalized_message_type, "duplicate_suppressed")
+
     order_ctx = _load_order_notification_context(client, order_id)
     resolved_customer_id = customer_id or order_ctx.get("customer_id")
     effective_line_uid = str(line_user_id or order_ctx.get("line_user_id") or "").strip() or None
-    payload: Dict[str, Any] = dict(message_payload or {})
-    message_text, status_link = _build_message_text(message_type, order_ctx, payload)
+    message_text, status_link = _build_message_text(normalized_message_type, order_ctx, payload)
     payload.update(
         {
             "message_text": message_text,
@@ -156,13 +226,17 @@ def send_line_notification(
     )
 
     if not effective_line_uid:
-        logger.warning("line notification skipped: no line identity order=%s type=%s", order_id, message_type)
+        logger.warning(
+            "line notification skipped: no line identity order=%s type=%s",
+            order_id,
+            normalized_message_type,
+        )
         _record_notification(
             client,
             order_id=order_id,
             customer_id=resolved_customer_id,
             line_user_id=None,
-            message_type=message_type,
+            message_type=normalized_message_type,
             payload=payload,
             send_status="skipped",
             error_message="no_line_identity",
@@ -170,7 +244,7 @@ def send_line_notification(
         return {
             "mode": "mock",
             "send_status": "skipped",
-            "message_type": message_type,
+            "message_type": normalized_message_type,
             "line_user_id_masked": None,
             "notification_message": message_text,
             "reason": "no_line_identity",
@@ -202,7 +276,7 @@ def send_line_notification(
         order_id=order_id,
         customer_id=resolved_customer_id,
         line_user_id=effective_line_uid,
-        message_type=message_type,
+        message_type=normalized_message_type,
         payload=payload,
         send_status=send_status,
         error_message=error_message,
@@ -211,7 +285,7 @@ def send_line_notification(
     return {
         "mode": "live" if attempted and send_status == "success" else "mock",
         "send_status": send_status,
-        "message_type": message_type,
+        "message_type": normalized_message_type,
         "line_user_id_masked": mask_line_user_id(effective_line_uid),
         "notification_message": message_text,
         "reason": error_reason,

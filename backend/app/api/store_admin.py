@@ -5365,11 +5365,7 @@ def _get_order_row(client: Client, order_id: str, store_id: str) -> Dict[str, An
 
 
 _NOTIFY_ORDER_STATUSES = {
-    "waiting_payment_review",
-    "accepted",
-    "preparing",
     "ready",
-    "completed",
     "cancelled",
 }
 

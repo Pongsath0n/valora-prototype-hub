@@ -39,18 +39,21 @@ class LineNotificationTests(unittest.TestCase):
         client.table.return_value = table
         return client
 
+    @patch("app.services.notification_sender._has_success_notification", return_value=False)
     @patch("app.services.notification_sender.log_line_notification")
     @patch("app.services.notification_sender.send_line_push")
-    def test_send_line_notification_skips_without_identity(self, mock_send_push, mock_log) -> None:
+    def test_send_line_notification_skips_without_identity(self, mock_send_push, mock_log, mock_dedupe) -> None:
         client = self._build_client({"order_no": "ORD-001", "public_token": "tok", "customer_id": "cust"})
         result = send_line_notification(client, "order-id", None, None, "ready", {})
+        mock_dedupe.assert_called_once_with(client, "order-id", "ready")
         mock_send_push.assert_not_called()
         mock_log.assert_called_once()
         self.assertEqual(result["send_status"], "skipped")
 
+    @patch("app.services.notification_sender._has_success_notification", return_value=False)
     @patch("app.services.notification_sender.log_line_notification")
     @patch("app.services.notification_sender.send_line_push")
-    def test_send_line_notification_success(self, mock_send_push, mock_log) -> None:
+    def test_send_line_notification_success(self, mock_send_push, mock_log, mock_dedupe) -> None:
         mock_send_push.return_value = {"attempted": True, "status": 200}
         client = self._build_client(
             {
@@ -62,6 +65,121 @@ class LineNotificationTests(unittest.TestCase):
             }
         )
         result = send_line_notification(client, "order-id", None, None, "ready", {})
+        mock_dedupe.assert_called_once_with(client, "order-id", "ready")
         mock_send_push.assert_called_once()
         mock_log.assert_called_once()
         self.assertEqual(result["send_status"], "success")
+
+    @patch("app.services.notification_sender._has_success_notification", return_value=False)
+    @patch("app.services.notification_sender.log_line_notification")
+    @patch("app.services.notification_sender.send_line_push")
+    def test_policy_blocks_non_customer_value_statuses(self, mock_send_push, mock_log, mock_dedupe) -> None:
+        client = self._build_client({"order_no": "ORD-003", "public_token": "tok"})
+        for status in ("accepted", "preparing", "completed"):
+            with self.subTest(status=status):
+                send_line_notification(client, "order-id", None, None, status, {})
+        mock_send_push.assert_not_called()
+        mock_log.assert_not_called()
+        mock_dedupe.assert_not_called()
+
+    @patch("app.services.notification_sender._has_success_notification", return_value=True)
+    @patch("app.services.notification_sender.log_line_notification")
+    @patch("app.services.notification_sender.send_line_push")
+    def test_duplicate_status_suppressed(self, mock_send_push, mock_log, mock_dedupe) -> None:
+        client = self._build_client({"order_no": "ORD-004", "public_token": "tok", "customer_id": "cust"})
+        result = send_line_notification(client, "order-id", None, None, "ready", {})
+        mock_dedupe.assert_called_once_with(client, "order-id", "ready")
+        mock_send_push.assert_not_called()
+        mock_log.assert_not_called()
+        self.assertEqual(result["reason"], "duplicate_suppressed")
+
+    @patch("app.services.notification_sender._has_success_notification", return_value=False)
+    @patch("app.services.notification_sender.log_line_notification")
+    @patch("app.services.notification_sender.send_line_push")
+    def test_payment_approved_message_has_no_amount(self, mock_send_push, mock_log, _) -> None:
+        mock_send_push.return_value = {"attempted": True, "status": 200}
+        client = self._build_client(
+            {
+                "order_no": "ORD-005",
+                "public_token": "tok",
+                "customer_id": "cust",
+                "customers": {"line_user_id": "Uxxxxx"},
+                "total_amount": 175.0,
+            }
+        )
+        result = send_line_notification(client, "order-id", None, None, "payment_approved", {})
+        self.assertNotIn("ยอดรวม", result["notification_message"])
+        self.assertIn("ร้านได้รับการชำระเงินเรียบร้อยแล้ว", result["notification_message"])
+        mock_send_push.assert_called_once()
+        mock_log.assert_called_once()
+
+    @patch("app.services.notification_sender._has_success_notification", return_value=False)
+    @patch("app.services.notification_sender.log_line_notification")
+    @patch("app.services.notification_sender.send_line_push")
+    def test_ready_message_has_no_amount(self, mock_send_push, mock_log, _) -> None:
+        mock_send_push.return_value = {"attempted": True, "status": 200}
+        client = self._build_client(
+            {
+                "order_no": "ORD-006",
+                "public_token": "tok",
+                "customer_id": "cust",
+                "customers": {"line_user_id": "Uxxxxx"},
+                "total_amount": 220.0,
+            }
+        )
+        result = send_line_notification(client, "order-id", None, None, "ready", {})
+        self.assertNotIn("ยอดรวม", result["notification_message"])
+        self.assertIn("เครื่องดื่มของคุณพร้อมรับแล้ว", result["notification_message"])
+        mock_send_push.assert_called_once()
+        mock_log.assert_called_once()
+
+    @patch("app.services.notification_sender._has_success_notification", return_value=False)
+    @patch("app.services.notification_sender.log_line_notification")
+    @patch("app.services.notification_sender.send_line_push")
+    def test_payment_rejected_omits_internal_reason(self, mock_send_push, mock_log, _) -> None:
+        mock_send_push.return_value = {"attempted": True, "status": 200}
+        client = self._build_client(
+            {
+                "order_no": "ORD-007",
+                "public_token": "tok",
+                "customer_id": "cust",
+                "customers": {"line_user_id": "Uxxxxx"},
+            }
+        )
+        result = send_line_notification(
+            client,
+            "order-id",
+            None,
+            None,
+            "payment_rejected",
+            {"reject_reason": "internal note"},
+        )
+        self.assertNotIn("internal note", result["notification_message"])
+        self.assertIn("สลิปการชำระเงินยังไม่ผ่านการตรวจสอบ", result["notification_message"])
+        mock_send_push.assert_called_once()
+        mock_log.assert_called_once()
+
+    @patch("app.services.notification_sender._has_success_notification", return_value=False)
+    @patch("app.services.notification_sender.log_line_notification")
+    @patch("app.services.notification_sender.send_line_push")
+    def test_cancelled_message_includes_customer_reason(self, mock_send_push, mock_log, _) -> None:
+        mock_send_push.return_value = {"attempted": True, "status": 200}
+        client = self._build_client(
+            {
+                "order_no": "ORD-008",
+                "public_token": "tok",
+                "customer_id": "cust",
+                "customers": {"line_user_id": "Uxxxxx"},
+            }
+        )
+        result = send_line_notification(
+            client,
+            "order-id",
+            None,
+            None,
+            "cancelled",
+            {"cancelled_reason": "สินค้าหมด"},
+        )
+        self.assertIn("สินค้าหมด", result["notification_message"])
+        mock_send_push.assert_called_once()
+        mock_log.assert_called_once()

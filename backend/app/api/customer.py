@@ -15,7 +15,13 @@ from app.core.config import settings
 from app.core.supabase import SupabaseConfigurationError, get_supabase_admin_client
 from app.services.cost_engine import build_order_item_record, mask_option_costs, prepare_order_item_snapshot
 from app.services.order_item_columns import order_items_supports_store_scope, prune_order_item_columns
-from app.services.line_service import mark_line_link_token_used, resolve_line_link_token
+from app.services.line_service import (
+    fetch_line_display_name,
+    mark_line_link_token_used,
+    resolve_line_link_token,
+    sanitize_line_display_name,
+    should_overwrite_display_name,
+)
 from app.services.order_totals import recalculate_order_totals
 from app.services.storage import StorageUploadError, upload_payment_slip as storage_upload_payment_slip
 from app.services.order_numbers import generate_order_number
@@ -329,10 +335,26 @@ def _find_or_create_customer(client: Client, store_id: str, payload: CustomerPay
         return None
 
 
-def _update_customer_contact_fields(client: Client, customer_id: str, *, name: Optional[str], phone: Optional[str]) -> None:
+def _update_customer_contact_fields(
+    client: Client,
+    customer_id: str,
+    *,
+    name: Optional[str],
+    phone: Optional[str],
+    line_name_lock: bool = False,
+) -> None:
     updates: Dict[str, Any] = {}
-    if name:
-        updates["display_name"] = name
+    sanitized_name = sanitize_line_display_name(name)
+    if sanitized_name:
+        if line_name_lock:
+            existing = (
+                client.table("customers").select("display_name").eq("id", customer_id).limit(1).execute().data or []
+            )
+            current_display = existing[0].get("display_name") if existing else None
+            if current_display and not should_overwrite_display_name(current_display, sanitized_name):
+                sanitized_name = None
+        if sanitized_name:
+            updates["display_name"] = sanitized_name
     if phone:
         updates["phone"] = phone
     if not updates:
@@ -363,11 +385,21 @@ def _ensure_customer_from_line_token(
     if not line_user_id:
         return None
     existing_customer_id = str(token_row.get("customer_id") or "").strip() or None
-    display_name = str(payload.name or "").strip() or None
+    form_name = str(payload.name or "").strip() or None
     normalized_phone = _normalize_phone(payload.phone)
+    profile_info = fetch_line_display_name(line_user_id)
+    profile_display_name = profile_info.get("display_name")
+    display_name_candidate = profile_display_name or form_name
+    sanitized_candidate = profile_display_name or sanitize_line_display_name(form_name)
 
     if existing_customer_id:
-        _update_customer_contact_fields(client, existing_customer_id, name=display_name, phone=normalized_phone)
+        _update_customer_contact_fields(
+            client,
+            existing_customer_id,
+            name=display_name_candidate,
+            phone=normalized_phone,
+            line_name_lock=bool(profile_display_name),
+        )
         return existing_customer_id
 
     lookup = (
@@ -385,15 +417,21 @@ def _ensure_customer_from_line_token(
         if rows:
             customer_id = rows[0].get("id")
             if customer_id:
-                _update_customer_contact_fields(client, customer_id, name=display_name, phone=normalized_phone)
+                _update_customer_contact_fields(
+                    client,
+                    customer_id,
+                    name=display_name_candidate,
+                    phone=normalized_phone,
+                    line_name_lock=bool(profile_display_name),
+                )
                 return customer_id
 
     create_data: Dict[str, Any] = {
         "store_id": store_id,
         "line_user_id": line_user_id,
     }
-    if display_name:
-        create_data["display_name"] = display_name
+    if sanitized_candidate:
+        create_data["display_name"] = sanitized_candidate
     if normalized_phone:
         create_data["phone"] = normalized_phone
 
