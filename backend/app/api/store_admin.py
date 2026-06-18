@@ -41,7 +41,12 @@ from app.services.order_item_columns import (
     prune_order_item_columns,
 )
 from app.services.order_totals import recalculate_order_totals, resolve_channel_fee
-from app.services.notification_sender import send_line_notification
+from app.services.notification_sender import (
+    ORDER_CANCEL_REASON_FALLBACK,
+    PAYMENT_REJECT_REASON_FALLBACK,
+    send_line_notification,
+)
+from app.services.line_service import sanitize_line_display_name
 from app.services.order_numbers import generate_order_number
 from app.services.storage import StorageUploadError, create_signed_slip_url, upload_payment_slip, upload_public_asset
 
@@ -104,6 +109,7 @@ _ORDER_FINANCIAL_FIELDS: Set[str] = {"total_cost", "gross_profit"}
 _ORDER_ITEM_FINANCIAL_FIELDS: Set[str] = {"unit_cost", "line_cost", "line_profit", "total_cost", "option_cost_total"}
 SWEETNESS_LEVELS: Tuple[int, ...] = (0, 25, 50, 75, 100)
 DEFAULT_SWEETNESS = 100
+CUSTOMER_NAME_FALLBACK = "ลูกค้าไม่ระบุชื่อ"
 _MENU_IMAGE_ALLOWED_TYPES: Set[str] = {
     "image/jpeg",
     "image/jpg",
@@ -4053,7 +4059,11 @@ def _load_relation_names(
     return base_map
 
 
-def _load_order_relation_maps(client: Client, store_id: str, rows: List[Dict[str, Any]]) -> Tuple[Dict[str, str], Dict[str, str]]:
+def _load_order_relation_maps(
+    client: Client,
+    store_id: str,
+    rows: List[Dict[str, Any]],
+) -> Tuple[Dict[str, Dict[str, Optional[str]]], Dict[str, str]]:
     customer_ids: Set[str] = set()
     channel_ids: Set[str] = set()
     for row in rows:
@@ -4064,14 +4074,42 @@ def _load_order_relation_maps(client: Client, store_id: str, rows: List[Dict[str
         if ch_id:
             channel_ids.add(str(ch_id))
 
-    customer_map = _load_relation_names(
-        client,
-        "customers",
-        store_id,
-        customer_ids,
-        ["full_name", "customer_name", "name"],
-        "Customer",
-    )
+    customer_map: Dict[str, Dict[str, Optional[str]]] = {}
+    if customer_ids:
+        select_fields = ["display_name", "name", "full_name", "customer_name"]
+        missing_handled = False
+        while select_fields and not missing_handled:
+            try:
+                resp = (
+                    client.table("customers")
+                    .select(", ".join(["id"] + select_fields))
+                    .eq("store_id", store_id)
+                    .in_("id", list(customer_ids))
+                    .execute()
+                )
+            except Exception as exc:
+                if _is_missing_column(exc, select_fields[0]):
+                    select_fields.pop(0)
+                    continue
+                raise
+            err = getattr(resp, "error", None)
+            if err and _is_missing_column(err, select_fields[0]):
+                select_fields.pop(0)
+                continue
+            if err:
+                raise HTTPException(status_code=500, detail="customer_lookup_failed")
+            for row in getattr(resp, "data", None) or []:
+                cid = str(row.get("id")) if row.get("id") else None
+                if not cid:
+                    continue
+                customer_map[cid] = {
+                    "display_name": row.get("display_name"),
+                    "name": row.get("name") or row.get("customer_name"),
+                    "full_name": row.get("full_name"),
+                }
+            missing_handled = True
+        for cid in customer_ids:
+            customer_map.setdefault(str(cid), {})
     channel_map = _load_relation_names(
         client,
         "sales_channels",
@@ -4861,24 +4899,41 @@ def _build_sales_report_payload(
 
 def _map_order(
     row: Dict[str, Any],
-    customer_names: Optional[Dict[str, str]] = None,
+    customer_names: Optional[Dict[str, Dict[str, Optional[str]]]] = None,
     channel_names: Optional[Dict[str, str]] = None,
     latest_payment: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     customer_name = None
     channel_name = None
     if customer_names and row.get("customer_id"):
-        customer_name = customer_names.get(str(row.get("customer_id")))
+        customer_info = customer_names.get(str(row.get("customer_id")))
+        if isinstance(customer_info, dict):
+            candidate = (
+                sanitize_line_display_name(customer_info.get("display_name"))
+                or sanitize_line_display_name(customer_info.get("name"))
+                or sanitize_line_display_name(customer_info.get("full_name"))
+            )
+            if candidate:
+                customer_name = candidate
+        elif isinstance(customer_info, str):
+            customer_name = sanitize_line_display_name(customer_info) or customer_info
     if channel_names and row.get("channel_id"):
         channel_name = channel_names.get(str(row.get("channel_id")))
     inline_customer_name = row.get("customer_name")
-    if inline_customer_name:
-        customer_name = inline_customer_name
+    inline_sanitized = sanitize_line_display_name(inline_customer_name)
+    if inline_sanitized:
+        customer_name = inline_sanitized
     order_no = row.get("order_no") or row.get("order_number")
     order_status = row.get("order_status") or row.get("status")
     normalized_status = normalize_order_status(order_status)
     archived = normalized_status in CANCELLED_ORDER_STATUSES or bool(row.get("cancelled_at"))
     customer_phone = row.get("customer_phone")
+    if not customer_name:
+        phone_label = str(customer_phone or "").strip()
+        if phone_label:
+            customer_name = phone_label
+    if not customer_name:
+        customer_name = CUSTOMER_NAME_FALLBACK
     return {
         "id": str(row.get("id")),
         "store_id": row.get("store_id"),
@@ -5380,6 +5435,11 @@ def _notify_order_status_change(
     if normalized not in _NOTIFY_ORDER_STATUSES:
         return
     payload = dict(extra_payload or {})
+    if normalized == "cancelled":
+        reason_text = str(payload.get("cancelled_reason") or "").strip()
+        if not reason_text:
+            reason_text = ORDER_CANCEL_REASON_FALLBACK
+        payload["cancelled_reason"] = reason_text
     payload["status"] = normalized
     try:
         send_line_notification(client, order_id, None, None, normalized, payload)
@@ -5638,8 +5698,13 @@ def update_order(order_id: str, payload: OrderUpdate, authorization: Optional[st
     recalculate_order_totals(ctx["client"], store_id_resolved, order_id)
 
     new_status = next_status
+    cancelled_reason_for_notify: Optional[str] = None
     response: Dict[str, Any] = {"id": order_id, "status": "updated"}
     if new_status and str(new_status) != str(current.get("status")):
+        notify_payload: Dict[str, Any] = {"note": data.get("note")}
+        if str(new_status) == "cancelled":
+            cancelled_reason_for_notify = data.get("cancelled_reason") or ORDER_CANCEL_REASON_FALLBACK
+            notify_payload["cancelled_reason"] = cancelled_reason_for_notify
         _write_order_status_log(
             ctx["client"],
             order_id,
@@ -5652,7 +5717,7 @@ def update_order(order_id: str, payload: OrderUpdate, authorization: Optional[st
             ctx["client"],
             order_id,
             str(new_status),
-            {"note": data.get("note")},
+            notify_payload,
         )
 
     return response
@@ -5764,12 +5829,14 @@ def update_order_status(order_id: str, payload: OrderStatusUpdate, authorization
 
     status_note = (payload.note or "").strip() or None
     update_data: Dict[str, Any] = {"status": next_status_value}
+    cancelled_reason_for_notify: Optional[str] = None
     if next_status_value == "cancelled":
         cancelled_reason = (payload.cancelled_reason or "").strip()
         cancelled_reason = cancelled_reason or status_note or "cancelled_via_status_update"
         cancelled_at_value = (payload.cancelled_at or "").strip() or datetime.utcnow().isoformat()
         update_data["cancelled_reason"] = cancelled_reason
         update_data["cancelled_at"] = cancelled_at_value
+        cancelled_reason_for_notify = cancelled_reason
 
     resp = (
         ctx["client"].table("orders").update(update_data).eq("id", order_id).eq("store_id", store_id_resolved).execute()
@@ -5786,11 +5853,14 @@ def update_order_status(order_id: str, payload: OrderStatusUpdate, authorization
         status_note,
     )
 
+    notify_payload = {"note": status_note}
+    if next_status_value == "cancelled":
+        notify_payload["cancelled_reason"] = cancelled_reason_for_notify or ORDER_CANCEL_REASON_FALLBACK
     _notify_order_status_change(
         ctx["client"],
         order_id,
         next_status_value,
-        {"note": status_note},
+        notify_payload,
     )
 
     return {"id": order_id, "status": next_status_value}
@@ -5806,9 +5876,10 @@ def cancel_order(order_id: str, payload: OrderCancelPayload, authorization: Opti
     if not _valid_order_transition(str(current.get("status") or ""), "cancelled"):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid_status_transition")
 
+    reason_text = (payload.reason or "").strip() or ORDER_CANCEL_REASON_FALLBACK
     update_data = {
         "status": "cancelled",
-        "cancelled_reason": (payload.reason or "").strip() or None,
+        "cancelled_reason": reason_text,
         "cancelled_at": datetime.utcnow().isoformat(),
     }
     resp = ctx["client"].table("orders").update(update_data).eq("id", order_id).eq("store_id", store_id_resolved).execute()
@@ -5827,7 +5898,7 @@ def cancel_order(order_id: str, payload: OrderCancelPayload, authorization: Opti
         ctx["client"],
         order_id,
         "cancelled",
-        {"cancelled_reason": (payload.reason or "").strip() or None},
+        {"cancelled_reason": reason_text},
     )
     return {"id": order_id, "status": "cancelled"}
 
@@ -6730,7 +6801,7 @@ def reject_payment(payment_id: str, payload: PaymentRejectPayload, authorization
         None,
         None,
         "payment_rejected",
-        {"reject_reason": (payload.reason or "").strip() or None},
+        {"reject_reason": (payload.reason or "").strip() or PAYMENT_REJECT_REASON_FALLBACK},
     )
 
     return {

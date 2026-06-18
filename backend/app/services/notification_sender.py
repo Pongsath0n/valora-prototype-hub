@@ -15,6 +15,11 @@ _ALLOWED_MESSAGE_TYPES = {
     "cancelled",
 }
 
+PAYMENT_REJECT_REASON_FALLBACK = "ข้อมูลการชำระเงินไม่ถูกต้องหรือยังตรวจสอบไม่ได้"
+ORDER_CANCEL_REASON_FALLBACK = "ร้านไม่สามารถดำเนินการออเดอร์นี้ต่อได้"
+_PAYMENT_REJECT_GUIDANCE = "กรุณาตรวจสอบข้อมูลการชำระเงินอีกครั้ง หรือติดต่อร้านเพื่อให้ทีมงานช่วยตรวจสอบ"
+_CANCELLED_GUIDANCE = "หากต้องการสอบถามเพิ่มเติม สามารถติดต่อร้านผ่านช่องทางนี้ได้เลย"
+
 
 def mask_line_user_id(line_user_id: Optional[str]) -> Optional[str]:
     if not line_user_id:
@@ -63,8 +68,8 @@ _STATUS_TEMPLATES: Dict[str, str] = {
     "preparing": "ร้านกำลังจัดเตรียมเครื่องดื่มของคุณ",
     "ready": "เครื่องดื่มของคุณพร้อมรับแล้ว\n\nสามารถมารับที่ร้านได้เลย",
     "completed": "ออเดอร์เสร็จเรียบร้อย ขอบคุณที่อุดหนุน",
-    "cancelled": "ออเดอร์นี้ถูกยกเลิกแล้ว\n\nหากต้องการสอบถามเพิ่มเติม สามารถติดต่อร้านผ่านช่องทางนี้ได้เลย",
-    "payment_rejected": "สลิปการชำระเงินยังไม่ผ่านการตรวจสอบ\n\nกรุณาตรวจสอบข้อมูลการชำระเงินอีกครั้ง หรือติดต่อร้านเพื่อให้ทีมงานช่วยตรวจสอบ",
+    "cancelled": "ออเดอร์นี้ถูกยกเลิกแล้ว",
+    "payment_rejected": "สลิปการชำระเงินยังไม่ผ่านการตรวจสอบ",
     "payment_approved": "ร้านได้รับการชำระเงินเรียบร้อยแล้ว\n\nกรุณารอสักครู่ ทางร้านกำลังจัดคิวและเตรียมเครื่องดื่มให้คุณ",
 }
 
@@ -146,8 +151,24 @@ def _build_message_text(message_type: str, ctx: Dict[str, Any], payload: Dict[st
         lines.append(f"ออเดอร์ {order_no}")
     lines.append(base_text)
 
-    if message_type == "cancelled" and payload.get("cancelled_reason"):
-        lines.append(f"เหตุผล: {payload['cancelled_reason']}")
+    if message_type == "payment_rejected":
+        reason = str(payload.get("reject_reason") or "").strip()
+        if not reason:
+            reason = PAYMENT_REJECT_REASON_FALLBACK
+        payload["reject_reason"] = reason
+        lines.append("")
+        lines.append(f"เหตุผล: {reason}")
+        lines.append("")
+        lines.append(_PAYMENT_REJECT_GUIDANCE)
+    elif message_type == "cancelled":
+        reason = str(payload.get("cancelled_reason") or "").strip()
+        if not reason:
+            reason = ORDER_CANCEL_REASON_FALLBACK
+        payload["cancelled_reason"] = reason
+        lines.append("")
+        lines.append(f"เหตุผล: {reason}")
+        lines.append("")
+        lines.append(_CANCELLED_GUIDANCE)
 
     amount_text = _format_baht(ctx.get("total_amount"))
     if amount_text and message_type in _AMOUNT_STATUS_TYPES:

@@ -7,7 +7,11 @@ from unittest.mock import MagicMock, patch
 
 from app.core.config import settings
 from app.services.line_service import verify_line_signature
-from app.services.notification_sender import send_line_notification
+from app.services.notification_sender import (
+    ORDER_CANCEL_REASON_FALLBACK,
+    PAYMENT_REJECT_REASON_FALLBACK,
+    send_line_notification,
+)
 
 
 class LineSignatureTests(unittest.TestCase):
@@ -136,7 +140,7 @@ class LineNotificationTests(unittest.TestCase):
     @patch("app.services.notification_sender._has_success_notification", return_value=False)
     @patch("app.services.notification_sender.log_line_notification")
     @patch("app.services.notification_sender.send_line_push")
-    def test_payment_rejected_omits_internal_reason(self, mock_send_push, mock_log, _) -> None:
+    def test_payment_rejected_includes_reason_and_guidance(self, mock_send_push, mock_log, _) -> None:
         mock_send_push.return_value = {"attempted": True, "status": 200}
         client = self._build_client(
             {
@@ -152,10 +156,35 @@ class LineNotificationTests(unittest.TestCase):
             None,
             None,
             "payment_rejected",
-            {"reject_reason": "internal note"},
+            {"reject_reason": "ยอดไม่ตรง"},
         )
-        self.assertNotIn("internal note", result["notification_message"])
-        self.assertIn("สลิปการชำระเงินยังไม่ผ่านการตรวจสอบ", result["notification_message"])
+        self.assertIn("ยอดไม่ตรง", result["notification_message"])
+        self.assertIn("กรุณาตรวจสอบข้อมูลการชำระเงินอีกครั้ง", result["notification_message"])
+        mock_send_push.assert_called_once()
+        mock_log.assert_called_once()
+
+    @patch("app.services.notification_sender._has_success_notification", return_value=False)
+    @patch("app.services.notification_sender.log_line_notification")
+    @patch("app.services.notification_sender.send_line_push")
+    def test_payment_rejected_uses_fallback_reason_when_missing(self, mock_send_push, mock_log, _) -> None:
+        mock_send_push.return_value = {"attempted": True, "status": 200}
+        client = self._build_client(
+            {
+                "order_no": "ORD-007",
+                "public_token": "tok",
+                "customer_id": "cust",
+                "customers": {"line_user_id": "Uxxxxx"},
+            }
+        )
+        result = send_line_notification(
+            client,
+            "order-id",
+            None,
+            None,
+            "payment_rejected",
+            {},
+        )
+        self.assertIn(PAYMENT_REJECT_REASON_FALLBACK, result["notification_message"])
         mock_send_push.assert_called_once()
         mock_log.assert_called_once()
 
@@ -181,5 +210,30 @@ class LineNotificationTests(unittest.TestCase):
             {"cancelled_reason": "สินค้าหมด"},
         )
         self.assertIn("สินค้าหมด", result["notification_message"])
+        mock_send_push.assert_called_once()
+        mock_log.assert_called_once()
+
+    @patch("app.services.notification_sender._has_success_notification", return_value=False)
+    @patch("app.services.notification_sender.log_line_notification")
+    @patch("app.services.notification_sender.send_line_push")
+    def test_cancelled_message_uses_fallback_reason_when_missing(self, mock_send_push, mock_log, _) -> None:
+        mock_send_push.return_value = {"attempted": True, "status": 200}
+        client = self._build_client(
+            {
+                "order_no": "ORD-009",
+                "public_token": "tok",
+                "customer_id": "cust",
+                "customers": {"line_user_id": "Uxxxxx"},
+            }
+        )
+        result = send_line_notification(
+            client,
+            "order-id",
+            None,
+            None,
+            "cancelled",
+            {},
+        )
+        self.assertIn(ORDER_CANCEL_REASON_FALLBACK, result["notification_message"])
         mock_send_push.assert_called_once()
         mock_log.assert_called_once()
