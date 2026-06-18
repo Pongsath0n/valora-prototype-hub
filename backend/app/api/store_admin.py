@@ -931,7 +931,7 @@ def _payment_select_clause(client: Client, include_relations: bool = False, incl
         if _orders_has_column(client, "customer_phone"):
             order_rel_fields.append("customer_phone")
         cols.append(
-            f"orders({', '.join(order_rel_fields)}, customers(display_name))"
+            f"orders({', '.join(order_rel_fields)}, customers(display_name, phone))"
         )
     return ", ".join(cols)
 
@@ -4076,27 +4076,29 @@ def _load_order_relation_maps(
 
     customer_map: Dict[str, Dict[str, Optional[str]]] = {}
     if customer_ids:
-        select_fields = ["display_name", "name", "full_name", "customer_name"]
-        missing_handled = False
-        while select_fields and not missing_handled:
+        select_fields = ["display_name", "phone"]
+        while True:
+            query_fields = ", ".join(["id"] + select_fields) if select_fields else "id"
             try:
                 resp = (
                     client.table("customers")
-                    .select(", ".join(["id"] + select_fields))
+                    .select(query_fields)
                     .eq("store_id", store_id)
                     .in_("id", list(customer_ids))
                     .execute()
                 )
             except Exception as exc:
-                if _is_missing_column(exc, select_fields[0]):
-                    select_fields.pop(0)
+                missing = _extract_missing_column(exc)
+                if missing and missing in select_fields:
+                    select_fields.remove(missing)
                     continue
                 raise
             err = getattr(resp, "error", None)
-            if err and _is_missing_column(err, select_fields[0]):
-                select_fields.pop(0)
-                continue
             if err:
+                missing = _extract_missing_column(err)
+                if missing and missing in select_fields:
+                    select_fields.remove(missing)
+                    continue
                 raise HTTPException(status_code=500, detail="customer_lookup_failed")
             for row in getattr(resp, "data", None) or []:
                 cid = str(row.get("id")) if row.get("id") else None
@@ -4104,10 +4106,9 @@ def _load_order_relation_maps(
                     continue
                 customer_map[cid] = {
                     "display_name": row.get("display_name"),
-                    "name": row.get("name") or row.get("customer_name"),
-                    "full_name": row.get("full_name"),
+                    "phone": row.get("phone"),
                 }
-            missing_handled = True
+            break
         for cid in customer_ids:
             customer_map.setdefault(str(cid), {})
     channel_map = _load_relation_names(
@@ -4908,32 +4909,37 @@ def _map_order(
     if customer_names and row.get("customer_id"):
         customer_info = customer_names.get(str(row.get("customer_id")))
         if isinstance(customer_info, dict):
-            candidate = (
-                sanitize_line_display_name(customer_info.get("display_name"))
-                or sanitize_line_display_name(customer_info.get("name"))
-                or sanitize_line_display_name(customer_info.get("full_name"))
-            )
+            candidate = sanitize_line_display_name(customer_info.get("display_name"))
             if candidate:
                 customer_name = candidate
         elif isinstance(customer_info, str):
-            customer_name = sanitize_line_display_name(customer_info) or customer_info
+            candidate = sanitize_line_display_name(customer_info)
+            if candidate:
+                customer_name = candidate
     if channel_names and row.get("channel_id"):
         channel_name = channel_names.get(str(row.get("channel_id")))
     inline_customer_name = row.get("customer_name")
     inline_sanitized = sanitize_line_display_name(inline_customer_name)
-    if inline_sanitized:
+    if inline_sanitized and not customer_name:
         customer_name = inline_sanitized
     order_no = row.get("order_no") or row.get("order_number")
     order_status = row.get("order_status") or row.get("status")
     normalized_status = normalize_order_status(order_status)
     archived = normalized_status in CANCELLED_ORDER_STATUSES or bool(row.get("cancelled_at"))
-    customer_phone = row.get("customer_phone")
+    linked_phone = None
+    if customer_names and row.get("customer_id"):
+        customer_info = customer_names.get(str(row.get("customer_id")))
+        if isinstance(customer_info, dict):
+            linked_phone = str(customer_info.get("phone") or "").strip() or None
+    order_phone_value = str(row.get("customer_phone") or "").strip() or None
     if not customer_name:
-        phone_label = str(customer_phone or "").strip()
-        if phone_label:
-            customer_name = phone_label
+        if linked_phone:
+            customer_name = linked_phone
+    if not customer_name and order_phone_value:
+        customer_name = order_phone_value
     if not customer_name:
         customer_name = CUSTOMER_NAME_FALLBACK
+    customer_phone = order_phone_value or linked_phone
     return {
         "id": str(row.get("id")),
         "store_id": row.get("store_id"),
@@ -6092,18 +6098,18 @@ def _sanitize_payment_payload(payload: PaymentCreate | PaymentUpdate, partial: b
 def _map_payment(row: Dict[str, Any], order_context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     order_rel = order_context or (row.get("orders") if isinstance(row, dict) else None)
     customer_rel = order_rel.get("customers") if isinstance(order_rel, dict) else None
-    customer_name = None
+    linked_display = None
+    linked_phone = None
     if isinstance(customer_rel, dict):
-        customer_name = (
-            customer_rel.get("display_name")
-            or customer_rel.get("name")
-            or customer_rel.get("customer_name")
-        )
-    if not customer_name and isinstance(order_rel, dict):
-        customer_name = order_rel.get("customer_name")
-    customer_phone = None
+        linked_display = sanitize_line_display_name(customer_rel.get("display_name"))
+        linked_phone = str(customer_rel.get("phone") or "").strip() or None
+    snapshot_name = None
+    snapshot_phone = None
     if isinstance(order_rel, dict):
-        customer_phone = order_rel.get("customer_phone")
+        snapshot_name = sanitize_line_display_name(order_rel.get("customer_name"))
+        snapshot_phone = str(order_rel.get("customer_phone") or "").strip() or None
+    customer_name = linked_display or snapshot_name or linked_phone or snapshot_phone or CUSTOMER_NAME_FALLBACK
+    customer_phone = snapshot_phone or linked_phone
     slip_submitted = bool(
         row.get("slip_storage_path")
         or row.get("slip_file_name")
