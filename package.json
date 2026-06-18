@@ -16,6 +16,7 @@
     "e2e:owner-dashboard-freshness-smoke": "node scripts/e2e/owner-dashboard-freshness-smoke.mjs",
     "e2e:planning-baseline-smoke": "node scripts/e2e/planning-baseline-smoke.mjs",
     "e2e:stock-intake-smoke": "node scripts/e2e/stock-intake-smoke.mjs",
+    "e2e:dashboard-revenue-kpi-smoke": "node scripts/e2e/dashboard-revenue-kpi-smoke.mjs",
     "test:phase4": "node scripts/e2e/order-payment-lifecycle.mjs",
     "test:phase4-1": "node scripts/e2e/owner-staff-permission-regression.mjs",
     "test:phase4-2": "node scripts/e2e/cost-data-permission-regression.mjs"

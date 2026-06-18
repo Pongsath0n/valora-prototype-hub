@@ -340,6 +340,31 @@ export type DashboardTrendPoint = {
   order_count: number;
 };
 
+export type DashboardRevenueRange = "all" | "today" | "last_7_days" | "last_30_days" | "this_month" | "custom";
+
+export type DashboardRevenueFilterPayload = {
+  revenueRange?: DashboardRevenueRange;
+  startDate?: string;
+  endDate?: string;
+};
+
+export type DashboardRevenueKpi = {
+  range: DashboardRevenueRange;
+  range_label: string;
+  start_date?: string | null;
+  end_date?: string | null;
+  all_time: boolean;
+  timezone: string;
+  generated_at: string;
+  total_sales_amount: number;
+  total_sales_order_count: number;
+  paid_sales_amount: number;
+  paid_sales_order_count: number;
+  pending_sales_amount: number;
+  pending_sales_order_count: number;
+  excluded_cancelled_order_count: number;
+};
+
 export type DashboardSummaryResponse = {
   store_id: string;
   store_timezone?: string | null;
@@ -360,6 +385,7 @@ export type DashboardSummaryResponse = {
   queues: Record<DashboardQueueStatus | string, number>;
   recent_orders: DashboardRecentOrder[];
   seven_day_trend: DashboardTrendPoint[];
+  dashboard_revenue_kpi?: DashboardRevenueKpi;
 };
 
 export type PlanningBaselineIngredientLine = {
@@ -659,6 +685,21 @@ function buildSalesReportQuery(filters: SalesReportFiltersPayload): string {
   return params.toString();
 }
 
+function buildDashboardSummaryQuery(filters?: DashboardRevenueFilterPayload): string {
+  if (!filters) return "";
+  const params = new URLSearchParams();
+  if (filters.revenueRange) {
+    params.set("revenue_range", filters.revenueRange);
+  }
+  if (filters.startDate) {
+    params.set("start_date", filters.startDate);
+  }
+  if (filters.endDate) {
+    params.set("end_date", filters.endDate);
+  }
+  return params.toString();
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const token = await getAccessToken();
   const res = await fetch(`${BACKEND_BASE}${path}`, {
@@ -700,8 +741,10 @@ export const storeAdminApi = {
     return request("/api/store-admin/me");
   },
 
-  async getDashboardSummary(): Promise<DashboardSummaryResponse> {
-    return request("/api/store-admin/dashboard-summary");
+  async getDashboardSummary(filters?: DashboardRevenueFilterPayload): Promise<DashboardSummaryResponse> {
+    const search = buildDashboardSummaryQuery(filters);
+    const path = `/api/store-admin/dashboard-summary${search ? `?${search}` : ""}`;
+    return request(path);
   },
 
   async getPlanningBaseline(): Promise<PlanningBaselineResponse> {

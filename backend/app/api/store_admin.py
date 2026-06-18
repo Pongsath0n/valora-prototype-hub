@@ -79,9 +79,20 @@ _DASHBOARD_QUEUE_STATUSES: List[str] = [
 CANCELLED_ORDER_STATUSES: Set[str] = {"cancelled", "voided"}
 CONFIRMED_PAYMENT_STATUSES: Set[str] = {"paid"}
 PENDING_REVIEW_PAYMENT_STATUSES: Set[str] = {"pending_review"}
+PENDING_PAYMENT_STATUSES: Set[str] = {"pending_payment"}
+PENDING_PAYMENT_PAYMENT_STATUSES: Set[str] = {"pending"}
 _FINALIZED_ORDER_STATUSES: Set[str] = {"completed"} | CANCELLED_ORDER_STATUSES
 _RECENT_ORDERS_LIMIT = 10
 _DASHBOARD_TREND_DAYS = 7
+_REVENUE_RANGE_LABELS: Dict[str, str] = {
+    "all": "ทุกวัน",
+    "today": "วันนี้",
+    "last_7_days": "7 วันที่ผ่านมา",
+    "last_30_days": "30 วันที่ผ่านมา",
+    "this_month": "เดือนนี้",
+    "custom": "กำหนดเอง",
+}
+_ALLOWED_REVENUE_RANGES: Set[str] = set(_REVENUE_RANGE_LABELS.keys())
 
 _BUSINESS_ROLES: Set[str] = {"owner", "admin", "manager"}
 _MANAGERIAL_ROLES: Set[str] = set(_BUSINESS_ROLES)
@@ -299,6 +310,22 @@ def is_pending_review_order(
     status_value = order_status if order_status is not None else normalize_order_status((row or {}).get("status") or (row or {}).get("order_status"))
     payment_value = payment_status if payment_status is not None else normalize_payment_status(_extract_row_payment_status(row))
     return payment_value in PENDING_REVIEW_PAYMENT_STATUSES and status_value not in CANCELLED_ORDER_STATUSES
+
+
+def is_pending_payment_order(
+    row: Dict[str, Any], *, order_status: Optional[str] = None, payment_status: Optional[str] = None
+) -> bool:
+    status_value = order_status if order_status is not None else normalize_order_status((row or {}).get("status") or (row or {}).get("order_status"))
+    payment_value = payment_status if payment_status is not None else normalize_payment_status(_extract_row_payment_status(row))
+    if status_value in CANCELLED_ORDER_STATUSES:
+        return False
+    if payment_value in CONFIRMED_PAYMENT_STATUSES:
+        return False
+    if status_value in PENDING_PAYMENT_STATUSES:
+        return True
+    if payment_value in PENDING_PAYMENT_PAYMENT_STATUSES:
+        return True
+    return False
 
 
 class SalesChannelCreate(BaseModel):
@@ -1044,6 +1071,81 @@ def _today_range(store_tz: Optional[str]) -> Tuple[datetime, datetime]:
     start = datetime(year=now.year, month=now.month, day=now.day, tzinfo=tzinfo)
     end = start + timedelta(days=1)
     return start, end
+
+
+def _start_of_day_in_tz(day: date, tzinfo) -> datetime:
+    tz = tzinfo or _DEFAULT_TZINFO
+    return datetime(year=day.year, month=day.month, day=day.day, tzinfo=tz)
+
+
+def _first_day_of_next_month(day: date) -> date:
+    if day.month == 12:
+        return date(day.year + 1, 1, 1)
+    return date(day.year, day.month + 1, 1)
+
+
+def _resolve_revenue_range(
+    range_key: Optional[str],
+    tzinfo,
+    start_date_text: Optional[str] = None,
+    end_date_text: Optional[str] = None,
+) -> Dict[str, Any]:
+    tz = tzinfo or _DEFAULT_TZINFO
+    normalized = (range_key or "all").strip().lower()
+    if normalized not in _ALLOWED_REVENUE_RANGES:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid_revenue_range")
+
+    now = datetime.now(tz)
+    today = now.date()
+    all_time = False
+    start_dt: Optional[datetime] = None
+    end_dt: Optional[datetime] = None
+    start_value: Optional[str] = None
+    end_value: Optional[str] = None
+    label = _REVENUE_RANGE_LABELS.get(normalized, _REVENUE_RANGE_LABELS["all"])
+
+    if normalized == "all":
+        all_time = True
+    elif normalized == "today":
+        start_dt = _start_of_day_in_tz(today, tz)
+        end_dt = start_dt + timedelta(days=1)
+    elif normalized == "last_7_days":
+        end_dt = _start_of_day_in_tz(today, tz) + timedelta(days=1)
+        start_dt = end_dt - timedelta(days=7)
+    elif normalized == "last_30_days":
+        end_dt = _start_of_day_in_tz(today, tz) + timedelta(days=1)
+        start_dt = end_dt - timedelta(days=30)
+    elif normalized == "this_month":
+        first_day = date(today.year, today.month, 1)
+        start_dt = _start_of_day_in_tz(first_day, tz)
+        end_dt = _start_of_day_in_tz(_first_day_of_next_month(first_day), tz)
+    elif normalized == "custom":
+        if not start_date_text or not end_date_text:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="custom_range_required")
+        try:
+            start_day = date.fromisoformat(start_date_text)
+            end_day = date.fromisoformat(end_date_text)
+        except ValueError as exc:  # pragma: no cover - defensive
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid_custom_range_format") from exc
+        if start_day > end_day:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid_custom_range_order")
+        start_dt = _start_of_day_in_tz(start_day, tz)
+        end_dt = _start_of_day_in_tz(end_day, tz) + timedelta(days=1)
+        label = f"{start_day.isoformat()} ถึง {end_day.isoformat()}"
+
+    if not all_time and start_dt and end_dt:
+        start_value = start_dt.date().isoformat()
+        end_value = (end_dt - timedelta(days=1)).date().isoformat()
+
+    return {
+        "key": normalized,
+        "label": label,
+        "all_time": all_time,
+        "start": start_dt,
+        "end": end_dt,
+        "start_date": start_value,
+        "end_date": end_value,
+    }
 
 
 def _parse_float(value: Any) -> float:
@@ -4912,8 +5014,85 @@ def _build_dashboard_summary(orders: List[Dict[str, Any]], today_start: datetime
     }
 
 
+def _build_dashboard_revenue_kpi(
+    orders: List[Dict[str, Any]],
+    tzinfo,
+    *,
+    range_ctx: Dict[str, Any],
+    timezone_name: Optional[str] = None,
+) -> Dict[str, Any]:
+    tz = tzinfo or _DEFAULT_TZINFO
+    start_dt = range_ctx.get("start")
+    end_dt = range_ctx.get("end")
+    all_time = bool(range_ctx.get("all_time"))
+
+    total_sales_amount = 0.0
+    total_sales_order_count = 0
+    paid_sales_amount = 0.0
+    paid_sales_order_count = 0
+    pending_sales_amount = 0.0
+    pending_sales_order_count = 0
+    excluded_cancelled_order_count = 0
+
+    for order in orders:
+        status_value = normalize_order_status(order.get("status") or order.get("order_status"))
+        payment_value = normalize_payment_status(order.get("payment_status"))
+        created_at = _parse_iso_datetime(order.get("created_at"))
+        created_local = created_at.astimezone(tz) if created_at else None
+        if not all_time:
+            if not created_local or not start_dt or not end_dt:
+                continue
+            if not (start_dt <= created_local < end_dt):
+                continue
+
+        if status_value in CANCELLED_ORDER_STATUSES:
+            excluded_cancelled_order_count += 1
+            continue
+
+        amount = _parse_float(order.get("total_amount"))
+        total_sales_amount += amount
+        total_sales_order_count += 1
+
+        if is_confirmed_sales_order(order, order_status=status_value, payment_status=payment_value):
+            paid_sales_amount += amount
+            paid_sales_order_count += 1
+            continue
+
+        is_pending_review = is_pending_review_order(order, order_status=status_value, payment_status=payment_value)
+        is_pending_payment = is_pending_payment_order(order, order_status=status_value, payment_status=payment_value)
+        if is_pending_review or is_pending_payment:
+            pending_sales_amount += amount
+            pending_sales_order_count += 1
+
+    generated_at = datetime.now(tz).isoformat()
+    tz_label = timezone_name or DEFAULT_BUSINESS_TIMEZONE
+
+    return {
+        "range": range_ctx.get("key", "all"),
+        "range_label": range_ctx.get("label") or _REVENUE_RANGE_LABELS.get("all"),
+        "start_date": range_ctx.get("start_date"),
+        "end_date": range_ctx.get("end_date"),
+        "all_time": all_time,
+        "timezone": tz_label,
+        "generated_at": generated_at,
+        "total_sales_amount": total_sales_amount,
+        "total_sales_order_count": total_sales_order_count,
+        "paid_sales_amount": paid_sales_amount,
+        "paid_sales_order_count": paid_sales_order_count,
+        "pending_sales_amount": pending_sales_amount,
+        "pending_sales_order_count": pending_sales_order_count,
+        "excluded_cancelled_order_count": excluded_cancelled_order_count,
+    }
+
+
 @router.get("/dashboard-summary")
-def get_dashboard_summary(authorization: Optional[str] = Header(None), store_id: Optional[str] = None) -> Dict[str, Any]:
+def get_dashboard_summary(
+    authorization: Optional[str] = Header(None),
+    store_id: Optional[str] = None,
+    revenue_range: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+) -> Dict[str, Any]:
     ctx = _get_ctx(authorization)
     store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
     _require_manager(role)
@@ -4924,12 +5103,21 @@ def get_dashboard_summary(authorization: Optional[str] = Header(None), store_id:
     summary = _build_dashboard_summary(orders, today_start, today_end)
     tzinfo = today_start.tzinfo or _DEFAULT_TZINFO
     timezone_offset = _format_timezone_offset(tzinfo)
+    timezone_display = f"{store_timezone} ({timezone_offset})"
+    revenue_range_ctx = _resolve_revenue_range(revenue_range, tzinfo, start_date, end_date)
+    revenue_kpi = _build_dashboard_revenue_kpi(
+        orders,
+        tzinfo,
+        range_ctx=revenue_range_ctx,
+        timezone_name=timezone_display,
+    )
 
     response = {
         "store_id": store_id_resolved,
         "store_timezone": store_timezone,
         "store_timezone_offset": timezone_offset,
-        "store_timezone_display": f"{store_timezone} ({timezone_offset})",
+        "store_timezone_display": timezone_display,
+        "dashboard_revenue_kpi": revenue_kpi,
         **summary,
     }
     return response

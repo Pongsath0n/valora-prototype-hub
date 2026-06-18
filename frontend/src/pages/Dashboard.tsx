@@ -12,6 +12,9 @@ import {
   type DashboardQueueStatus,
   type DashboardRecentOrder,
   type DashboardSummaryResponse,
+  type DashboardRevenueFilterPayload,
+  type DashboardRevenueRange,
+  type DashboardRevenueKpi,
 } from "@/services/storeAdminApi";
 
 const DASHBOARD_ALLOWED_ROLES: AppRole[] = ["owner", "admin", "manager"];
@@ -21,6 +24,37 @@ const trendTickFormatter = new Intl.DateTimeFormat("th-TH", { weekday: "short", 
 const dateTimeFormatter = new Intl.DateTimeFormat("th-TH", { dateStyle: "medium", timeStyle: "short" });
 const compactNumberFormatter = new Intl.NumberFormat("th-TH", { notation: "compact", maximumFractionDigits: 1 });
 const DEFAULT_TIMEZONE_DISPLAY = "Asia/Bangkok (UTC+7)";
+const REVENUE_RANGE_PRESETS: { key: DashboardRevenueRange; label: string }[] = [
+  { key: "all", label: "ทั้งหมด" },
+  { key: "today", label: "วันนี้" },
+  { key: "last_7_days", label: "7 วันที่ผ่านมา" },
+  { key: "last_30_days", label: "30 วันที่ผ่านมา" },
+  { key: "custom", label: "กำหนดเอง" },
+];
+const REVENUE_RANGE_LABELS: Record<DashboardRevenueRange, string> = {
+  all: "ทุกวัน",
+  today: "วันนี้",
+  last_7_days: "7 วันที่ผ่านมา",
+  last_30_days: "30 วันที่ผ่านมา",
+  this_month: "เดือนนี้",
+  custom: "กำหนดเอง",
+};
+
+const CUSTOM_RANGE_ERROR_MESSAGES: Record<string, string> = {
+  custom_range_required: "กรุณาเลือกวันที่เริ่มต้นและวันที่สิ้นสุด",
+  invalid_custom_range_order: "วันที่เริ่มต้นต้องไม่เกินวันที่สิ้นสุด",
+};
+
+type RevenueFilterState = {
+  range: DashboardRevenueRange;
+  startDate?: string | null;
+  endDate?: string | null;
+};
+
+type CustomRangeDraft = {
+  startDate: string;
+  endDate: string;
+};
 
 const queueStatusDefinitions: { key: DashboardQueueStatus; label: string }[] = [
   { key: "pending_payment", label: "รอชำระ" },
@@ -65,6 +99,10 @@ export default function DashboardPage() {
     refreshing: false,
     lastUpdated: null,
   });
+  const [selectedRevenueRange, setSelectedRevenueRange] = useState<DashboardRevenueRange>("all");
+  const [appliedRevenueFilter, setAppliedRevenueFilter] = useState<RevenueFilterState>({ range: "all" });
+  const [customDraft, setCustomDraft] = useState<CustomRangeDraft>({ startDate: "", endDate: "" });
+  const [customRangeError, setCustomRangeError] = useState<string | null>(null);
   const isMountedRef = useRef(true);
 
   useEffect(() => {
@@ -74,7 +112,7 @@ export default function DashboardPage() {
   }, []);
 
   const loadSummary = useCallback(
-    async (options?: { silent?: boolean }) => {
+    async (options?: { silent?: boolean; filters?: DashboardRevenueFilterPayload; onError?: (message: string) => void }) => {
       const silent = Boolean(options?.silent);
       setState((prev) => ({
         ...prev,
@@ -88,7 +126,7 @@ export default function DashboardPage() {
       }));
 
       try {
-        const res = await storeAdminApi.getDashboardSummary();
+        const res = await storeAdminApi.getDashboardSummary(options?.filters);
         if (!isMountedRef.current) return;
         setState({
           data: res,
@@ -97,9 +135,20 @@ export default function DashboardPage() {
           refreshing: false,
           lastUpdated: new Date().toISOString(),
         });
+        return true;
       } catch (err: any) {
         if (!isMountedRef.current) return;
         const message = err?.message || "โหลดข้อมูลไม่สำเร็จ";
+        if (options?.onError) {
+          options.onError(message);
+          setState((prev) => ({
+            ...prev,
+            error: null,
+            loading: silent ? prev.loading : false,
+            refreshing: false,
+          }));
+          return false;
+        }
         setState((prev) => ({
           ...prev,
           error: message,
@@ -107,9 +156,29 @@ export default function DashboardPage() {
           refreshing: false,
           data: silent ? prev.data : null,
         }));
+        return false;
       }
     },
     [],
+  );
+
+  const fetchDashboard = useCallback(
+    async (
+      filter: RevenueFilterState,
+      options?: { silent?: boolean; onError?: (message: string) => void },
+    ): Promise<boolean> => {
+      const payload: DashboardRevenueFilterPayload = {
+        revenueRange: filter.range,
+        startDate: filter.startDate || undefined,
+        endDate: filter.endDate || undefined,
+      };
+      const success = await loadSummary({ silent: options?.silent, filters: payload, onError: options?.onError });
+      if (success) {
+        setAppliedRevenueFilter(filter);
+      }
+      return success;
+    },
+    [loadSummary],
   );
 
   useEffect(() => {
@@ -119,8 +188,64 @@ export default function DashboardPage() {
       return;
     }
 
-    void loadSummary();
-  }, [checking, accessDenied, loadSummary]);
+    void fetchDashboard({ range: "all" });
+  }, [checking, accessDenied, fetchDashboard]);
+
+  const handlePresetSelect = useCallback(
+    (range: DashboardRevenueRange) => {
+      setSelectedRevenueRange(range);
+      setCustomRangeError(null);
+      if (range === "custom") {
+        setCustomDraft((prev) => {
+          if (prev.startDate || prev.endDate) return prev;
+          if (appliedRevenueFilter.range === "custom") {
+            return {
+              startDate: appliedRevenueFilter.startDate || "",
+              endDate: appliedRevenueFilter.endDate || "",
+            };
+          }
+          return prev;
+        });
+        return;
+      }
+      setCustomDraft({ startDate: "", endDate: "" });
+      void fetchDashboard({ range });
+    },
+    [appliedRevenueFilter, fetchDashboard],
+  );
+
+  const handleCustomDraftChange = useCallback((draft: CustomRangeDraft) => {
+    setCustomRangeError(null);
+    setCustomDraft(draft);
+  }, []);
+
+  const handleApplyCustomRange = useCallback(() => {
+    if (!customDraft.startDate || !customDraft.endDate) {
+      setCustomRangeError("กรุณาเลือกวันที่เริ่มต้นและวันที่สิ้นสุด");
+      return;
+    }
+    if (customDraft.startDate > customDraft.endDate) {
+      setCustomRangeError("วันที่เริ่มต้นต้องไม่เกินวันที่สิ้นสุด");
+      return;
+    }
+    setSelectedRevenueRange("custom");
+    setCustomRangeError(null);
+    void fetchDashboard(
+      { range: "custom", startDate: customDraft.startDate, endDate: customDraft.endDate },
+      {
+        onError: (message) => {
+          setCustomRangeError(CUSTOM_RANGE_ERROR_MESSAGES[message] || "ไม่สามารถใช้ช่วงวันที่นี้ได้");
+        },
+      },
+    );
+  }, [customDraft, fetchDashboard]);
+
+  const handleClearCustomRange = useCallback(() => {
+    setCustomDraft({ startDate: "", endDate: "" });
+    setCustomRangeError(null);
+    setSelectedRevenueRange("all");
+    void fetchDashboard({ range: "all" });
+  }, [fetchDashboard]);
 
   if (checking || state.loading) {
     return (
@@ -283,7 +408,7 @@ export default function DashboardPage() {
           <div>
             <button
               type="button"
-              onClick={() => loadSummary({ silent: true })}
+              onClick={() => fetchDashboard(appliedRevenueFilter, { silent: true })}
               disabled={state.refreshing}
               className="inline-flex items-center justify-center rounded-2xl border border-input bg-background px-4 py-2 text-sm font-semibold text-foreground shadow-sm transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-70"
             >
@@ -375,13 +500,19 @@ export default function DashboardPage() {
             </div>
           </Panel>
 
-          <Panel title="สถานะการดำเนินการ">
-            <div className="space-y-3">
-              <ListStat label="ออเดอร์กำลังดำเนินการ (ทั้งหมด)" value={formatNumber(summary.active_orders_count)} />
-              <ListStat label="ออเดอร์เสร็จสิ้น (ทั้งหมด)" value={formatNumber(summary.completed_orders_count)} />
-              <ListStat label="ออเดอร์ที่ชำระแล้ว (ทั้งหมด)" value={formatNumber(summary.paid_orders_count)} />
-            </div>
-          </Panel>
+          <RevenuePanel
+            kpi={summary.dashboard_revenue_kpi}
+            timezoneDisplay={timezoneDisplay}
+            selectedRange={selectedRevenueRange}
+            appliedFilter={appliedRevenueFilter}
+            onPresetSelect={handlePresetSelect}
+            customDraft={customDraft}
+            onCustomDraftChange={handleCustomDraftChange}
+            onApplyCustomRange={handleApplyCustomRange}
+            onClearCustomRange={handleClearCustomRange}
+            customRangeError={customRangeError}
+            refreshing={state.refreshing}
+          />
         </div>
 
         <Section title="เทรนด์ 7 วันที่ผ่านมา">
@@ -499,11 +630,143 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
-function ListStat({ label, value }: { label: string; value: string }) {
+type RevenuePanelProps = {
+  kpi?: DashboardRevenueKpi;
+  timezoneDisplay: string;
+  selectedRange: DashboardRevenueRange;
+  appliedFilter: RevenueFilterState;
+  onPresetSelect: (range: DashboardRevenueRange) => void;
+  customDraft: CustomRangeDraft;
+  onCustomDraftChange: (draft: CustomRangeDraft) => void;
+  onApplyCustomRange: () => void;
+  onClearCustomRange: () => void;
+  customRangeError: string | null;
+  refreshing: boolean;
+};
+
+function RevenuePanel({
+  kpi,
+  timezoneDisplay,
+  selectedRange,
+  appliedFilter,
+  onPresetSelect,
+  customDraft,
+  onCustomDraftChange,
+  onApplyCustomRange,
+  onClearCustomRange,
+  customRangeError,
+  refreshing,
+}: RevenuePanelProps) {
+  const appliedLabel =
+    kpi?.range === "custom" && kpi?.start_date && kpi?.end_date
+      ? `${kpi.start_date} ถึง ${kpi.end_date}`
+      : kpi?.range_label || REVENUE_RANGE_LABELS[appliedFilter.range];
+  const selectedLabel = appliedLabel || REVENUE_RANGE_LABELS[selectedRange];
+  const updatedAt = kpi?.generated_at ? dateTimeFormatter.format(new Date(kpi.generated_at)) : null;
+  const totalOrdersText = kpi ? `จาก ${formatNumber(kpi.total_sales_order_count)} ออเดอร์` : "-";
+  const paidOrdersText = kpi ? `ยืนยันแล้ว ${formatNumber(kpi.paid_sales_order_count)} ออเดอร์` : "-";
+  const pendingOrdersText = kpi ? `รอดำเนินการ ${formatNumber(kpi.pending_sales_order_count)} ออเดอร์` : "-";
+
   return (
-    <div className="flex items-center justify-between rounded-xl border border-border/60 bg-muted/30 px-3 py-2">
-      <p className="text-sm text-muted-foreground">{label}</p>
-      <p className="text-lg font-semibold text-foreground">{value}</p>
+    <div className="rounded-2xl border bg-card/70 p-5 shadow-sm">
+      <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h2 className="text-base font-semibold text-foreground">ยอดขายสะสม</h2>
+          <p className="text-xs text-muted-foreground">ช่วงข้อมูล: {selectedLabel}</p>
+          <p className="text-xs text-muted-foreground">เวลาร้าน: {timezoneDisplay}</p>
+          {updatedAt ? <p className="text-[11px] text-muted-foreground">อัปเดตล่าสุด: {updatedAt}</p> : null}
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {REVENUE_RANGE_PRESETS.map((preset) => (
+            <button
+              key={preset.key}
+              type="button"
+              onClick={() => onPresetSelect(preset.key)}
+              className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
+                preset.key === selectedRange
+                  ? "border-primary bg-primary/10 text-primary"
+                  : "border-border bg-background text-muted-foreground hover:border-primary/60"
+              }`}
+              disabled={preset.key === selectedRange && preset.key !== "custom" && refreshing}
+            >
+              {preset.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {selectedRange === "custom" ? (
+        <div className="mt-4 space-y-3 rounded-2xl border border-dashed border-border/80 p-3">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="text-xs font-semibold text-muted-foreground">
+              วันที่เริ่ม
+              <input
+                type="date"
+                value={customDraft.startDate}
+                onChange={(event) => onCustomDraftChange({ ...customDraft, startDate: event.target.value })}
+                className="mt-1 w-full rounded-xl border border-input bg-background px-3 py-2 text-sm"
+              />
+            </label>
+            <label className="text-xs font-semibold text-muted-foreground">
+              วันที่สิ้นสุด
+              <input
+                type="date"
+                value={customDraft.endDate}
+                onChange={(event) => onCustomDraftChange({ ...customDraft, endDate: event.target.value })}
+                className="mt-1 w-full rounded-xl border border-input bg-background px-3 py-2 text-sm"
+              />
+            </label>
+          </div>
+          {customRangeError ? (
+            <div className="rounded-xl border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs font-semibold text-destructive">
+              {customRangeError}
+            </div>
+          ) : null}
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={onApplyCustomRange}
+              className="rounded-xl bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground shadow-sm disabled:opacity-60"
+              disabled={refreshing}
+            >
+              ใช้ตัวกรอง
+            </button>
+            <button
+              type="button"
+              onClick={onClearCustomRange}
+              className="rounded-xl border border-input px-4 py-2 text-xs font-semibold text-muted-foreground disabled:opacity-60"
+              disabled={refreshing}
+            >
+              ล้างตัวกรอง
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      <div className="mt-5 space-y-3">
+        <RevenueStatRow label="ยอดขายรวม" value={formatCurrency(kpi?.total_sales_amount)} helper={totalOrdersText} />
+        <RevenueStatRow label="ยอดรับชำระแล้ว" value={formatCurrency(kpi?.paid_sales_amount)} helper={paidOrdersText} />
+        <RevenueStatRow label="ยอดรอชำระ / รอตรวจสลิป" value={formatCurrency(kpi?.pending_sales_amount)} helper={pendingOrdersText} />
+      </div>
+
+      <div className="mt-4 rounded-xl bg-muted/30 px-4 py-3 text-xs text-muted-foreground">
+        <p>ไม่รวมออเดอร์ที่ยกเลิก • ตัดออก {formatNumber(kpi?.excluded_cancelled_order_count ?? 0)} ออเดอร์</p>
+        {refreshing ? <p className="mt-1 text-[11px] text-muted-foreground">กำลังโหลดข้อมูลล่าสุด...</p> : null}
+      </div>
+    </div>
+  );
+}
+
+function RevenueStatRow({ label, value, helper }: { label: string; value: string; helper: string }) {
+  return (
+    <div className="rounded-2xl border border-border/80 bg-background/60 px-4 py-3 shadow-sm">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold text-foreground">{label}</p>
+          <p className="text-[12px] text-muted-foreground">{helper}</p>
+        </div>
+        <p className="text-2xl font-semibold text-foreground">{value}</p>
+      </div>
     </div>
   );
 }
