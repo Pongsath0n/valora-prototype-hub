@@ -107,11 +107,18 @@ export default function SettingsPage() {
           </div>
         </div>
 
-        {/* ── Display Settings ──────────────────────────── */}
+        {/* ── Display Settings (future — not active in v1) ─── */}
         <div className="stat-card space-y-4">
           <div>
-            <h2 className="section-title">การแสดงผลตัวเลข</h2>
-            <p className="text-xs text-muted-foreground mt-0.5">มีผลต่อทุกหน้าและรายงานที่ดาวน์โหลด</p>
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="section-title">การแสดงผลตัวเลข</h2>
+              <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold text-muted-foreground">
+                ยังไม่เปิดใช้ใน v1
+              </span>
+            </div>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              ปัจจุบันระบบแสดงผลเป็นเงินบาท (฿) ทั้งหมด ตัวเลือกด้านล่างจะเปิดใช้งานในเวอร์ชันถัดไป
+            </p>
           </div>
           <div className="section-divider" />
           <div className="form-group">
@@ -119,7 +126,9 @@ export default function SettingsPage() {
             <select
               value={currency}
               onChange={(e) => setCurrency(e.target.value)}
-              className="form-input"
+              disabled
+              aria-disabled="true"
+              className="form-input opacity-60 cursor-not-allowed"
             >
               <option value="THB">บาท (฿)</option>
               <option value="USD">US Dollar ($)</option>
@@ -130,13 +139,15 @@ export default function SettingsPage() {
             <select
               value={rounding}
               onChange={(e) => setRounding(e.target.value)}
-              className="form-input"
+              disabled
+              aria-disabled="true"
+              className="form-input opacity-60 cursor-not-allowed"
             >
               <option value="0">ไม่มีทศนิยม (฿100)</option>
               <option value="1">1 ตำแหน่ง (฿100.0)</option>
               <option value="2">2 ตำแหน่ง (฿100.00)</option>
             </select>
-            <p className="form-hint">ค่าเริ่มต้น: บาท (฿) ทศนิยม 1 ตำแหน่ง</p>
+            <p className="form-hint">ค่าเริ่มต้น: บาท (฿) ทศนิยม 1 ตำแหน่ง (ล็อกไว้ใน v1)</p>
           </div>
         </div>
 

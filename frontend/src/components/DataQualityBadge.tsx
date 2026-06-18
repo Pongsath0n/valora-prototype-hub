@@ -23,7 +23,7 @@ const STATUS_META: Record<DataQualityStatus, StatusMeta> = {
     badge: "bg-success/10 text-success",
     icon: ShieldCheck,
     detail: (lastChecked) =>
-      lastChecked ? `อัปเดต baseline สด ${lastChecked}` : "อัปเดต baseline สดจากระบบ",
+      lastChecked ? `อัปเดตข้อมูลล่าสุด ${lastChecked}` : "อัปเดตข้อมูลล่าสุดจากระบบ",
   },
   fallback: {
     label: "โหมดออฟไลน์ (ประมาณการ)",
@@ -32,7 +32,7 @@ const STATUS_META: Record<DataQualityStatus, StatusMeta> = {
     detail: () => "ใช้ข้อมูลประมาณการจากเครื่องนี้",
   },
   loading: {
-    label: "กำลังโหลด baseline...",
+    label: "กำลังโหลดข้อมูล...",
     badge: "bg-muted text-muted-foreground",
     icon: Loader2,
     iconClassName: "animate-spin",
@@ -41,7 +41,7 @@ const STATUS_META: Record<DataQualityStatus, StatusMeta> = {
 };
 
 const LEVEL_DETAIL: Record<DataQualityLevel, string> = {
-  confirmed: "ต้นทุนยืนยันจาก Stock Intake",
+  confirmed: "ต้นทุนยืนยันจากการซื้อเข้าสต็อกจริง",
   estimated: "ต้นทุนบางรายการยังเป็นค่าประมาณ",
 };
 

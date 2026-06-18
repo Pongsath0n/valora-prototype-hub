@@ -84,6 +84,17 @@ function legacyOrCanonical(legacyElement: React.ReactNode, canonicalPath: string
   return redirectLegacyConfig ? <Navigate to={canonicalPath} replace /> : legacyElement;
 }
 
+/**
+ * Promo and Delivery are localStorage-only prototype dashboards that render
+ * fabricated/mock data and are NOT production-ready. In production they redirect
+ * to a safe owner page; in DEV they remain reachable for internal testing (and
+ * render a clear "prototype/testing only" banner). Reuses the same DEV/prod gate
+ * as the legacy config prototypes.
+ */
+function prototypeOrRedirect(prototypeElement: React.ReactNode, fallbackPath = "/app/dashboard") {
+  return redirectLegacyConfig ? <Navigate to={fallbackPath} replace /> : prototypeElement;
+}
+
 /** Legacy alias: /app/scenario → canonical Profit Planning route. */
 export function ScenarioLegacyRedirect() {
   const location = useLocation();
@@ -193,8 +204,10 @@ function AppRoutes() {
       {/* Canonical Profit Planning route — core business engine of Valora */}
       <Route path="/app/planning" element={<ProtectedRoute><BusinessRoute><Scenario /></BusinessRoute></ProtectedRoute>} />
       <Route path="/app/scenario" element={<ScenarioLegacyRedirect />} />
-      <Route path="/app/promo" element={<ProtectedRoute><BusinessRoute><Promo /></BusinessRoute></ProtectedRoute>} />
-      <Route path="/app/delivery" element={<ProtectedRoute><BusinessRoute><Delivery /></BusinessRoute></ProtectedRoute>} />
+      {/* Promo/Delivery are localStorage-only mock prototypes — redirect to the
+          owner dashboard in production; reachable (clearly labelled) only in DEV. */}
+      <Route path="/app/promo" element={prototypeOrRedirect(<ProtectedRoute><BusinessRoute><Promo /></BusinessRoute></ProtectedRoute>)} />
+      <Route path="/app/delivery" element={prototypeOrRedirect(<ProtectedRoute><BusinessRoute><Delivery /></BusinessRoute></ProtectedRoute>)} />
       <Route path="/app/reports" element={<ProtectedRoute><BusinessRoute><Reports /></BusinessRoute></ProtectedRoute>} />
       {/* Legacy config prototypes — redirect to canonical /store-admin/* in production */}
       <Route path="/app/menu" element={legacyOrCanonical(<ProtectedRoute><BusinessRoute><MenuManagement /></BusinessRoute></ProtectedRoute>, "/store-admin/menus")} />

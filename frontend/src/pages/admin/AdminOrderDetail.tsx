@@ -18,16 +18,18 @@ import {
   paymentHasSlip,
   paymentSlipStatus,
 } from "@/lib/paymentReview";
-import { formatOrderStatus, orderStatusTone, formatPaymentStatus, paymentStatusTone, formatTHB } from "@/lib/format";
+import { formatOrderStatus, orderStatusTone, formatPaymentStatus, paymentStatusTone, formatTHB, formatNextStatusAction } from "@/lib/format";
 import { useProfileRole } from "@/contexts/RoleContext";
 
-const nextStatusActions: { label: string; next: string }[] = [
-  { label: "Mark Waiting Payment Review", next: "waiting_payment_review" },
-  { label: "Mark Accepted", next: "accepted" },
-  { label: "Mark Preparing", next: "preparing" },
-  { label: "Mark Ready", next: "ready" },
-  { label: "Mark Completed", next: "completed" },
-];
+// Order of the forward status actions. Thai labels come from the shared
+// `formatNextStatusAction` helper so they match the order-queue wording exactly.
+const NEXT_STATUS_OPTIONS = [
+  "waiting_payment_review",
+  "accepted",
+  "preparing",
+  "ready",
+  "completed",
+] as const;
 
 type OrderItemAddonSnapshot = {
   addon_id?: string;
@@ -226,7 +228,7 @@ export default function AdminOrderDetailPage() {
         <div className="stat-card">
           <p>ไม่พบออเดอร์</p>
           <Link to="/store-admin/orders" className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground transition-colors">
-            <ArrowLeft className="w-4 h-4" /> กลับไปที่ Order Queue
+            <ArrowLeft className="w-4 h-4" /> กลับไปที่คิวออเดอร์
           </Link>
         </div>
       </AdminLayout>
@@ -324,7 +326,7 @@ export default function AdminOrderDetailPage() {
   }
 
   return (
-    <AdminLayout title="รายละเอียดออเดอร์" subtitle={`Order ${order.order_no || `#${order.id}`}`}>
+    <AdminLayout title="รายละเอียดออเดอร์" subtitle={`ออเดอร์ ${order.order_no || `#${order.id}`}`}>
       <div className="stat-card space-y-2">
         <div className="flex flex-wrap items-center gap-3">
           <StatusBadge label={formatOrderStatus(order.status)} tone={orderStatusTone(order.status)} />
@@ -347,18 +349,14 @@ export default function AdminOrderDetailPage() {
           ลูกค้า: {order.customer_name || "-"} ({order.customer_phone || "-"})
         </p>
         <div className="flex flex-wrap gap-2 pt-2">
-          {nextStatusActions.map((a) => (
+          {NEXT_STATUS_OPTIONS.map((next) => (
             <button
-              key={a.next}
+              key={next}
               type="button"
-              onClick={() => handleStatus(a.next)}
-              className={`px-3 py-1.5 rounded border text-sm ${
-                a.next === "cancelled"
-                  ? "text-destructive border-destructive/40 hover:bg-destructive/10"
-                  : "hover:bg-muted"
-              }`}
+              onClick={() => handleStatus(next)}
+              className="px-3 py-1.5 rounded border text-sm hover:bg-muted"
             >
-              {a.label}
+              {formatNextStatusAction(next)}
             </button>
           ))}
           <button
@@ -367,7 +365,7 @@ export default function AdminOrderDetailPage() {
             disabled={cancelBlocked}
             className="px-3 py-1.5 rounded border text-sm text-destructive border-destructive/40 hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent"
           >
-            Cancel Order
+            ยกเลิกออเดอร์
           </button>
         </div>
         {cancelBlocked ? (

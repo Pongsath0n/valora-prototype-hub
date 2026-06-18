@@ -29,14 +29,14 @@ const PRICE_SOURCE_HINTS: Record<string, string> = {
 };
 
 const COST_SOURCE_HINTS: Record<string, string> = {
-  "recipes.ingredients.cost_engine": "สูตร + ราคาซื้อจริง (purchase-derived)",
-  purchase_derived: "ต้นทุนจาก Stock Intake",
-  manual: "กรอกเอง (manual)",
+  "recipes.ingredients.cost_engine": "สูตร + ราคาซื้อจริง",
+  purchase_derived: "ต้นทุนจากการซื้อเข้าสต็อกจริง",
+  manual: "กรอกเอง",
   estimated: "ประมาณการ",
 };
 
 const MIX_SOURCE_HINTS: Record<string, string> = {
-  order_items: "Mix จากออเดอร์จริง",
+  order_items: "สัดส่วนการขายจากออเดอร์จริง",
 };
 
 const LOCAL_SOURCE_LABEL = "ข้อมูลประมาณการจากเครื่องนี้";
@@ -190,7 +190,7 @@ export default function ScenarioPage() {
     { label: "ราคา", value: formatSourceLabel(activeBaseline?.priceSource, "price") },
     { label: "ต้นทุน", value: formatSourceLabel(activeBaseline?.costSource, "cost") },
     {
-      label: "Mix",
+      label: "สัดส่วนการขาย",
       value: formatSourceLabel(activeBaseline?.mixSource, "mix", activeBaseline?.lookbackDays),
     },
   ];
@@ -208,8 +208,8 @@ export default function ScenarioPage() {
   const baselineStatusMessages: Record<BaselineLoadState["status"], string> = {
     live: baselineUpdatedLabel ? `ข้อมูลสดจากร้าน (อัปเดต ${baselineUpdatedLabel})` : "ข้อมูลสดจากร้าน",
     fallback: "ไม่ได้เชื่อมต่อระบบ กำลังใช้ข้อมูลประมาณการจากเครื่องนี้",
-    loading: "กำลังโหลดข้อมูล baseline สดของร้าน...",
-    error: "โหลด baseline ไม่สำเร็จ กำลังใช้ข้อมูลประมาณการ",
+    loading: "กำลังโหลดข้อมูลตั้งต้นล่าสุดของร้าน...",
+    error: "โหลดข้อมูลตั้งต้นไม่สำเร็จ กำลังใช้ข้อมูลประมาณการ",
   };
   const baselineStatusTag = baselineStatusMessages[baselineState.status] ?? baselineStatusMessages.fallback;
   const baselineIsLoading = baselineState.status === "loading" && !baselineState.data;
@@ -217,23 +217,27 @@ export default function ScenarioPage() {
     dataQualityStatus === "live"
       ? baselineUpdatedLabel
         ? `อัปเดตล่าสุด ${baselineUpdatedLabel}`
-        : "อัปเดต baseline สดล่าสุด"
+        : "อัปเดตข้อมูลตั้งต้นล่าสุด"
       : dataQualityStatus === "fallback"
         ? "ข้อมูลประมาณการ ไม่ได้เชื่อมต่อระบบ"
-        : "กำลังโหลด baseline สด...";
+        : "กำลังโหลดข้อมูลตั้งต้น...";
   const baselineRecencyDescriptor =
     dataQualityStatus === "live" && baselineUpdatedLabel
-      ? `baseline สด ${baselineUpdatedLabel}`
+      ? `ข้อมูลตั้งต้น ${baselineUpdatedLabel}`
       : dataQualityStatus === "fallback"
-        ? "baseline จากข้อมูลประมาณการ"
+        ? "ข้อมูลตั้งต้นจากค่าประมาณการ"
         : null;
 
-  const diff = (a: number, b: number) => {
+  const diff = (a: number, b: number, higherIsGood = false) => {
     if (!isFinite(a) || !isFinite(b)) return { text: "-", cls: "text-muted-foreground" };
     const d = a - b;
     if (d === 0) return { text: "ไม่เปลี่ยนแปลง", cls: "text-muted-foreground" };
     const sign = d > 0 ? "+" : "";
-    return { text: `${sign}${d.toLocaleString()}`, cls: d > 0 ? "text-destructive" : "text-success" };
+    // Direction-aware semantics (display only — no calculation change):
+    // net profit higher = good (green); break-even / cups-needed / revenue-needed
+    // higher = worse (red).
+    const isImprovement = higherIsGood ? d > 0 : d < 0;
+    return { text: `${sign}${d.toLocaleString()}`, cls: isImprovement ? "text-success" : "text-destructive" };
   };
 
   const saveScenario = () => {
@@ -270,11 +274,11 @@ export default function ScenarioPage() {
   const cm = avgPrice - avgCost;
 
   const kpiRows = [
-    { label: "จุดคุ้มทุน (แก้ว/เดือน)", unit: "แก้ว", base: baselineKPIs.bepMonth, scen: scenario.bepMonth },
-    { label: "จุดคุ้มทุน (แก้ว/วัน)", unit: "แก้ว", base: baselineKPIs.bepDay, scen: scenario.bepDay },
-    { label: "ยอดขายเพื่อกำไรเป้า (แก้ว/วัน)", unit: "แก้ว", base: baselineKPIs.targetCupsDay, scen: scenario.targetCupsDay },
-    { label: "รายได้ที่ต้องทำ (บาท/วัน)", unit: "฿", base: baselineKPIs.revenueDay, scen: scenario.revenueDay },
-    { label: "กำไรสุทธิประมาณการ (บาท/เดือน)", unit: "฿", base: baselineKPIs.netProfit, scen: scenario.netProfit },
+    { label: "จุดคุ้มทุน (แก้ว/เดือน)", unit: "แก้ว", base: baselineKPIs.bepMonth, scen: scenario.bepMonth, higherIsGood: false },
+    { label: "จุดคุ้มทุน (แก้ว/วัน)", unit: "แก้ว", base: baselineKPIs.bepDay, scen: scenario.bepDay, higherIsGood: false },
+    { label: "ยอดขายเพื่อกำไรเป้า (แก้ว/วัน)", unit: "แก้ว", base: baselineKPIs.targetCupsDay, scen: scenario.targetCupsDay, higherIsGood: false },
+    { label: "รายได้ที่ต้องทำ (บาท/วัน)", unit: "฿", base: baselineKPIs.revenueDay, scen: scenario.revenueDay, higherIsGood: false },
+    { label: "กำไรสุทธิประมาณการ (บาท/เดือน)", unit: "฿", base: baselineKPIs.netProfit, scen: scenario.netProfit, higherIsGood: true },
   ];
 
   return (
@@ -298,7 +302,7 @@ export default function ScenarioPage() {
               ตัวเลขทั้งสองส่วนอาจต่างกันได้หากมีการปรับราคา สูตร หรือข้อมูลวัตถุดิบล่าสุด
             </p>
             <p className="text-xs text-muted-foreground">
-              ค่าเริ่มต้นด้านล่างมาจาก baseline สดของร้าน หากเชื่อมต่อไม่ได้ ระบบจะใช้ข้อมูลตัวอย่างจากเครื่องนี้และระบุว่าเป็นข้อมูลประมาณการ
+              ค่าเริ่มต้นด้านล่างมาจากข้อมูลตั้งต้นล่าสุดของร้าน หากเชื่อมต่อไม่ได้ ระบบจะใช้ข้อมูลตัวอย่างจากเครื่องนี้และระบุว่าเป็นข้อมูลประมาณการ
             </p>
           </div>
         </div>
@@ -307,7 +311,7 @@ export default function ScenarioPage() {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">ข้อมูลต้นทุนล่าสุด</p>
-              <h2 className="text-lg font-semibold text-foreground">Profit Planning Baseline</h2>
+              <h2 className="text-lg font-semibold text-foreground">ข้อมูลตั้งต้นสำหรับวางแผนกำไร</h2>
               <div className="text-xs text-muted-foreground mt-1">{baselineStatusTag}</div>
             </div>
             <DataQualityBadge level={dataQualityLevel} status={dataQualityStatus} lastChecked={dataQualityTimestamp} />
@@ -315,7 +319,7 @@ export default function ScenarioPage() {
 
           {baselineIsLoading ? (
             <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
-              กำลังโหลดข้อมูล baseline ล่าสุดของร้าน...
+              กำลังโหลดข้อมูลตั้งต้นล่าสุดของร้าน...
             </div>
           ) : (
             <>
@@ -359,7 +363,7 @@ export default function ScenarioPage() {
 
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
-                  <p className="text-sm font-semibold text-foreground">ตัวอย่างเมนูจาก baseline</p>
+                  <p className="text-sm font-semibold text-foreground">ตัวอย่างเมนู</p>
                   {baselineMenuTimestampNote && <span className="text-xs text-muted-foreground">{baselineMenuTimestampNote}</span>}
                 </div>
                 <div className="overflow-x-auto">
@@ -391,7 +395,7 @@ export default function ScenarioPage() {
                       {baselineMenuPreview.length === 0 && (
                         <tr>
                           <td colSpan={5} className="py-4 text-center text-sm text-muted-foreground">
-                            ยังไม่มีเมนูใน baseline โปรดเพิ่มเมนูและสูตรก่อนใช้งานการวางแผน
+                            ยังไม่มีเมนูสำหรับวางแผน โปรดเพิ่มเมนูและสูตรก่อนใช้งาน
                           </td>
                         </tr>
                       )}
@@ -456,16 +460,35 @@ export default function ScenarioPage() {
                 />
               </div>
 
-              <div className="flex gap-2">
-                <button
-                  onClick={saveScenario}
-                  className="flex-1 flex items-center justify-center gap-1.5 bg-primary text-primary-foreground py-2 rounded-lg text-sm font-medium hover:opacity-90 transition-opacity"
-                >
-                  <Save className="w-4 h-4" /> บันทึกสถานการณ์
-                </button>
-                <button className="flex items-center justify-center gap-1.5 bg-secondary text-secondary-foreground px-4 py-2 rounded-lg text-sm font-medium hover:bg-secondary/80 transition-colors">
-                  <FileText className="w-4 h-4" /> บันทึกเป็นรายงาน
-                </button>
+              <div className="space-y-1.5">
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  {/* Active primary action */}
+                  <button
+                    type="button"
+                    onClick={saveScenario}
+                    className="flex h-11 items-center justify-center gap-1.5 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
+                  >
+                    <Save className="w-4 h-4 flex-shrink-0" /> บันทึกสถานการณ์
+                  </button>
+                  {/* Future action — intentionally non-interactive in v1. Styled as a
+                      dashed "coming soon" tile so it never reads as a working button. */}
+                  <button
+                    type="button"
+                    disabled
+                    aria-disabled="true"
+                    title="บันทึกเป็นรายงานยังไม่พร้อมใช้งานใน v1 — จะเปิดใช้ในเวอร์ชันถัดไป"
+                    className="flex h-11 cursor-not-allowed items-center justify-center gap-1.5 rounded-lg border border-dashed border-border bg-muted/40 px-4 text-sm font-medium text-muted-foreground"
+                  >
+                    <FileText className="w-4 h-4 flex-shrink-0" />
+                    <span>บันทึกเป็นรายงาน</span>
+                    <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-semibold leading-none text-muted-foreground">
+                      เร็ว ๆ นี้
+                    </span>
+                  </button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  “บันทึกสถานการณ์” ใช้งานได้แล้ว • “บันทึกเป็นรายงาน” ยังไม่พร้อมใช้งานใน v1
+                </p>
               </div>
             </div>
           </div>
@@ -495,7 +518,7 @@ export default function ScenarioPage() {
                 </thead>
                 <tbody>
                   {kpiRows.map((row, i) => {
-                    const d = diff(row.scen, row.base);
+                    const d = diff(row.scen, row.base, row.higherIsGood);
                     const isInf = !isFinite(row.scen);
                     return (
                       <tr key={i}>
@@ -546,17 +569,17 @@ export default function ScenarioPage() {
             <AssumptionsDrawer
               title="วิธีคำนวณ"
               inputSources={[
-                "ราคา + ต้นทุนเฉลี่ยจาก baseline สด (หรือข้อมูลประมาณการหากออฟไลน์)",
+                "ราคา + ต้นทุนเฉลี่ยจากข้อมูลตั้งต้นล่าสุด (หรือค่าประมาณการหากออฟไลน์)",
                 "ค่าใช้จ่ายคงที่และเป้ากำไรที่เจ้าของร้านปรับในหน้านี้",
-                "Mix% ย้อนหลัง (หากไม่มีจะเฉลี่ยน้ำหนักเมนูเท่าๆ กัน)",
+                "สัดส่วนการขายย้อนหลัง (หากไม่มีจะเฉลี่ยน้ำหนักเมนูเท่าๆ กัน)",
               ]}
               formulas={[
                 { label: "จุดคุ้มทุน", formula: "= ค่าใช้จ่ายคงที่ / กำไรขั้นต้นต่อแก้ว" },
                 { label: "กำไรสุทธิ", formula: "= (แก้วเป้า/วัน x วันเปิดขาย x กำไรขั้นต้น/แก้ว) - ค่าใช้จ่ายคงที่" },
               ]}
               assumptions={[
-                { text: "ใช้ค่าเฉลี่ยถ่วงน้ำหนักจาก Mix ปัจจุบัน หรือเฉลี่ยเท่าๆ กันถ้ายังไม่มีข้อมูลขาย" },
-                { text: "สมมติว่า Mix% และโครงสร้างต้นทุนไม่เปลี่ยนแปลงระหว่างจำลอง" },
+                { text: "ใช้ค่าเฉลี่ยถ่วงน้ำหนักจากสัดส่วนการขายปัจจุบัน หรือเฉลี่ยเท่าๆ กันถ้ายังไม่มีข้อมูลขาย" },
+                { text: "สมมติว่าสัดส่วนการขายและโครงสร้างต้นทุนไม่เปลี่ยนแปลงระหว่างจำลอง" },
                 { text: "ผลลัพธ์เป็นการวางแผนล่วงหน้า ไม่ใช่รายงานยอดขายจริง" },
               ]}
             />

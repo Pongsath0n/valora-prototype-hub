@@ -4,6 +4,7 @@ import { CheckCircle2, Plus, Trash2, Info, Lightbulb, Eye, EyeOff } from "lucide
 import { shopService, fixedCostService, menuService } from "@/services/mockStorage";
 import type { FixedCostRow, MenuRow } from "@/services/types";
 import LogoBrand from "@/components/LogoBrand";
+import { useProfileRole } from "@/contexts/RoleContext";
 
 
 const defaultFixedCosts: FixedCostRow[] = [
@@ -30,6 +31,7 @@ let nextMenuId = 4;
 
 export default function OnboardingPage() {
   const navigate = useNavigate();
+  const { role } = useProfileRole();
   const [step, setStep] = useState(0);
 
   // Step 1 — initialise from localStorage so returning users see saved data
@@ -51,7 +53,9 @@ export default function OnboardingPage() {
     fixedCostService.set(fixedCosts);
     menuService.set(menuRows);
     localStorage.setItem("valora:onboarded", "1");
-    navigate("/app/dashboard");
+    // Staff never belong in the owner business portal — send them to the store
+    // workspace so finishing onboarding cannot bounce them into Access Denied.
+    navigate(role === "staff" ? "/store-admin" : "/app/dashboard");
   };
 
 

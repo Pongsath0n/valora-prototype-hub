@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import AdminLayout from "@/components/admin/AdminLayout";
+import { useProfileRole } from "@/contexts/RoleContext";
 import DataTable from "@/components/shared/DataTable";
 import StatusBadge from "@/components/shared/StatusBadge";
 import { Download, Search, ClipboardList, Inbox, AlertTriangle } from "lucide-react";
@@ -176,6 +177,10 @@ const emptyStateCopy: Record<TabKey, { title: string; hint: string }> = {
 };
 
 export default function AdminOrdersPage() {
+  // Data export is an owner/admin/manager capability (it can include cost data).
+  // Staff never see the export controls; the backend remains the final authority.
+  const { role } = useProfileRole();
+  const canExport = role ? ["owner", "admin", "manager"].includes(role) : false;
   const [rows, setRows] = useState<ApiOrder[]>([]);
   const [paymentQueue, setPaymentQueue] = useState<ApiPayment[]>([]);
   const [activeTab, setActiveTab] = useState<TabKey>("queue");
@@ -505,26 +510,28 @@ export default function AdminOrdersPage() {
           </button>
         ))}
         {refreshing ? <span className="text-xs text-muted-foreground self-center">กำลังโหลด...</span> : null}
-        <div className="flex gap-2 ml-auto">
-          <button
-            type="button"
-            className="inline-flex items-center gap-1 rounded border px-3 py-1.5 text-xs"
-            onClick={handleExportOrders}
-            disabled={exportingOrders}
-          >
-            <Download className="w-3 h-3" />
-            {exportingOrders ? "กำลังส่งออก..." : "Export Orders"}
-          </button>
-          <button
-            type="button"
-            className="inline-flex items-center gap-1 rounded border px-3 py-1.5 text-xs"
-            onClick={handleExportPayments}
-            disabled={exportingPayments}
-          >
-            <Download className="w-3 h-3" />
-            {exportingPayments ? "กำลังส่งออก..." : "Export Payments"}
-          </button>
-        </div>
+        {canExport ? (
+          <div className="flex gap-2 ml-auto">
+            <button
+              type="button"
+              className="inline-flex items-center gap-1 rounded border px-3 py-1.5 text-xs"
+              onClick={handleExportOrders}
+              disabled={exportingOrders}
+            >
+              <Download className="w-3 h-3" />
+              {exportingOrders ? "กำลังส่งออก..." : "ส่งออกออเดอร์"}
+            </button>
+            <button
+              type="button"
+              className="inline-flex items-center gap-1 rounded border px-3 py-1.5 text-xs"
+              onClick={handleExportPayments}
+              disabled={exportingPayments}
+            >
+              <Download className="w-3 h-3" />
+              {exportingPayments ? "กำลังส่งออก..." : "ส่งออกการชำระเงิน"}
+            </button>
+          </div>
+        ) : null}
         <div className="ml-auto flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs text-muted-foreground bg-background">
           <Search className="w-3.5 h-3.5" />
           <input
@@ -547,7 +554,7 @@ export default function AdminOrdersPage() {
       {activeTab === "payments" ? (
         <div className="stat-card mb-4">
           <p className="text-sm text-muted-foreground">
-            ใช้สำหรับตรวจสอบและอนุมัติการชำระเงิน (mock trigger LINE):
+            เมื่ออนุมัติการชำระเงิน ลูกค้าจะได้รับข้อความแจ้งเตือน:
             "ตรวจสอบการชำระเงินสำเร็จแล้ว กำลังเตรียมเครื่องดื่มให้คุณ"
           </p>
         </div>
@@ -556,7 +563,7 @@ export default function AdminOrdersPage() {
       {activeTab === "ready" || activeTab === "completed" ? (
         <div className="stat-card mb-4">
           <p className="text-sm text-muted-foreground">
-            เมื่อออเดอร์พร้อมรับ/สำเร็จ (mock trigger LINE):
+            เมื่อออเดอร์พร้อมรับ/สำเร็จ ลูกค้าจะได้รับข้อความแจ้งเตือน:
             "เครื่องดื่มของคุณพร้อมแล้ว สามารถมารับได้เลยครับ"
           </p>
         </div>

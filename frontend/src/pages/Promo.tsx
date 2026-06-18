@@ -90,6 +90,9 @@ export default function PromoPage() {
   return (
     <AppLayout>
       <div className="space-y-6">
+        <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-2.5 text-xs text-amber-800">
+          หน้านี้เป็นต้นแบบสำหรับทดสอบภายใน (prototype) — ข้อมูลเป็นตัวอย่างที่เก็บในเครื่องนี้เท่านั้น ยังไม่เชื่อมต่อข้อมูลจริง และจะไม่แสดงในเวอร์ชันใช้งานจริง
+        </div>
         {/* ── Page Header ─────────────────────────────── */}
         <div className="page-header">
           <div>
