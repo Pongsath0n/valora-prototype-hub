@@ -15,6 +15,7 @@
     "e2e:security-audit": "node scripts/e2e/security-audit-smoke.mjs",
     "e2e:owner-dashboard-freshness-smoke": "node scripts/e2e/owner-dashboard-freshness-smoke.mjs",
     "e2e:planning-baseline-smoke": "node scripts/e2e/planning-baseline-smoke.mjs",
+    "e2e:recipe-cost-coverage-smoke": "node scripts/e2e/recipe-cost-coverage-smoke.mjs",
     "e2e:stock-intake-smoke": "node scripts/e2e/stock-intake-smoke.mjs",
     "e2e:dashboard-revenue-kpi-smoke": "node scripts/e2e/dashboard-revenue-kpi-smoke.mjs",
     "test:phase4": "node scripts/e2e/order-payment-lifecycle.mjs",

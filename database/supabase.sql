@@ -45,8 +45,17 @@
 -- Table: products
 -- Columns: id (uuid, pk), store_id (uuid fk -> stores), category_id (uuid fk -> product_categories, nullable), name (text, not null), sku (text, nullable), is_active (bool, default true), base_price (numeric(12,2) default 0), created_at (timestamptz), updated_at (timestamptz)
 
+-- Table: product_addons
+-- Columns: id (uuid, pk), store_id (uuid fk -> stores), product_id (uuid fk -> products), name (text, not null), code (text, nullable), addon_type (text, nullable), price (numeric(12,2) default 0), max_quantity (int, nullable), is_active (bool default true), created_at (timestamptz)
+
+-- Table: product_addon_recipes
+-- Columns: id (uuid, pk), store_id (uuid fk -> stores), addon_id (uuid fk -> product_addons), ingredient_id (uuid fk -> ingredients), quantity_used (numeric(12,4)), unit (text, nullable), created_at (timestamptz), unique(addon_id, ingredient_id)
+
 -- Table: ingredients
 -- Columns: id (uuid, pk), store_id (uuid fk -> stores), name (text, not null), unit (text), cost_per_unit (numeric(12,4) default 0), stock_on_hand (numeric(12,3) default 0), low_stock_threshold (numeric(12,3) default 0), created_at (timestamptz), updated_at (timestamptz)
+
+-- Table: ingredient_purchases
+-- Columns: id (uuid, pk), store_id (uuid fk -> stores), ingredient_id (uuid fk -> ingredients), quantity (numeric), normalized_quantity (numeric), purchase_unit (text), conversion_factor (numeric), total_cost (numeric), unit_cost_snapshot (numeric), supplier_name (text, nullable), payment_status (text), paid_at (timestamptz, nullable), due_date (date, nullable), note (text, nullable), receipt_url (text, nullable), receipt_storage_path (text, nullable), created_at (timestamptz), created_by (uuid fk -> profiles, nullable)
 
 -- Table: recipes
 -- Columns: id (uuid, pk), store_id (uuid fk -> stores), product_id (uuid fk -> products), ingredient_id (uuid fk -> ingredients), quantity_used (numeric(12,4)), created_at (timestamptz), unique(product_id, ingredient_id)

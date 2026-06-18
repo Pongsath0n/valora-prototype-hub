@@ -396,6 +396,9 @@ export type PlanningBaselineIngredientLine = {
   cost_per_unit?: number | null;
   line_cost?: number | null;
   cost_type?: string | null;
+  cost_source?: string | null;
+  is_active?: boolean | null;
+  issues?: string[] | null;
 };
 
 export type PlanningBaselineAddon = {
@@ -420,6 +423,20 @@ export type PlanningBaselineItem = {
   ingredient_breakdown?: PlanningBaselineIngredientLine[];
   addons?: PlanningBaselineAddon[];
   historical_mix_percent?: number | null;
+  has_addon_cost_gap?: boolean;
+  addon_cost_status?: string | null;
+  recipe_issue_codes?: string[];
+};
+
+export type PlanningBaselineWarningSummary = {
+  missing_recipe_products: number;
+  missing_ingredient_products: number;
+  missing_ingredient_cost_products: number;
+  zero_quantity_recipe_products: number;
+  missing_addon_recipe_count: number;
+  addon_cost_gap_products: number;
+  manual_cost_ingredients_count: number;
+  purchase_derived_ingredients_count: number;
 };
 
 export type PlanningBaselineResponse = {
@@ -438,6 +455,7 @@ export type PlanningBaselineResponse = {
   };
   items: PlanningBaselineItem[];
   warnings: string[];
+  warning_summary?: PlanningBaselineWarningSummary;
 };
 
 export type SalesReportSummary = {

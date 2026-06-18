@@ -4165,10 +4165,15 @@ def _load_planning_products(client: Client, store_id: str) -> List[Dict[str, Any
     return [product for product in mapped if product.get("is_active", True)]
 
 
-def _summarize_ingredient_breakdown(breakdown: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], bool, bool]:
+def _summarize_ingredient_breakdown(
+    breakdown: List[Dict[str, Any]]
+) -> Tuple[List[Dict[str, Any]], bool, bool, Dict[str, Any]]:
     summarized: List[Dict[str, Any]] = []
     missing_ingredient = False
     missing_cost = False
+    issue_codes: Set[str] = set()
+    purchase_derived_count = 0
+    other_cost_count = 0
 
     for item in breakdown:
         ingredient_id = item.get("ingredient_id")
@@ -4178,11 +4183,24 @@ def _summarize_ingredient_breakdown(breakdown: List[Dict[str, Any]]) -> Tuple[Li
         cost_per_unit = _parse_float(item.get("cost_per_unit"))
         line_cost = _parse_float(item.get("line_cost"))
         cost_type = item.get("cost_type")
+        cost_source = item.get("cost_source")
+        ingredient_active = item.get("ingredient_is_active")
+        row_issues = item.get("issues") or []
 
         if ingredient_id and not ingredient_name:
             missing_ingredient = True
         if ingredient_name and cost_per_unit <= 0:
             missing_cost = True
+        if row_issues:
+            issue_codes.update(str(code) for code in row_issues if code)
+
+        if cost_source == "purchase_derived":
+            purchase_derived_count += 1
+        elif cost_source:
+            other_cost_count += 1
+        elif ingredient_name and cost_per_unit > 0:
+            # Treat unknown sources as manual/other when cost exists
+            other_cost_count += 1
 
         summarized.append(
             {
@@ -4193,10 +4211,20 @@ def _summarize_ingredient_breakdown(breakdown: List[Dict[str, Any]]) -> Tuple[Li
                 "unit": unit,
                 "cost_per_unit": cost_per_unit,
                 "line_cost": line_cost,
+                "cost_source": cost_source,
+                "is_active": ingredient_active,
+                "issues": row_issues,
             }
         )
 
-    return summarized, missing_ingredient, missing_cost
+    meta = {
+        "issue_codes": issue_codes,
+        "purchase_derived_count": purchase_derived_count,
+        "other_cost_count": other_cost_count,
+        "ingredient_count": len(summarized),
+    }
+
+    return summarized, missing_ingredient, missing_cost, meta
 
 
 def _safe_collect_product_addons_for_planning(client: Client, store_id: str, product_id: str) -> List[Dict[str, Any]]:
@@ -4222,9 +4250,12 @@ def _safe_collect_product_addons_for_planning(client: Client, store_id: str, pro
         return []
 
 
-def _summarize_addons(client: Client, store_id: str, product_id: str) -> List[Dict[str, Any]]:
+def _summarize_addons(client: Client, store_id: str, product_id: str) -> Tuple[List[Dict[str, Any]], Dict[str, int]]:
     addons: List[Dict[str, Any]] = []
     addon_rows = _safe_collect_product_addons_for_planning(client, store_id, product_id)
+    gap_count = 0
+    missing_recipe_count = 0
+    missing_cost_count = 0
     for addon in addon_rows:
         if addon.get("is_active") is False:
             continue
@@ -4236,8 +4267,12 @@ def _summarize_addons(client: Client, store_id: str, product_id: str) -> List[Di
         has_recipe = bool(addon.get("has_recipe"))
         if not has_recipe:
             cost_status = "missing_addon_recipe"
+            gap_count += 1
+            missing_recipe_count += 1
         elif unit_cost <= 0:
             cost_status = "estimated"
+            gap_count += 1
+            missing_cost_count += 1
         else:
             cost_status = "complete"
         addons.append(
@@ -4249,7 +4284,13 @@ def _summarize_addons(client: Client, store_id: str, product_id: str) -> List[Di
                 "cost_status": cost_status,
             }
         )
-    return addons
+
+    meta = {
+        "gap_count": gap_count,
+        "missing_recipe_count": missing_recipe_count,
+        "missing_cost_count": missing_cost_count,
+    }
+    return addons, meta
 
 
 def _build_planning_product_entry(
@@ -4257,27 +4298,30 @@ def _build_planning_product_entry(
     store_id: str,
     product: Dict[str, Any],
     mix_percent: Optional[float],
-) -> Dict[str, Any]:
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     product_id = str(product.get("id"))
     base_price = _parse_float(product.get("base_price"))
     base_cost, breakdown, base_status = _calculate_recipe_cost(client, store_id, product_id)
-    ingredient_breakdown, missing_ingredient, missing_cost = _summarize_ingredient_breakdown(breakdown)
+    ingredient_breakdown, missing_ingredient, missing_cost, ingredient_meta = _summarize_ingredient_breakdown(breakdown)
+
+    issue_codes = set(ingredient_meta.get("issue_codes", set()))
+    if missing_ingredient:
+        issue_codes.add("missing_ingredient")
+    if missing_cost:
+        issue_codes.add("missing_ingredient_cost")
 
     cost_status = base_status
     recipe_complete = cost_status == "complete"
-    if cost_status == "complete":
-        if not ingredient_breakdown:
-            cost_status = "missing_recipe"
-            recipe_complete = False
-        elif missing_ingredient:
-            cost_status = "missing_ingredient"
-            recipe_complete = False
-        elif missing_cost:
-            cost_status = "missing_ingredient_cost"
-            recipe_complete = False
-        elif base_cost <= 0:
-            cost_status = "estimated"
-            recipe_complete = False
+    if not ingredient_breakdown:
+        cost_status = "missing_recipe"
+        recipe_complete = False
+        issue_codes.add("missing_recipe")
+
+    addons, addon_meta = _summarize_addons(client, store_id, product_id)
+    has_addon_cost_gap = addon_meta.get("gap_count", 0) > 0
+
+    if cost_status != "complete":
+        issue_codes.add(cost_status)
 
     gross_profit = base_price - base_cost
     gross_margin_percent: Optional[float]
@@ -4286,9 +4330,7 @@ def _build_planning_product_entry(
     else:
         gross_margin_percent = None
 
-    addons = _summarize_addons(client, store_id, product_id)
-
-    return {
+    entry: Dict[str, Any] = {
         "product_id": product_id,
         "name": product.get("name"),
         "category": product.get("category_name"),
@@ -4302,7 +4344,22 @@ def _build_planning_product_entry(
         "ingredient_breakdown": ingredient_breakdown,
         "addons": addons,
         "historical_mix_percent": mix_percent,
+        "has_addon_cost_gap": has_addon_cost_gap,
+        "addon_cost_status": "incomplete" if has_addon_cost_gap else "complete",
     }
+    if issue_codes:
+        entry["recipe_issue_codes"] = sorted(issue_codes)
+
+    meta = {
+        "issue_codes": issue_codes,
+        "purchase_derived_count": ingredient_meta.get("purchase_derived_count", 0),
+        "other_cost_count": ingredient_meta.get("other_cost_count", 0),
+        "ingredient_count": ingredient_meta.get("ingredient_count", 0),
+        "has_addon_cost_gap": has_addon_cost_gap,
+        "missing_addon_recipe_count": addon_meta.get("missing_recipe_count", 0),
+    }
+
+    return entry, meta
 
 
 def _collect_recent_mix(
@@ -4372,14 +4429,61 @@ def _build_planning_payload(client: Client, store_id: str, lookback_days: int) -
 
     mix_map, mix_source = _collect_recent_mix(client, store_id, lookback_days)
     products = _load_planning_products(client, store_id)
-    items = []
+    items: List[Dict[str, Any]] = []
+    product_metas: List[Dict[str, Any]] = []
     for product in products:
         mix_percent = mix_map.get(product.get("id")) if mix_map else None
-        items.append(_build_planning_product_entry(client, store_id, product, mix_percent))
+        entry, meta = _build_planning_product_entry(client, store_id, product, mix_percent)
+        items.append(entry)
+        product_metas.append(meta)
 
     warnings: List[str] = []
     if mix_source != "order_items":
         warnings.append("historical_mix_unavailable")
+
+    warning_summary = {
+        "missing_recipe_products": 0,
+        "missing_ingredient_products": 0,
+        "missing_ingredient_cost_products": 0,
+        "zero_quantity_recipe_products": 0,
+        "missing_addon_recipe_count": 0,
+        "addon_cost_gap_products": 0,
+        "manual_cost_ingredients_count": 0,
+        "purchase_derived_ingredients_count": 0,
+    }
+
+    has_blocking_gap = False
+    for entry, meta in zip(items, product_metas):
+        issue_codes = set(meta.get("issue_codes", set()))
+        if "missing_recipe" in issue_codes:
+            warning_summary["missing_recipe_products"] += 1
+            has_blocking_gap = True
+        if "missing_ingredient" in issue_codes:
+            warning_summary["missing_ingredient_products"] += 1
+            has_blocking_gap = True
+        if "missing_ingredient_cost" in issue_codes:
+            warning_summary["missing_ingredient_cost_products"] += 1
+            has_blocking_gap = True
+        if "zero_quantity" in issue_codes:
+            warning_summary["zero_quantity_recipe_products"] += 1
+            has_blocking_gap = True
+
+        if entry.get("has_addon_cost_gap"):
+            warning_summary["addon_cost_gap_products"] += 1
+            has_blocking_gap = True
+        warning_summary["missing_addon_recipe_count"] += meta.get("missing_addon_recipe_count", 0)
+
+        warning_summary["purchase_derived_ingredients_count"] += meta.get("purchase_derived_count", 0)
+        warning_summary["manual_cost_ingredients_count"] += meta.get("other_cost_count", 0)
+
+        if entry.get("cost_status") != "complete":
+            has_blocking_gap = True
+
+    baseline_cost_source = _classify_baseline_cost_source(
+        has_blocking_gap,
+        warning_summary["purchase_derived_ingredients_count"],
+        warning_summary["manual_cost_ingredients_count"],
+    )
 
     return {
         "store": {
@@ -4393,11 +4497,28 @@ def _build_planning_payload(client: Client, store_id: str, lookback_days: int) -
             "lookback_days": lookback_days,
             "mix_source": mix_source,
             "price_source": "products.base_price",
-            "cost_source": "recipes.ingredients.cost_engine",
+            "cost_source": baseline_cost_source,
         },
         "items": items,
         "warnings": warnings,
+        "warning_summary": warning_summary,
     }
+
+
+def _classify_baseline_cost_source(has_blocking_gap: bool, purchase_derived_count: int, manual_count: int) -> str:
+    if has_blocking_gap:
+        return "estimated"
+
+    if purchase_derived_count <= 0 and manual_count <= 0:
+        return "estimated"
+
+    if purchase_derived_count > 0 and manual_count == 0:
+        return "purchase_derived"
+
+    if purchase_derived_count > 0 and manual_count > 0:
+        return "mixed"
+
+    return "manual"
 
 
 @router.get("/planning/baseline")

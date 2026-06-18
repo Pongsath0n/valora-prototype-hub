@@ -1,4 +1,4 @@
-import type { PlanningBaselineItem, PlanningBaselineResponse } from "@/services/storeAdminApi";
+import type { PlanningBaselineItem, PlanningBaselineResponse, PlanningBaselineWarningSummary } from "@/services/storeAdminApi";
 import type { MenuRow } from "@/services/types";
 
 export type PlanningBaselineMenuSummary = {
@@ -11,6 +11,7 @@ export type PlanningBaselineMenuSummary = {
   costStatus: string | null;
   recipeComplete: boolean;
   historicalMixPercent: number | null;
+  has_addon_cost_gap?: boolean;
 };
 
 export type PlanningBaselineAdapterResult = {
@@ -28,6 +29,8 @@ export type PlanningBaselineAdapterResult = {
   hasIncompleteRecipes: boolean;
   hasEstimatedCosts: boolean;
   mixFallbackApplied: boolean;
+  hasAddonCostGaps: boolean;
+  warningSummary?: PlanningBaselineWarningSummary;
 };
 
 const MIX_WARNING_MESSAGES: Record<string, string> = {
@@ -40,6 +43,7 @@ const COST_STATUS_NEEDS_REVIEW = new Set([
   "missing_ingredient_cost",
   "estimated",
   "manual",
+  "zero_quantity",
 ]);
 
 function safeNumber(value: unknown): number {
@@ -77,8 +81,21 @@ function buildDerivedWarnings(result: PlanningBaselineAdapterResult): string[] {
   if (result.hasIncompleteRecipes) {
     alerts.add("สูตรยังไม่ครบ ต้นทุนเมนูนี้อาจต่ำกว่าความจริง");
   }
+  if (result.hasAddonCostGaps) {
+    alerts.add("ตัวเลือกเสริมบางรายการยังไม่มีสูตรหรือบันทึกต้นทุน โปรดตรวจสอบ Add-on");
+  }
   if (result.mixFallbackApplied) {
     alerts.add("ยังไม่มีข้อมูล Mix ล่าสุด ระบบจะกระจายน้ำหนักเมนูเท่าๆ กันชั่วคราว");
+  }
+
+  const summary = result.warningSummary;
+  if (summary) {
+    if (summary.zero_quantity_recipe_products > 0) {
+      alerts.add("พบสูตรที่มีปริมาณเป็นศูนย์ โปรดใส่ปริมาณวัตถุดิบให้ครบถ้วน");
+    }
+    if (summary.missing_recipe_products > 0) {
+      alerts.add("ยังมีเมนูที่ไม่ได้บันทึกสูตรเลย ทำให้ต้นทุนไม่ครบ");
+    }
   }
   return Array.from(alerts);
 }
@@ -94,6 +111,7 @@ function toMenuSummary(item: PlanningBaselineItem): PlanningBaselineMenuSummary 
     costStatus: item.cost_status ?? null,
     recipeComplete: Boolean(item.recipe_complete),
     historicalMixPercent: typeof item.historical_mix_percent === "number" ? item.historical_mix_percent : null,
+    has_addon_cost_gap: item.has_addon_cost_gap,
   };
 }
 
@@ -112,7 +130,10 @@ export function adaptPlanningBaseline(response: PlanningBaselineResponse): Plann
   const summaries = items.map(toMenuSummary);
   const hasIncompleteRecipes = summaries.some((item) => !item.recipeComplete || COST_STATUS_NEEDS_REVIEW.has(item.costStatus ?? ""));
   const hasEstimatedCosts = summaries.some((item) => COST_STATUS_NEEDS_REVIEW.has(item.costStatus ?? ""));
-  const dataQualityLevel: "confirmed" | "estimated" = !hasIncompleteRecipes && response.baseline.cost_source === "purchase_derived" ? "confirmed" : "estimated";
+  const hasAddonCostGaps = summaries.some((item) => item.has_addon_cost_gap);
+  const warningSummary = response.warning_summary;
+  const isPurchaseDerived = response.baseline.cost_source === "purchase_derived";
+  const dataQualityLevel: "confirmed" | "estimated" = !hasIncompleteRecipes && !hasAddonCostGaps && isPurchaseDerived ? "confirmed" : "estimated";
 
   const result: PlanningBaselineAdapterResult = {
     items: summaries,
@@ -129,6 +150,8 @@ export function adaptPlanningBaseline(response: PlanningBaselineResponse): Plann
     hasIncompleteRecipes,
     hasEstimatedCosts,
     mixFallbackApplied,
+    hasAddonCostGaps,
+    warningSummary,
   };
 
   result.derivedWarnings = buildDerivedWarnings(result);
@@ -178,5 +201,7 @@ export function buildFallbackBaselineFromMenu(menuRows: MenuRow[]): PlanningBase
     hasIncompleteRecipes: true,
     hasEstimatedCosts: true,
     mixFallbackApplied: mixSum === 0,
+    hasAddonCostGaps: false,
+    warningSummary: undefined,
   };
 }

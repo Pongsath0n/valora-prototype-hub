@@ -6,6 +6,7 @@ from fastapi import HTTPException
 
 from app.api.store_admin import _mask_order_item_fields
 from app.services.cost_engine import (
+    _calculate_recipe_cost,
     build_order_item_record,
     mask_option_costs,
     prepare_order_item_snapshot,
@@ -29,6 +30,84 @@ def _snapshot_template(overrides: Dict[str, Any]) -> Dict[str, Any]:
     }
     base.update(overrides)
     return base
+
+class CalculateRecipeCostTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.client = object()
+        self.store_id = "store-1"
+        self.product_id = "prod-1"
+
+    def _patch_recipe(self, recipe_rows, ingredient_map):
+        return patch.multiple(
+            "app.services.cost_engine",
+            _fetch_recipe_rows=lambda *_args, **_kwargs: recipe_rows,
+            _fetch_ingredients_map=lambda *_args, **_kwargs: ingredient_map,
+        )
+
+    def test_complete_recipe_returns_complete(self):
+        recipe_rows = [
+            {"ingredient_id": "ing-1", "quantity_used": 10, "unit": "g"},
+        ]
+        ingredient_map = {
+            "ing-1": {"id": "ing-1", "cost_per_unit": 2, "unit": "g", "is_active": True},
+        }
+        with self._patch_recipe(recipe_rows, ingredient_map):
+            total_cost, breakdown, status = _calculate_recipe_cost(self.client, self.store_id, self.product_id)
+        self.assertEqual(status, "complete")
+        self.assertAlmostEqual(total_cost, 20)
+        self.assertEqual(breakdown[0]["issues"], [])
+
+    def test_missing_recipe_returns_missing_recipe(self):
+        with patch("app.services.cost_engine._fetch_recipe_rows", return_value=[]):
+            total_cost, breakdown, status = _calculate_recipe_cost(self.client, self.store_id, self.product_id)
+        self.assertEqual(status, "missing_recipe")
+        self.assertEqual(total_cost, 0)
+        self.assertEqual(breakdown, [])
+
+    def test_zero_quantity_returns_zero_quantity_status(self):
+        recipe_rows = [
+            {"ingredient_id": "ing-1", "quantity_used": 0, "unit": "g"},
+        ]
+        ingredient_map = {
+            "ing-1": {"id": "ing-1", "cost_per_unit": 2, "unit": "g", "is_active": True},
+        }
+        with self._patch_recipe(recipe_rows, ingredient_map):
+            _total_cost, breakdown, status = _calculate_recipe_cost(self.client, self.store_id, self.product_id)
+        self.assertEqual(status, "zero_quantity")
+        self.assertIn("zero_quantity", breakdown[0]["issues"])
+
+    def test_missing_ingredient_returns_missing_status(self):
+        recipe_rows = [
+            {"ingredient_id": "missing", "quantity_used": 5, "unit": "g"},
+        ]
+        with self._patch_recipe(recipe_rows, {}):
+            _total_cost, breakdown, status = _calculate_recipe_cost(self.client, self.store_id, self.product_id)
+        self.assertEqual(status, "missing_ingredient")
+        self.assertIn("missing_ingredient", breakdown[0]["issues"])
+
+    def test_inactive_ingredient_returns_missing_status(self):
+        recipe_rows = [
+            {"ingredient_id": "ing-1", "quantity_used": 5, "unit": "g"},
+        ]
+        ingredient_map = {
+            "ing-1": {"id": "ing-1", "cost_per_unit": 2, "unit": "g", "is_active": False},
+        }
+        with self._patch_recipe(recipe_rows, ingredient_map):
+            _total_cost, breakdown, status = _calculate_recipe_cost(self.client, self.store_id, self.product_id)
+        self.assertEqual(status, "missing_ingredient")
+        self.assertIn("missing_ingredient", breakdown[0]["issues"])
+
+    def test_missing_cost_returns_missing_ingredient_cost(self):
+        recipe_rows = [
+            {"ingredient_id": "ing-1", "quantity_used": 5, "unit": "g"},
+        ]
+        ingredient_map = {
+            "ing-1": {"id": "ing-1", "cost_per_unit": 0, "unit": "g", "is_active": True},
+        }
+        with self._patch_recipe(recipe_rows, ingredient_map):
+            _total_cost, breakdown, status = _calculate_recipe_cost(self.client, self.store_id, self.product_id)
+        self.assertEqual(status, "missing_ingredient_cost")
+        self.assertIn("missing_ingredient_cost", breakdown[0]["issues"])
 
 
 class PrepareOrderItemSnapshotTests(unittest.TestCase):

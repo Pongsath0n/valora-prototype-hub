@@ -50,6 +50,8 @@ describe("planningBaselineAdapter", () => {
     expect(result.averageCost).toBeCloseTo(44);
     expect(result.dataQualityLevel).toBe("confirmed");
     expect(result.derivedWarnings).toEqual([]);
+    expect(result.hasAddonCostGaps).toBe(false);
+    expect(result.warningSummary).toBeUndefined();
   });
 
   it("flags manual/estimated costs, missing recipes, and mix fallbacks with warnings", () => {
@@ -91,6 +93,8 @@ describe("planningBaselineAdapter", () => {
     expect(result.hasEstimatedCosts).toBe(true);
     expect(result.hasIncompleteRecipes).toBe(true);
     expect(result.mixFallbackApplied).toBe(true);
+    expect(result.hasAddonCostGaps).toBe(false);
+    expect(result.warningSummary).toBeUndefined();
     expect(result.backendWarnings).toEqual(["historical_mix_unavailable"]);
     expect(result.derivedWarnings).toEqual(
       expect.arrayContaining([

@@ -1,5 +1,5 @@
 import logging
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from fastapi import HTTPException, status
 from supabase import Client
@@ -156,13 +156,26 @@ def _calculate_recipe_cost(client: Client, store_id: str, product_id: str) -> Tu
     ingredients_map = _fetch_ingredients_map(client, store_id, ingredient_ids)
     total_cost = 0.0
     breakdown: List[Dict[str, Any]] = []
+    issue_codes: Set[str] = set()
     for row in recipe_rows:
         ingredient_id = str(row.get("ingredient_id")) if row.get("ingredient_id") else None
         ingredient = ingredients_map.get(ingredient_id or "")
         quantity_used = _safe_float(row.get("quantity_used"))
-        cost_per_unit = _safe_float((ingredient or {}).get("cost_per_unit"))
+        row_issues: List[str] = []
+        if quantity_used <= 0:
+            row_issues.append("zero_quantity")
+        ingredient_active = True
+        if not ingredient or ingredient.get("is_active") is False:
+            row_issues.append("missing_ingredient")
+            ingredient_active = False
+
+        cost_per_unit = _safe_float((ingredient or {}).get("cost_per_unit")) if ingredient_active else 0.0
+        if ingredient_active and cost_per_unit <= 0:
+            row_issues.append("missing_ingredient_cost")
+
         line_cost = quantity_used * cost_per_unit
         total_cost += line_cost
+        issue_codes.update(row_issues)
         breakdown.append(
             {
                 "ingredient_id": ingredient_id,
@@ -172,9 +185,22 @@ def _calculate_recipe_cost(client: Client, store_id: str, product_id: str) -> Tu
                 "line_cost": line_cost,
                 "ingredient_name": (ingredient or {}).get("name"),
                 "cost_type": (ingredient or {}).get("cost_type"),
+                "cost_source": (ingredient or {}).get("cost_source"),
+                "ingredient_is_active": None if ingredient is None else ingredient.get("is_active"),
+                "issues": row_issues,
             }
         )
-    return total_cost, breakdown, "complete"
+
+    if "missing_ingredient" in issue_codes:
+        status = "missing_ingredient"
+    elif "zero_quantity" in issue_codes:
+        status = "zero_quantity"
+    elif "missing_ingredient_cost" in issue_codes:
+        status = "missing_ingredient_cost"
+    else:
+        status = "complete"
+
+    return total_cost, breakdown, status
 
 
 def _product_allows_sweetness(product: Dict[str, Any]) -> bool:
