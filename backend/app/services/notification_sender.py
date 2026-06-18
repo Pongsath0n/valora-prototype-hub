@@ -17,8 +17,15 @@ _ALLOWED_MESSAGE_TYPES = {
 
 PAYMENT_REJECT_REASON_FALLBACK = "ข้อมูลการชำระเงินไม่ถูกต้องหรือยังตรวจสอบไม่ได้"
 ORDER_CANCEL_REASON_FALLBACK = "ร้านไม่สามารถดำเนินการออเดอร์นี้ต่อได้"
-_PAYMENT_REJECT_GUIDANCE = "กรุณาตรวจสอบข้อมูลการชำระเงินอีกครั้ง หรือติดต่อร้านเพื่อให้ทีมงานช่วยตรวจสอบ"
-_CANCELLED_GUIDANCE = "หากต้องการสอบถามเพิ่มเติม สามารถติดต่อร้านผ่านช่องทางนี้ได้เลย"
+_PAYMENT_REJECT_REVIEW_GUIDANCE = "กรุณาตรวจสอบข้อมูลการชำระเงินอีกครั้ง"
+_CONTACT_CHAT_GUIDANCE = "หากมีข้อสงสัย สามารถพิมพ์สอบถามผ่านแชทนี้ได้เลย ทีมงานจะรีบเข้ามาตอบ"
+_CONTACT_PHONE_GUIDANCE = "หากเร่งด่วน โทร 0847371089"
+_CANCEL_REASON_MAP = {
+    "cancelled_by_admin": "ร้านยกเลิกออเดอร์นี้",
+    "admin_cancelled": "ร้านยกเลิกออเดอร์นี้",
+    "cancelled": ORDER_CANCEL_REASON_FALLBACK,
+}
+_REJECT_REASON_BLOCKLIST = {"payment_rejected", "rejected"}
 
 
 def mask_line_user_id(line_user_id: Optional[str]) -> Optional[str]:
@@ -74,6 +81,7 @@ _STATUS_TEMPLATES: Dict[str, str] = {
 }
 
 _AMOUNT_STATUS_TYPES = {"waiting_payment_review", "accepted", "preparing"}
+_EXCEPTION_MESSAGE_TYPES = {"payment_rejected", "cancelled"}
 
 
 def _normalize_message_type(message_type: Optional[str]) -> str:
@@ -143,6 +151,29 @@ def _load_order_notification_context(client: Client, order_id: str) -> Dict[str,
     }
 
 
+def _normalize_reason(reason: Any) -> str:
+    return str(reason or "").strip()
+
+
+def _sanitize_payment_reject_reason(reason: Any) -> str:
+    normalized = _normalize_reason(reason)
+    if not normalized:
+        return PAYMENT_REJECT_REASON_FALLBACK
+    if normalized.lower() in _REJECT_REASON_BLOCKLIST:
+        return PAYMENT_REJECT_REASON_FALLBACK
+    return normalized
+
+
+def _sanitize_cancel_reason(reason: Any) -> str:
+    normalized = _normalize_reason(reason)
+    if not normalized:
+        return ORDER_CANCEL_REASON_FALLBACK
+    mapped = _CANCEL_REASON_MAP.get(normalized.lower())
+    if mapped:
+        return mapped
+    return normalized
+
+
 def _build_message_text(message_type: str, ctx: Dict[str, Any], payload: Dict[str, Any]) -> str:
     order_no = ctx.get("order_no") or payload.get("order_no")
     base_text = _STATUS_TEMPLATES.get(message_type, payload.get("message") or "ระบบอัปเดตสถานะออเดอร์ของคุณแล้ว")
@@ -152,30 +183,31 @@ def _build_message_text(message_type: str, ctx: Dict[str, Any], payload: Dict[st
     lines.append(base_text)
 
     if message_type == "payment_rejected":
-        reason = str(payload.get("reject_reason") or "").strip()
-        if not reason:
-            reason = PAYMENT_REJECT_REASON_FALLBACK
+        reason = _sanitize_payment_reject_reason(payload.get("reject_reason"))
         payload["reject_reason"] = reason
         lines.append("")
         lines.append(f"เหตุผล: {reason}")
         lines.append("")
-        lines.append(_PAYMENT_REJECT_GUIDANCE)
+        lines.append(_PAYMENT_REJECT_REVIEW_GUIDANCE)
+        lines.append(_CONTACT_CHAT_GUIDANCE)
+        lines.append(_CONTACT_PHONE_GUIDANCE)
     elif message_type == "cancelled":
-        reason = str(payload.get("cancelled_reason") or "").strip()
-        if not reason:
-            reason = ORDER_CANCEL_REASON_FALLBACK
+        reason = _sanitize_cancel_reason(payload.get("cancelled_reason"))
         payload["cancelled_reason"] = reason
         lines.append("")
         lines.append(f"เหตุผล: {reason}")
         lines.append("")
-        lines.append(_CANCELLED_GUIDANCE)
+        lines.append(_CONTACT_CHAT_GUIDANCE)
+        lines.append(_CONTACT_PHONE_GUIDANCE)
 
     amount_text = _format_baht(ctx.get("total_amount"))
     if amount_text and message_type in _AMOUNT_STATUS_TYPES:
         lines.append(f"ยอดรวม {amount_text}")
 
-    status_link = _build_status_link(ctx.get("public_token"))
-    lines.append(f"ติดตามสถานะ: {status_link}")
+    status_link: Optional[str] = None
+    if message_type not in _EXCEPTION_MESSAGE_TYPES:
+        status_link = _build_status_link(ctx.get("public_token"))
+        lines.append(f"ติดตามสถานะ: {status_link}")
     return "\n".join(lines), status_link
 
 

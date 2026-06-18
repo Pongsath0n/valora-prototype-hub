@@ -160,6 +160,9 @@ class LineNotificationTests(unittest.TestCase):
         )
         self.assertIn("ยอดไม่ตรง", result["notification_message"])
         self.assertIn("กรุณาตรวจสอบข้อมูลการชำระเงินอีกครั้ง", result["notification_message"])
+        self.assertIn("หากมีข้อสงสัย สามารถพิมพ์สอบถามผ่านแชทนี้ได้เลย ทีมงานจะรีบเข้ามาตอบ", result["notification_message"])
+        self.assertIn("หากเร่งด่วน โทร 0847371089", result["notification_message"])
+        self.assertNotIn("ติดตามสถานะ", result["notification_message"])
         mock_send_push.assert_called_once()
         mock_log.assert_called_once()
 
@@ -185,6 +188,7 @@ class LineNotificationTests(unittest.TestCase):
             {},
         )
         self.assertIn(PAYMENT_REJECT_REASON_FALLBACK, result["notification_message"])
+        self.assertNotIn("ติดตามสถานะ", result["notification_message"])
         mock_send_push.assert_called_once()
         mock_log.assert_called_once()
 
@@ -210,6 +214,9 @@ class LineNotificationTests(unittest.TestCase):
             {"cancelled_reason": "สินค้าหมด"},
         )
         self.assertIn("สินค้าหมด", result["notification_message"])
+        self.assertIn("หากมีข้อสงสัย สามารถพิมพ์สอบถามผ่านแชทนี้ได้เลย ทีมงานจะรีบเข้ามาตอบ", result["notification_message"])
+        self.assertIn("หากเร่งด่วน โทร 0847371089", result["notification_message"])
+        self.assertNotIn("ติดตามสถานะ", result["notification_message"])
         mock_send_push.assert_called_once()
         mock_log.assert_called_once()
 
@@ -235,5 +242,32 @@ class LineNotificationTests(unittest.TestCase):
             {},
         )
         self.assertIn(ORDER_CANCEL_REASON_FALLBACK, result["notification_message"])
+        self.assertNotIn("ติดตามสถานะ", result["notification_message"])
+        mock_send_push.assert_called_once()
+        mock_log.assert_called_once()
+
+    @patch("app.services.notification_sender._has_success_notification", return_value=False)
+    @patch("app.services.notification_sender.log_line_notification")
+    @patch("app.services.notification_sender.send_line_push")
+    def test_cancelled_maps_internal_reason_codes(self, mock_send_push, mock_log, _) -> None:
+        mock_send_push.return_value = {"attempted": True, "status": 200}
+        client = self._build_client(
+            {
+                "order_no": "ORD-010",
+                "public_token": "tok",
+                "customer_id": "cust",
+                "customers": {"line_user_id": "Uxxxxx"},
+            }
+        )
+        result = send_line_notification(
+            client,
+            "order-id",
+            None,
+            None,
+            "cancelled",
+            {"cancelled_reason": "cancelled_by_admin"},
+        )
+        self.assertIn("ร้านยกเลิกออเดอร์นี้", result["notification_message"])
+        self.assertNotIn("cancelled_by_admin", result["notification_message"])
         mock_send_push.assert_called_once()
         mock_log.assert_called_once()
