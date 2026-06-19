@@ -3,11 +3,12 @@ import { Mail } from "lucide-react";
 import LogoBrand from "@/components/LogoBrand";
 
 const productLinks = [
-  { href: "#pain", label: "ปัญหา" },
-  { href: "#solution", label: "วิธีแก้" },
-  { href: "#profit", label: "กำไรต่อเมนู" },
-  { href: "#workflow", label: "Workflow" },
-  { href: "#transparency", label: "ความโปร่งใส" },
+  { href: "#pain", label: "ปัญหาที่เจอ" },
+  { href: "#planning", label: "วางแผนกำไร" },
+  { href: "#features", label: "ฟีเจอร์" },
+  { href: "#how", label: "วิธีใช้งาน" },
+  { href: "#preview", label: "ตัวอย่างระบบ" },
+  { href: "#scope", label: "ขอบเขต V.1" },
 ];
 
 export default function LandingFooter() {
@@ -22,8 +23,8 @@ export default function LandingFooter() {
           <div>
             <LogoBrand size="sm" />
             <p className="mt-4 max-w-sm text-sm leading-relaxed text-muted-foreground">
-              ระบบสั่งซื้อและวางแผนกำไรสำหรับร้านกาแฟและ SME ขนาดเล็ก
-              ที่ช่วยให้เจ้าของร้านเห็นต้นทุนและกำไรจริง โดยไม่ต้องเริ่มจากระบบ POS ขนาดใหญ่
+              ระบบวางแผนกำไรสำหรับร้านกาแฟและ SMEs ขนาดเล็ก
+              ช่วยให้เจ้าของร้านเห็นต้นทุน กำไรจริง และจุดคุ้มทุน ก่อนตัดสินใจขาย
             </p>
           </div>
 
@@ -49,14 +50,6 @@ export default function LandingFooter() {
                 >
                   เข้าสู่ระบบ
                 </Link>
-              </li>
-              <li>
-                <a
-                  href="#snapshots"
-                  className="text-foreground/80 transition-colors hover:text-foreground"
-                >
-                  ดูตัวอย่างหน้าจอระบบ
-                </a>
               </li>
             </ul>
           </nav>

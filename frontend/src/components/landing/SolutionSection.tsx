@@ -1,58 +1,57 @@
 import {
   CheckCircle2,
-  ClipboardCheck,
-  MessageCircle,
-  Receipt,
-  Smartphone,
-  Wallet,
+  Coffee,
+  Layers,
+  SlidersHorizontal,
+  Sparkles,
+  Target,
 } from "lucide-react";
 
 const steps = [
   {
-    icon: Smartphone,
-    title: "ลูกค้ากดลิงก์เปิดเมนูร้าน",
-    desc: "ลูกค้ากดลิงก์จาก LINE OA หรือลิงก์ของร้าน เปิดเมนูสั่งได้ทันที ไม่ต้องสมัครหรือล็อกอิน",
+    icon: Coffee,
+    title: "เพิ่มสินค้าและต้นทุน",
+    desc: "ใส่เมนูพร้อมต้นทุนวัตถุดิบและบรรจุภัณฑ์ เพื่อให้ระบบคิดต้นทุนจริงต่อแก้ว",
   },
   {
-    icon: MessageCircle,
-    title: "เลือกเมนูและสร้างออเดอร์",
-    desc: "ลูกค้าเลือกของ ปรับจำนวน ใส่หมายเหตุ ระบบรวมเงินให้อัตโนมัติ ไม่ต้องคุยทีละข้อความ",
+    icon: Layers,
+    title: "ใส่ต้นทุนแฝง เช่น ค่าเช่า ค่าไฟ",
+    desc: "เพิ่มค่าใช้จ่ายประจำของร้าน ระบบจะเฉลี่ยลงเป็นต้นทุนต่อแก้วให้อัตโนมัติ",
   },
   {
-    icon: Wallet,
-    title: "โอนเงินและแนบสลิป",
-    desc: 'ลูกค้าโอนเข้าบัญชีร้านและอัปโหลดสลิปในระบบ ออเดอร์เข้าสถานะ "รอตรวจสลิป" ทันที',
+    icon: SlidersHorizontal,
+    title: "ตั้งสมมติฐานยอดขาย",
+    desc: "ใส่ยอดขายที่คาดว่าจะขายได้ต่อวันหรือต่อเดือน เพื่อใช้เป็นฐานในการวางแผน",
   },
   {
-    icon: Receipt,
-    title: "ร้านตรวจสลิปและยืนยัน",
-    desc: "เจ้าของร้านเข้าหลังบ้าน เห็นสลิปและยอดเงิน กดยืนยันรับออเดอร์ หรือปฏิเสธพร้อมเหตุผล",
+    icon: Target,
+    title: "ดูกำไรจริงและจุดคุ้มทุน",
+    desc: "เห็นกำไรหลังหักต้นทุนทั้งหมด และจำนวนแก้วที่ต้องขายเพื่อให้คุ้มทุน",
   },
   {
-    icon: ClipboardCheck,
-    title: "ระบบจัดคิว ติดตามสถานะ",
-    desc: "ออเดอร์เคลื่อนจาก รับแล้ว → กำลังเตรียม → พร้อมรับ → เสร็จสมบูรณ์ ลูกค้าติดตามสถานะได้เอง พร้อมสรุปยอดและกำไรของวัน",
+    icon: Sparkles,
+    title: "ทดลองปรับแผนก่อนตัดสินใจ",
+    desc: "ลองปรับราคา ต้นทุน หรือยอดขาย แล้วเปรียบเทียบผลลัพธ์ ก่อนตัดสินใจขายจริง",
   },
 ];
 
 export default function SolutionSection() {
   return (
-    <section id="solution" className="border-t py-20 md:py-24" aria-labelledby="solution-heading">
+    <section id="how" className="border-t py-20 md:py-24" aria-labelledby="how-heading">
       <div className="mx-auto max-w-6xl px-4">
         <div className="mx-auto max-w-2xl text-center">
           <p className="mb-4 inline-flex items-center gap-2 rounded-full border border-accent/30 bg-accent/10 px-3 py-1 text-xs font-medium text-foreground">
             <CheckCircle2 className="h-3.5 w-3.5 text-accent" aria-hidden />
-            วิธีที่ Valora ช่วย
+            ใช้งานง่ายใน 5 ขั้นตอน
           </p>
           <h2
-            id="solution-heading"
+            id="how-heading"
             className="text-3xl font-bold tracking-tight text-foreground md:text-4xl"
           >
-            ตั้งแต่ลูกค้ากดลิงก์สั่ง จนเจ้าของเห็นกำไรของวัน อยู่ในระบบเดียว
+            วางแผนกำไรร้านได้ ตั้งแต่ครั้งแรกที่ใช้
           </h2>
           <p className="mt-4 text-base text-muted-foreground md:text-lg">
-            ลูกค้าใช้สะดวก ร้านคุมง่าย พนักงานเห็นเฉพาะสิ่งที่ควรเห็น
-            และทุกออเดอร์เชื่อมไปถึงต้นทุน–กำไรจริงให้เจ้าของร้านโดยอัตโนมัติ
+            ไม่ต้องมีพื้นฐานบัญชี แค่ใส่ข้อมูลร้านของคุณ ระบบจะคำนวณกำไรและจุดคุ้มทุนให้
           </p>
         </div>
 

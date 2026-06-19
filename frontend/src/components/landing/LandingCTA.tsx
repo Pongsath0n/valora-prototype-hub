@@ -21,23 +21,24 @@ export default function LandingCTA() {
               id="landing-cta-heading"
               className="text-3xl font-bold tracking-tight md:text-4xl lg:text-5xl"
             >
-              เริ่มจากการรู้กำไรจริงของทุกแก้ว
+              เริ่มเห็นกำไรจริงของร้านคุณ
             </h2>
             <p className="mt-4 text-base text-primary-foreground/80 md:text-lg">
-              ลองเปิด Valora ดูสักรอบ ดูว่าระบบเข้ากับวิธีการทำงานปัจจุบันของร้านได้แค่ไหน
+              ลองเปิด Valora แล้ววางแผนกำไร คำนวณต้นทุนแฝง และดูจุดคุ้มทุนของร้าน
               ไม่มีข้อผูกมัด ไม่ต้องลงโปรแกรมเพิ่ม
             </p>
 
             <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
               <Button asChild size="lg" variant="secondary" className="w-full sm:w-auto">
-                <a
-                  href="#profit"
+                <Link
+                  to="/login"
                   className="inline-flex items-center gap-2"
-                  aria-label="ดูวิธีคำนวณกำไร"
+                  aria-label="เข้าสู่ระบบ"
                 >
-                  ดูวิธีคำนวณกำไร
+                  <LayoutDashboard className="h-4 w-4" aria-hidden />
+                  เข้าสู่ระบบ
                   <ArrowRight className="h-4 w-4" aria-hidden />
-                </a>
+                </Link>
               </Button>
               <Button
                 asChild
@@ -45,24 +46,14 @@ export default function LandingCTA() {
                 variant="outline"
                 className="w-full border-primary-foreground/30 bg-transparent text-primary-foreground hover:bg-primary-foreground/10 hover:text-primary-foreground sm:w-auto"
               >
-                <Link
-                  to="/login"
+                <a
+                  href="#planning"
                   className="inline-flex items-center gap-2"
-                  aria-label="เข้าสู่ระบบร้านค้า"
+                  aria-label="ดูวิธีคิดกำไรและจุดคุ้มทุน"
                 >
-                  <LayoutDashboard className="h-4 w-4" aria-hidden />
-                  เข้าสู่ระบบร้านค้า
-                </Link>
+                  ดูวิธีคิดกำไรและจุดคุ้มทุน
+                </a>
               </Button>
-            </div>
-
-            <div className="mt-5">
-              <a
-                href="#workflow"
-                className="text-sm font-medium text-primary-foreground/80 underline-offset-4 hover:text-primary-foreground hover:underline"
-              >
-                ดู Workflow ของระบบ
-              </a>
             </div>
 
             <p className="mt-6 text-xs text-primary-foreground/60">

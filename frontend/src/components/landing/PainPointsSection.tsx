@@ -1,37 +1,31 @@
 import {
   AlertTriangle,
-  Banknote,
-  ClipboardX,
-  MessageSquareWarning,
-  Settings2,
-  UserCog,
+  Coins,
+  Receipt,
+  Scale,
+  TrendingDown,
 } from "lucide-react";
 
 const painPoints = [
   {
-    icon: ClipboardX,
-    title: "ไม่รู้กำไรจริงต่อเมนู",
-    desc: "ขายดีแต่ไม่รู้ว่าแต่ละแก้วเหลือกำไรเท่าไหร่ ปรับราคาทีต้องเดา ต้นทุนวัตถุดิบขยับก็ตามไม่ทัน",
+    icon: TrendingDown,
+    title: "ขายดี แต่ไม่รู้ว่าเหลือกำไรจริงไหม",
+    desc: "ยอดขายดูดีทุกวัน แต่พอสิ้นเดือนเงินไม่เหลือเท่าที่คิด เพราะไม่เคยเห็นกำไรจริงหลังหักต้นทุนทั้งหมด",
   },
   {
-    icon: MessageSquareWarning,
-    title: "รับออเดอร์ในแชทแล้วตกหล่น",
-    desc: "ลูกค้าทักมาในไลน์รวมกับแชทอื่น เลื่อนแป๊บเดียวก็หาย ออเดอร์ขาด หาย ทำผิดเมนู",
+    icon: Scale,
+    title: "ตั้งราคาแล้วไม่แน่ใจว่าคุ้มทุนหรือเปล่า",
+    desc: "ตั้งราคาตามร้านอื่นหรือตามความรู้สึก ไม่รู้ว่าต้องขายกี่แก้วต่อวันถึงจะคุ้มทุนจริง",
   },
   {
-    icon: Banknote,
-    title: "ตรวจสลิปไม่เป็นระบบ",
-    desc: "สลิปกระจัดกระจาย ต้องไล่เช็คในแชททีละคน บางทีลูกค้าโอนแล้วลืมยืนยัน",
+    icon: Receipt,
+    title: "ลืมคิดค่าเช่า ค่าน้ำ ค่าไฟ",
+    desc: "คิดแต่ต้นทุนวัตถุดิบ แต่ลืมต้นทุนแฝงที่จ่ายทุกเดือน พอรวมแล้วกำไรหายไปมากกว่าที่คิด",
   },
   {
-    icon: Settings2,
-    title: "POS ใหญ่เกินจำเป็น",
-    desc: "ระบบที่มีในตลาดออกแบบให้ร้านใหญ่ ฟีเจอร์เยอะเกิน ใช้จริงแค่ 10% แต่จ่ายเต็ม",
-  },
-  {
-    icon: UserCog,
-    title: "เจ้าของทำทุกอย่างเอง / พนักงานเห็นข้อมูลการเงินปนกัน",
-    desc: "ทั้งรับออเดอร์ ตรวจสลิป ชง ส่ง สรุปยอด ทำคนเดียว และยังต้องกังวลว่าตัวเลขต้นทุน/กำไรจะปนไปให้พนักงานเห็น",
+    icon: Coins,
+    title: "ไม่รู้ว่าแต่ละเมนูกำไรเหลือเท่าไหร่",
+    desc: "บางเมนูขายดีแต่กำไรบาง บางเมนูกำไรดีแต่ไม่ค่อยเชียร์ ถ้าไม่เห็นตัวเลขก็ตัดสินใจได้ยาก",
   },
 ];
 
@@ -46,7 +40,7 @@ export default function PainPointsSection() {
         <div className="mx-auto max-w-2xl text-center">
           <p className="mb-4 inline-flex items-center gap-2 rounded-full border border-destructive/20 bg-destructive/5 px-3 py-1 text-xs font-medium text-destructive">
             <AlertTriangle className="h-3.5 w-3.5" aria-hidden />
-            ปัญหาที่ร้านเล็กเจอทุกวัน
+            ปัญหาที่เจ้าของร้านเล็กเจอบ่อย
           </p>
           <h2
             id="painpoints-heading"
@@ -55,11 +49,11 @@ export default function PainPointsSection() {
             ขายดีก็เหนื่อย ขายไม่ดีก็เครียด
           </h2>
           <p className="mt-4 text-base text-muted-foreground md:text-lg">
-            ขายดีก็เหนื่อย ขายไม่ดีก็เครียด — และส่วนใหญ่ยังไม่รู้ว่าแต่ละแก้ว “เหลือกำไรจริงกี่บาท”
+            และส่วนใหญ่ยังไม่รู้ว่าแต่ละแก้ว “เหลือกำไรจริงกี่บาท” หลังหักต้นทุนทุกอย่าง
           </p>
         </div>
 
-        <ul className="mt-12 grid gap-5 md:grid-cols-2 lg:grid-cols-3">
+        <ul className="mt-12 grid gap-5 sm:grid-cols-2">
           {painPoints.map((p) => (
             <li
               key={p.title}

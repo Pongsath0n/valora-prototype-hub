@@ -1,110 +1,133 @@
-import { useState } from "react";
-import { ImageIcon, LayoutDashboard, Receipt, Smartphone } from "lucide-react";
+import { Layers, Target } from "lucide-react";
 
-const snapshots = [
-  {
-    icon: Smartphone,
-    badge: "ลูกค้า",
-    title: "หน้าสั่งซื้อของลูกค้า",
-    desc: "หน้าเมนูบอร์ดของลูกค้า และหน้ารายละเอียดเมนู เลือกความหวาน เพิ่มช็อต และจำนวนได้",
-    // Drop the masked screenshot here to replace the placeholder automatically.
-    src: "/snapshots/customer-order.png",
-    // object-position for the wide-frame crop (keeps the most important UI in view).
-    position: "object-top",
-  },
-  {
-    icon: Receipt,
-    badge: "พนักงาน",
-    title: "หน้าจัดการของพนักงาน",
-    desc: "คิวออเดอร์และการตรวจสลิป — ไม่มีคอลัมน์ต้นทุน/กำไรให้พนักงานเห็น",
-    src: "/snapshots/staff-operation.png",
-    position: "object-top",
-  },
-  {
-    icon: LayoutDashboard,
-    badge: "เจ้าของร้าน",
-    title: "หน้าต้นทุน–กำไรของเจ้าของ",
-    desc: "เห็นยอดขาย ต้นทุน ค่าช่องทาง และกำไร ทั้งต่อออเดอร์และต่อรายการเมนู — หลักฐานคุณค่าหลักของระบบ",
-    src: "/snapshots/owner-profit.png",
-    position: "object-top",
-  },
+/** All figures below are illustrative demo data — clearly labelled, not real shop data. */
+const overheadRows = [
+  { label: "ค่าเช่า", value: "฿ 5,500" },
+  { label: "ค่าไฟ", value: "฿ 1,300" },
+  { label: "ค่าน้ำ", value: "฿ 400" },
+  { label: "ค่าใช้จ่ายประจำอื่น ๆ", value: "฿ 600" },
 ];
 
-export default function ProductSnapshots() {
-  const [failed, setFailed] = useState<Record<string, boolean>>({});
+const menuRows = [
+  { name: "อเมริกาโน่เย็น", price: "฿ 55", profit: "฿ 28", margin: 51, tone: "success" as const },
+  { name: "ลาเต้เย็น", price: "฿ 65", profit: "฿ 20", margin: 31, tone: "info" as const },
+  { name: "มัทฉะลาเต้", price: "฿ 75", profit: "฿ 15", margin: 20, tone: "warning" as const },
+];
 
+function barColor(tone: "success" | "info" | "warning"): string {
+  if (tone === "success") return "hsl(var(--success))";
+  if (tone === "info") return "hsl(var(--info))";
+  return "hsl(var(--warning))";
+}
+
+export default function ProductSnapshots() {
   return (
     <section
-      id="snapshots"
+      id="preview"
       className="border-t bg-muted/30 py-20 md:py-24"
-      aria-labelledby="snapshots-heading"
+      aria-labelledby="preview-heading"
     >
       <div className="mx-auto max-w-6xl px-4">
         <div className="mx-auto max-w-2xl text-center">
           <p className="mb-4 inline-flex items-center gap-2 rounded-full border bg-card px-3 py-1 text-xs font-medium text-muted-foreground">
-            ตัวอย่างหน้าจอจริง
+            ตัวอย่างระบบ • ข้อมูลจำลอง
           </p>
           <h2
-            id="snapshots-heading"
+            id="preview-heading"
             className="text-3xl font-bold tracking-tight text-foreground md:text-4xl"
           >
-            หน้าตาการใช้งานจริงของแต่ละบทบาท
+            หน้าตาการวางแผนกำไรใน Valora
           </h2>
           <p className="mt-4 text-base text-muted-foreground md:text-lg">
-            ภาพหน้าจอจากระบบจริง โดยปิดบังข้อมูลส่วนบุคคลของลูกค้าก่อนนำมาแสดง
+            ตัวอย่างการมองเห็นต้นทุนแฝงและกำไรต่อเมนู ตัวเลขทั้งหมดเป็นข้อมูลจำลองเพื่อสาธิตเท่านั้น
           </p>
         </div>
 
-        <ul className="mt-12 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-          {snapshots.map((s) => {
-            const showImage = !failed[s.src];
-            return (
-              <li
-                key={s.title}
-                className="flex flex-col overflow-hidden rounded-2xl border bg-card shadow-sm transition-shadow hover:shadow-md"
+        <div className="mt-12 grid gap-6 lg:grid-cols-2">
+          <div className="flex flex-col rounded-2xl border bg-card p-6 shadow-sm">
+            <div className="flex items-center gap-3 border-b pb-4">
+              <span
+                className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-accent/10 text-accent"
+                aria-hidden
               >
-                <div className="aspect-video w-full overflow-hidden border-b border-border bg-muted/40">
-                  {showImage ? (
-                    <img
-                      src={s.src}
-                      alt={`ตัวอย่างหน้าจอ — ${s.title}`}
-                      loading="lazy"
-                      className={`h-full w-full object-cover ${s.position}`}
-                      onError={() => setFailed((prev) => ({ ...prev, [s.src]: true }))}
-                    />
-                  ) : (
-                    <div
-                      className="flex h-full w-full flex-col items-center justify-center gap-2 text-muted-foreground"
-                      role="img"
-                      aria-label={`พื้นที่ภาพตัวอย่างหน้าจอ — ${s.title} (กำลังเตรียม)`}
-                    >
-                      <ImageIcon className="h-8 w-8 opacity-60" aria-hidden />
-                      <span className="px-4 text-center text-xs font-medium">
-                        ภาพตัวอย่างหน้าจอ — กำลังเตรียม
-                      </span>
-                    </div>
-                  )}
-                </div>
+                <Layers className="h-5 w-5" />
+              </span>
+              <div>
+                <p className="text-sm font-semibold text-foreground">ต้นทุนแฝงต่อเดือน</p>
+                <p className="text-xs text-muted-foreground">ค่าใช้จ่ายประจำที่มักถูกลืม</p>
+              </div>
+            </div>
 
-                <div className="flex flex-1 flex-col p-5">
-                  <div className="flex items-center gap-2">
-                    <span
-                      className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-accent/10 text-accent"
-                      aria-hidden
-                    >
-                      <s.icon className="h-4 w-4" />
-                    </span>
-                    <span className="rounded-full border border-border bg-background px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-                      {s.badge}
+            <ul className="mt-4 space-y-2">
+              {overheadRows.map((r) => (
+                <li
+                  key={r.label}
+                  className="flex items-center justify-between rounded-lg bg-muted/50 px-3 py-2 text-sm"
+                >
+                  <span className="text-muted-foreground">{r.label}</span>
+                  <span className="font-medium tabular-nums text-foreground">{r.value}</span>
+                </li>
+              ))}
+            </ul>
+
+            <div className="mt-4 flex items-center justify-between rounded-xl border border-accent/30 bg-accent/5 px-4 py-3">
+              <span className="text-sm font-medium text-foreground">ต้นทุนแฝงต่อแก้ว</span>
+              <span className="text-lg font-bold tabular-nums text-foreground">≈ ฿ 22.67</span>
+            </div>
+          </div>
+
+          <div className="flex flex-col rounded-2xl border bg-card p-6 shadow-sm">
+            <div className="flex items-center gap-3 border-b pb-4">
+              <span
+                className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-accent/10 text-accent"
+                aria-hidden
+              >
+                <Target className="h-5 w-5" />
+              </span>
+              <div>
+                <p className="text-sm font-semibold text-foreground">กำไรต่อเมนู</p>
+                <p className="text-xs text-muted-foreground">เมนูไหนทำกำไรจริง เมนูไหนควรระวัง</p>
+              </div>
+            </div>
+
+            <ul className="mt-4 space-y-3">
+              {menuRows.map((m) => (
+                <li key={m.name} className="rounded-lg bg-muted/50 px-3 py-2.5">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="font-medium text-foreground">{m.name}</span>
+                    <span className="text-muted-foreground">
+                      ราคา {m.price} ·{" "}
+                      <span className="font-semibold text-foreground">กำไร {m.profit}</span>
                     </span>
                   </div>
-                  <h3 className="mt-3 text-base font-semibold text-foreground">{s.title}</h3>
-                  <p className="mt-1 text-sm leading-relaxed text-muted-foreground">{s.desc}</p>
-                </div>
-              </li>
-            );
-          })}
-        </ul>
+                  <div className="mt-2 flex items-center gap-2">
+                    <div
+                      className="h-1.5 flex-1 overflow-hidden rounded-full bg-border"
+                      role="img"
+                      aria-label={`อัตรากำไร ${m.margin}%`}
+                    >
+                      <div
+                        className="h-full rounded-full"
+                        style={{ width: `${m.margin}%`, backgroundColor: barColor(m.tone) }}
+                      />
+                    </div>
+                    <span className="w-10 text-right text-xs font-medium tabular-nums text-muted-foreground">
+                      {m.margin}%
+                    </span>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+
+        <div className="mx-auto mt-6 flex max-w-3xl flex-col items-center justify-center gap-2 rounded-2xl border border-success/30 bg-success/10 px-6 py-5 text-center sm:flex-row sm:gap-4">
+          <span className="text-sm font-medium text-muted-foreground">จุดคุ้มทุนจากตัวอย่างนี้</span>
+          <span className="text-xl font-bold tabular-nums text-foreground">
+            ≈ 180 แก้ว / เดือน
+            <span className="ml-2 text-sm font-medium text-muted-foreground">(≈ 6 แก้ว / วัน)</span>
+          </span>
+        </div>
       </div>
     </section>
   );

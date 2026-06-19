@@ -1,62 +1,64 @@
 import {
   BarChart3,
+  Bell,
   Calculator,
-  ClipboardList,
-  Coffee,
-  MessageCircle,
-  ShieldCheck,
-  Store,
-  Wallet,
+  ClipboardCheck,
+  Layers,
+  LineChart,
+  Target,
 } from "lucide-react";
 
-const features = [
+type Feature = {
+  icon: typeof BarChart3;
+  title: string;
+  desc: string;
+  tag: string;
+  secondary?: boolean;
+};
+
+const features: Feature[] = [
   {
-    icon: BarChart3,
-    title: "เห็นต้นทุน–กำไรจริงต่อเมนู",
-    desc: "รู้ว่าเมนูไหนทำเงินจริง เมนูไหนแค่ดูดี คำนวณกำไรจาก ราคา − ต้นทุน − ค่าธรรมเนียมช่องทาง",
-    tag: "ข้อมูลเชิงลึก",
-  },
-  {
-    icon: ShieldCheck,
-    title: "ปกป้องข้อมูลการเงินตามบทบาท",
-    desc: "พนักงานจัดการออเดอร์และตรวจสลิปได้ แต่ไม่เห็นต้นทุน/กำไร",
-    tag: "ความปลอดภัย",
+    icon: LineChart,
+    title: "วางแผนกำไร",
+    desc: "ตั้งราคา ต้นทุน และยอดขายที่คาดไว้ แล้วเห็นกำไรที่ควรได้ก่อนลงมือขายจริง",
+    tag: "วางแผน",
   },
   {
     icon: Calculator,
-    title: "Recipe & Addon Cost Engine",
-    desc: "ผูกวัตถุดิบและสูตรเข้ากับเมนูและ Extra Shot เพื่อคิดต้นทุนต่อแก้ว",
+    title: "คำนวณต้นทุนต่อเมนู",
+    desc: "ผูกวัตถุดิบและบรรจุภัณฑ์เข้ากับแต่ละเมนู เพื่อคิดต้นทุนจริงต่อแก้วให้อัตโนมัติ",
     tag: "ต้นทุน",
   },
   {
-    icon: MessageCircle,
-    title: "ลูกค้าสั่งเองผ่านลิงก์",
-    desc: "เปิดเมนูจาก LINE OA หรือลิงก์ร้าน สั่งได้ทันที ไม่ต้องสมัคร/ล็อกอิน",
-    tag: "ลูกค้า",
+    icon: Layers,
+    title: "จัดการต้นทุนแฝง",
+    desc: "ใส่ค่าเช่า ค่าน้ำ ค่าไฟ และค่าใช้จ่ายประจำ แล้วเฉลี่ยลงเป็นต้นทุนต่อแก้ว",
+    tag: "ต้นทุนแฝง",
   },
   {
-    icon: Coffee,
-    title: "ตัวเลือกเครื่องดื่ม",
-    desc: "ความหวาน / เพิ่มช็อต / จำนวน / หมายเหตุ ปรับได้ในหน้าเดียว",
-    tag: "ลูกค้า",
+    icon: Target,
+    title: "ดูจุดคุ้มทุน",
+    desc: "รู้ว่าต้องขายกี่แก้วต่อเดือนและต่อวัน ร้านถึงจะเริ่มมีกำไรจริง",
+    tag: "จุดคุ้มทุน",
   },
   {
-    icon: Wallet,
-    title: "PromptPay + Slip Upload",
-    desc: "ลูกค้าโอนและแนบสลิป ติดตามสถานะได้เอง",
-    tag: "การเงิน",
+    icon: BarChart3,
+    title: "วิเคราะห์กำไรรายสินค้า",
+    desc: "เห็นว่าเมนูไหนทำกำไรจริง เมนูไหนกำไรบาง เพื่อตัดสินใจว่าจะเชียร์หรือปรับเมนูไหน",
+    tag: "วิเคราะห์",
   },
   {
-    icon: ClipboardList,
-    title: "Staff Order Operation",
-    desc: "รับออเดอร์ ตรวจสลิป อนุมัติ/ปฏิเสธ และอัปเดตสถานะ",
-    tag: "หน้าร้าน",
+    icon: ClipboardCheck,
+    title: "รองรับ order / payment review",
+    desc: "รับออเดอร์ ตรวจสลิป และทบทวนการชำระเงิน เชื่อมต่อกับการดูต้นทุน–กำไรในระบบเดียว",
+    tag: "ออเดอร์",
   },
   {
-    icon: Store,
-    title: "Channel Fee Modelling",
-    desc: "แยกค่าธรรมเนียมตามช่องทางเพื่อให้กำไรสุทธิใกล้ความจริงมากขึ้น",
-    tag: "ต้นทุน",
+    icon: Bell,
+    title: "แจ้งเตือนผ่าน LINE OA",
+    desc: "แจ้งสถานะออเดอร์ถึงลูกค้าผ่าน LINE OA เป็นส่วนเสริม ไม่ใช่หัวใจหลักของระบบ",
+    tag: "ส่วนเสริม",
+    secondary: true,
   },
 ];
 
@@ -76,22 +78,26 @@ export default function FeatureGrid() {
             id="features-heading"
             className="text-3xl font-bold tracking-tight text-foreground md:text-4xl"
           >
-            ทุกอย่างที่ร้านเล็กต้องใช้จริง ๆ ในที่เดียว
+            ทุกอย่างที่ร้านเล็กต้องใช้เพื่อวางแผนกำไร
           </h2>
           <p className="mt-4 text-base text-muted-foreground md:text-lg">
-            ไม่ใช่ POS ใหญ่ที่ฟีเจอร์ล้น แต่เป็นเครื่องมือพอดีตัวสำหรับร้านที่ขายผ่าน LINE OA และหน้าร้าน
+            เน้นที่การวางแผนกำไรและการมองเห็นต้นทุนสำคัญ พร้อมรองรับการรับออเดอร์และตรวจสลิปในตัว
           </p>
         </div>
 
-        <ul className="mt-12 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+        <ul className="mt-12 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
           {features.map((f) => (
             <li
               key={f.title}
-              className="group flex flex-col rounded-2xl border bg-card p-6 transition-all hover:-translate-y-0.5 hover:border-accent/40 hover:shadow-md"
+              className={`group flex flex-col rounded-2xl border bg-card p-6 transition-all hover:-translate-y-0.5 hover:border-accent/40 hover:shadow-md ${
+                f.secondary ? "border-dashed" : ""
+              }`}
             >
               <div className="mb-4 flex items-center justify-between">
                 <span
-                  className="inline-flex h-11 w-11 items-center justify-center rounded-xl bg-accent/10 text-accent"
+                  className={`inline-flex h-11 w-11 items-center justify-center rounded-xl ${
+                    f.secondary ? "bg-muted text-muted-foreground" : "bg-accent/10 text-accent"
+                  }`}
                   aria-hidden
                 >
                   <f.icon className="h-5 w-5" />

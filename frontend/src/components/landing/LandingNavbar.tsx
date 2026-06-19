@@ -5,11 +5,11 @@ import LogoBrand from "@/components/LogoBrand";
 import { Button } from "@/components/ui/button";
 
 const navLinks = [
-  { href: "#pain", label: "ปัญหา" },
-  { href: "#solution", label: "วิธีแก้" },
-  { href: "#profit", label: "กำไรต่อเมนู" },
-  { href: "#workflow", label: "Workflow" },
-  { href: "#transparency", label: "ความโปร่งใส" },
+  { href: "#pain", label: "ปัญหาที่เจอ" },
+  { href: "#planning", label: "วางแผนกำไร" },
+  { href: "#features", label: "ฟีเจอร์" },
+  { href: "#how", label: "วิธีใช้งาน" },
+  { href: "#preview", label: "ตัวอย่างระบบ" },
 ];
 
 export default function LandingNavbar() {
@@ -50,14 +50,14 @@ export default function LandingNavbar() {
 
         <div className="hidden items-center gap-2 md:flex">
           <Button asChild variant="ghost" size="sm">
-            <Link to="/login" aria-label="เข้าสู่ระบบร้านค้า">
-              เข้าสู่ระบบร้านค้า
-            </Link>
+            <a href="#preview" aria-label="ดูระบบวางแผนกำไร">
+              ดูระบบวางแผนกำไร
+            </a>
           </Button>
           <Button asChild size="sm">
-            <a href="#workflow" aria-label="ดู Workflow ของระบบ">
-              ดู Workflow ของระบบ
-            </a>
+            <Link to="/login" aria-label="เข้าสู่ระบบ">
+              เข้าสู่ระบบ
+            </Link>
           </Button>
         </div>
 
@@ -88,14 +88,14 @@ export default function LandingNavbar() {
             ))}
             <div className="mt-2 grid grid-cols-2 gap-2">
               <Button asChild variant="outline" size="sm" onClick={() => setOpen(false)}>
-                <Link to="/login" aria-label="เข้าสู่ระบบร้านค้า">
-                  เข้าสู่ระบบร้านค้า
-                </Link>
+                <a href="#preview" aria-label="ดูระบบวางแผนกำไร">
+                  ดูระบบวางแผนกำไร
+                </a>
               </Button>
               <Button asChild size="sm" onClick={() => setOpen(false)}>
-                <a href="#workflow" aria-label="ดู Workflow ของระบบ">
-                  ดู Workflow ของระบบ
-                </a>
+                <Link to="/login" aria-label="เข้าสู่ระบบ">
+                  เข้าสู่ระบบ
+                </Link>
               </Button>
             </div>
           </nav>

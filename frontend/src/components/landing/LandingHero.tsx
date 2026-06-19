@@ -1,42 +1,21 @@
 import { Link } from "react-router-dom";
-import { ArrowRight, CheckCircle2, MessageCircle, Sparkles } from "lucide-react";
+import { ArrowRight, CheckCircle2, Sparkles, TrendingUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
-const trustPoints = [
-  "เห็นต้นทุน–กำไรจริงต่อเมนู",
-  "ลูกค้าสั่งและชำระเงินเองผ่านลิงก์",
-  "ไม่ต้องเริ่มจาก POS ขนาดใหญ่",
+/** Questions Valora helps a small-shop owner answer (the core value framing). */
+const coreQuestions = [
+  "ขายแก้วนี้แล้วเหลือกำไรจริงเท่าไหร่?",
+  "ต้องขายกี่แก้วต่อวันถึงคุ้มทุน?",
+  "ค่าเช่า ค่าน้ำ ค่าไฟ ทำให้กำไรหายไปแค่ไหน?",
+  "เมนูไหนควรขายต่อ เมนูไหนควรระวัง?",
 ];
 
-const metrics = [
-  { label: "ยอดขายวันนี้", value: "฿ 8,420", change: "+12%" },
-  { label: "ออเดอร์ที่รอตรวจสลิป", value: "3", change: "ใหม่" },
-  { label: "กำไรขั้นต้น", value: "฿ 4,210", change: "50.0%" },
+/** Illustrative demo figures only — clearly labelled, not real shop data. */
+const demoOverhead = [
+  { label: "ค่าเช่า / เดือน", value: "฿ 5,500" },
+  { label: "ค่าไฟ / เดือน", value: "฿ 1,300" },
+  { label: "ต้นทุนแฝงต่อแก้ว", value: "฿ 22.67" },
 ];
-
-const recentOrders = [
-  { id: "#1042", item: "ลาเต้เย็น × 2", status: "รอตรวจสลิป", tone: "warning" as const },
-  { id: "#1041", item: "อเมริกาโน่ × 1", status: "กำลังเตรียม", tone: "info" as const },
-  { id: "#1040", item: "มัทฉะลาเต้ × 3", status: "พร้อมรับ", tone: "success" as const },
-];
-
-const lineMessages = [
-  { name: "คุณก้อง", msg: "ขออเมริกาโน่ 2 แก้วครับ" },
-  { name: "คุณเอ", msg: "สั่งล่วงหน้าได้มั้ยคะ" },
-];
-
-function statusStyle(tone: "warning" | "info" | "success"): React.CSSProperties {
-  if (tone === "warning") {
-    return {
-      color: "hsl(var(--warning-foreground))",
-      backgroundColor: "hsl(var(--warning) / 0.15)",
-    };
-  }
-  if (tone === "info") {
-    return { color: "hsl(var(--info))", backgroundColor: "hsl(var(--info) / 0.15)" };
-  }
-  return { color: "hsl(var(--success))", backgroundColor: "hsl(var(--success) / 0.15)" };
-}
 
 export default function LandingHero() {
   return (
@@ -54,7 +33,7 @@ export default function LandingHero() {
         <div className="mx-auto max-w-3xl text-center">
           <p className="mb-5 inline-flex items-center gap-2 rounded-full border border-accent/30 bg-accent/10 px-3 py-1 text-xs font-medium text-foreground">
             <Sparkles className="h-3.5 w-3.5 text-accent" aria-hidden />
-            ระบบสั่งซื้อ + วางแผนกำไร สำหรับร้านกาแฟและ SME ขนาดเล็ก
+            Profit Planning สำหรับร้านกาแฟและ SMEs ขนาดเล็ก
           </p>
 
           <h1
@@ -62,91 +41,83 @@ export default function LandingHero() {
             className="text-3xl font-bold tracking-tight text-foreground md:text-4xl lg:text-5xl"
             style={{ lineHeight: 1.3 }}
           >
-            ร้านเล็กไม่ควรรู้แค่ว่า “ขายได้เท่าไหร่”
-            <br className="hidden sm:block" /> แต่ควรรู้ว่า{" "}
-            <span className="text-accent">“ขายแล้วเหลือกำไรจริงกี่บาท”</span>
+            เห็นกำไรจริงของร้าน
+            <br className="hidden sm:block" /> <span className="text-accent">ก่อนตัดสินใจขาย</span>
           </h1>
 
           <p className="mx-auto mt-6 max-w-2xl text-base text-muted-foreground md:text-lg">
-            Valora ช่วยให้ลูกค้าสั่งและชำระเงินเองผ่านลิงก์ ร้านตรวจสลิปและจัดคิวได้ง่าย
-            และเจ้าของร้านเห็นต้นทุน–กำไรจริงของแต่ละเมนู — โดยไม่ต้องเริ่มจากระบบ POS ขนาดใหญ่
+            Valora ช่วยเจ้าของร้านกาแฟและ SMEs ขนาดเล็กคำนวณต้นทุน วางแผนกำไร จุดคุ้มทุน
+            และต้นทุนแฝง เช่น ค่าเช่า ค่าน้ำ ค่าไฟ ในที่เดียว
           </p>
 
           <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
             <Button asChild size="lg" className="w-full sm:w-auto">
-              <a
-                href="#workflow"
-                className="inline-flex items-center gap-2"
-                aria-label="ดู Workflow ของระบบ"
-              >
-                ดู Workflow ของระบบ
+              <Link to="/login" className="inline-flex items-center gap-2" aria-label="เข้าสู่ระบบ">
+                เข้าสู่ระบบ
                 <ArrowRight className="h-4 w-4" aria-hidden />
-              </a>
+              </Link>
             </Button>
             <Button asChild size="lg" variant="outline" className="w-full sm:w-auto">
               <a
-                href="#snapshots"
+                href="#preview"
                 className="inline-flex items-center gap-2"
-                aria-label="ดูตัวอย่างหน้าจอระบบ"
+                aria-label="ดูระบบวางแผนกำไร"
               >
-                ดูตัวอย่างหน้าจอระบบ
+                ดูระบบวางแผนกำไร
               </a>
             </Button>
           </div>
 
           <div className="mt-4 flex flex-wrap items-center justify-center gap-x-5 gap-y-1 text-sm">
             <a
-              href="#profit"
+              href="#planning"
               className="font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
             >
-              ดูวิธีคำนวณกำไร
+              ดูวิธีคิดกำไรและจุดคุ้มทุน
             </a>
-            <Link
-              to="/login"
-              className="font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
-            >
-              เข้าสู่ระบบร้านค้า
-            </Link>
           </div>
 
-          <ul className="mx-auto mt-8 flex max-w-2xl flex-wrap items-center justify-center gap-x-6 gap-y-2 text-sm text-muted-foreground">
-            {trustPoints.map((t) => (
-              <li key={t} className="inline-flex items-center gap-2">
-                <CheckCircle2 className="h-4 w-4 text-success" aria-hidden />
-                {t}
+          <ul className="mx-auto mt-9 grid max-w-2xl gap-2 text-left sm:grid-cols-2">
+            {coreQuestions.map((q) => (
+              <li
+                key={q}
+                className="inline-flex items-start gap-2 rounded-xl border bg-card/60 px-3 py-2 text-sm text-foreground/90"
+              >
+                <CheckCircle2 className="mt-0.5 h-4 w-4 flex-shrink-0 text-success" aria-hidden />
+                {q}
               </li>
             ))}
           </ul>
         </div>
 
-        {/* Mock dashboard preview */}
         <figure
           className="relative mt-14 md:mt-20"
-          aria-label="ตัวอย่างหน้า Admin Dashboard ของ Valora"
+          aria-label="ตัวอย่างการวางแผนกำไรและจุดคุ้มทุนของ Valora (ข้อมูลจำลอง)"
         >
           <div
             aria-hidden
             className="pointer-events-none absolute inset-x-6 -top-6 h-24 rounded-full bg-accent/20 blur-3xl"
           />
-          <div className="relative mx-auto max-w-5xl rounded-2xl border bg-card p-3 shadow-xl md:p-4">
+          <div className="relative mx-auto max-w-3xl rounded-2xl border bg-card p-3 shadow-xl md:p-4">
             <span className="absolute right-5 top-5 z-10 rounded-full border border-border bg-background/90 px-3 py-1 text-[11px] font-semibold text-muted-foreground shadow-sm">
-              ภาพจำลอง
+              ภาพจำลอง • ข้อมูลตัวอย่าง
             </span>
             <div className="rounded-xl border bg-background p-5 md:p-8">
-              <div className="flex items-center justify-between border-b pb-4">
-                <div className="flex items-center gap-3">
-                  <span className="h-2.5 w-2.5 rounded-full bg-destructive/70" aria-hidden />
-                  <span className="h-2.5 w-2.5 rounded-full bg-warning/70" aria-hidden />
-                  <span className="h-2.5 w-2.5 rounded-full bg-success/70" aria-hidden />
-                  <span className="ml-3 text-xs text-muted-foreground">valora.app/store-admin</span>
-                </div>
-                <span className="hidden text-xs text-muted-foreground sm:inline">
-                  วันนี้ • อัปเดตล่าสุด 09:42
+              <div className="flex items-center gap-3 border-b pb-4">
+                <span
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-accent/10 text-accent"
+                  aria-hidden
+                >
+                  <TrendingUp className="h-5 w-5" />
                 </span>
+                <div>
+                  <p className="text-sm font-semibold text-foreground">วางแผนกำไรร้านกาแฟ</p>
+                  <p className="text-xs text-muted-foreground">ตัวอย่างการคำนวณต้นทุนแฝงและจุดคุ้มทุน</p>
+                </div>
               </div>
 
-              <dl className="mt-6 grid gap-4 md:grid-cols-3">
-                {metrics.map((m) => (
+              <dl className="mt-6 grid gap-4 sm:grid-cols-3">
+                {demoOverhead.map((m) => (
                   <div key={m.label} className="rounded-xl border bg-card p-4">
                     <dt className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
                       {m.label}
@@ -154,61 +125,31 @@ export default function LandingHero() {
                     <dd className="mt-2 text-2xl font-bold tabular-nums text-foreground">
                       {m.value}
                     </dd>
-                    <p className="mt-1 text-xs font-medium text-success">{m.change}</p>
                   </div>
                 ))}
               </dl>
 
-              <div className="mt-6 grid gap-4 md:grid-cols-5">
-                <div className="rounded-xl border bg-card p-4 md:col-span-3">
-                  <p className="text-sm font-semibold text-foreground">ออเดอร์ล่าสุด</p>
-                  <ul className="mt-3 space-y-2">
-                    {recentOrders.map((row) => (
-                      <li
-                        key={row.id}
-                        className="flex items-center justify-between rounded-lg bg-muted/50 px-3 py-2 text-sm"
-                      >
-                        <div className="flex items-center gap-3">
-                          <span className="font-medium tabular-nums text-foreground">{row.id}</span>
-                          <span className="text-muted-foreground">{row.item}</span>
-                        </div>
-                        <span
-                          className="rounded-full px-2 py-0.5 text-xs font-medium"
-                          style={statusStyle(row.tone)}
-                        >
-                          {row.status}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
+              <div className="mt-4 flex flex-col items-start justify-between gap-2 rounded-xl border border-success/30 bg-success/10 p-5 sm:flex-row sm:items-center">
+                <div>
+                  <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                    จุดคุ้มทุน
+                  </p>
+                  <p className="mt-1 text-2xl font-bold tabular-nums text-foreground">
+                    ≈ 180 แก้ว / เดือน
+                    <span className="ml-2 text-sm font-medium text-muted-foreground">
+                      (≈ 6 แก้ว / วัน)
+                    </span>
+                  </p>
                 </div>
-
-                <div className="rounded-xl border bg-card p-4 md:col-span-2">
-                  <p className="text-sm font-semibold text-foreground">ลูกค้าทักผ่าน LINE OA</p>
-                  <ul className="mt-3 space-y-2">
-                    {lineMessages.map((c) => (
-                      <li
-                        key={c.name}
-                        className="flex items-start gap-2 rounded-lg bg-muted/50 px-3 py-2 text-sm"
-                      >
-                        <MessageCircle
-                          className="mt-0.5 h-4 w-4 flex-shrink-0 text-accent"
-                          aria-hidden
-                        />
-                        <div>
-                          <p className="font-medium text-foreground">{c.name}</p>
-                          <p className="text-muted-foreground">{c.msg}</p>
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
+                <p className="max-w-xs text-sm leading-relaxed text-muted-foreground">
+                  ต้องขายให้ถึงจุดนี้ก่อน ร้านถึงจะเริ่มมีกำไรจริงหลังหักต้นทุนแฝง
+                </p>
               </div>
             </div>
           </div>
           <figcaption className="sr-only">
-            ภาพประกอบหน้า Admin Dashboard แสดงยอดขาย ออเดอร์รอตรวจสลิป กำไรขั้นต้น ออเดอร์ล่าสุด
-            และข้อความจากลูกค้าใน LINE OA
+            ภาพประกอบการวางแผนกำไรของ Valora แสดงต้นทุนแฝงตัวอย่าง เช่น ค่าเช่า ค่าไฟ
+            ต้นทุนแฝงต่อแก้ว และจุดคุ้มทุนต่อเดือน/ต่อวัน (เป็นข้อมูลจำลองเพื่อสาธิตเท่านั้น)
           </figcaption>
         </figure>
       </div>

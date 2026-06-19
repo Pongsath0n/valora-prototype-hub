@@ -1,40 +1,25 @@
-import { Info } from "lucide-react";
-import {
-  Accordion,
-  AccordionContent,
-  AccordionItem,
-  AccordionTrigger,
-} from "@/components/ui/accordion";
+import { Check, Info, Minus } from "lucide-react";
 
-const items = [
-  {
-    value: "manual-slip",
-    title: "ร้านตรวจสลิปด้วยตัวเอง",
-    body: "ตอนนี้เจ้าของร้านจะเป็นคนกดยืนยันสลิปทุกใบเอง เพื่อให้มั่นใจว่ายอดและบัญชีตรงกับร้านจริง ก่อนเปิดสถานะให้เริ่มเตรียม วิธีนี้เรียบง่าย โปร่งใส และเริ่มใช้ได้ทันทีโดยไม่ต้องพึ่งบริการภายนอก",
-  },
-  {
-    value: "future-api",
-    title: "อนาคต: เพิ่มการตรวจสลิปอัตโนมัติได้",
-    body: "ระบบออกแบบแยกขั้นตอนรับสลิปออกจากการอนุมัติ ทำให้อนาคตสามารถเพิ่มระบบตรวจสลิปอัตโนมัติได้ โดยไม่ต้องรื้อหน้าจอหรือย้ายข้อมูลใหม่ ร้านยังเลือกได้ว่าจะให้ระบบช่วยกรองก่อน แล้วค่อยตรวจซ้ำอีกทีได้",
-  },
-  {
-    value: "line-notification",
-    title: "การแจ้งเตือนผ่าน LINE",
-    body: "ขณะนี้การแจ้งเตือนสถานะไปหาลูกค้าผ่าน LINE ยังเป็นโหมดทดสอบ ลูกค้าสามารถติดตามสถานะออเดอร์ได้เองผ่านหน้าเช็กสถานะได้ตลอด ร้านสามารถเปิดใช้งานได้ครบทุกอย่างแม้ยังไม่ได้เปิดการส่ง LINE จริง",
-  },
-  {
-    value: "scope",
-    title: "ตอนนี้ระบบทำอะไรได้บ้าง",
-    body: "ตอนนี้ Valora เน้นรับออเดอร์ออนไลน์ ตรวจสลิป ติดตามออเดอร์ และดูต้นทุน–กำไรของแต่ละเมนู ส่วนฟีเจอร์ขั้นสูง เช่น การจัดการสต็อกอัตโนมัติ ใบเสร็จภาษี และการเชื่อมต่อระบบบัญชีภายนอก จะทยอยเพิ่มในลำดับถัดไปตามฟีดแบ็กจากร้านจริง",
-  },
+const focusOn = [
+  "วางแผนกำไรและจุดคุ้มทุน",
+  "คำนวณต้นทุนต่อเมนูและต้นทุนแฝง",
+  "วิเคราะห์กำไรรายสินค้า",
+  "รับออเดอร์และทบทวนการชำระเงิน",
+];
+
+const notYet = [
+  "ระบบบัญชีและงบการเงิน",
+  "ใบกำกับภาษี / ภาษีมูลค่าเพิ่ม",
+  "เงินเดือนพนักงาน (payroll)",
+  "ระบบ ERP เต็มรูปแบบ",
 ];
 
 export default function PhaseOneSection() {
   return (
     <section
-      id="transparency"
+      id="scope"
       className="border-t py-20 md:py-24"
-      aria-labelledby="phaseone-heading"
+      aria-labelledby="scope-heading"
     >
       <div className="mx-auto max-w-4xl px-4">
         <div className="text-center">
@@ -46,30 +31,61 @@ export default function PhaseOneSection() {
             พูดตรงไปตรงมา
           </p>
           <h2
-            id="phaseone-heading"
+            id="scope-heading"
             className="text-3xl font-bold tracking-tight text-foreground md:text-4xl"
           >
-            พูดตรง ๆ ว่าตอนนี้ระบบทำอะไรได้ และอะไรกำลังจะมา
+            Valora V.1 ทำอะไร และไม่ใช่อะไร
           </h2>
           <p className="mt-4 text-base text-muted-foreground md:text-lg">
-            Valora เลือกออกแบบจากของจริงก่อน ค่อย ๆ ขยายตามฟีดแบ็กของร้าน
+            Valora V.1 โฟกัสที่การวางแผนกำไรและการมองเห็นต้นทุนสำคัญ
+            ไม่ใช่ระบบบัญชีหรือ ERP เต็มรูปแบบ
           </p>
         </div>
 
-        <div className="mt-10 rounded-2xl border bg-card p-2 sm:p-4 md:p-6">
-          <Accordion type="single" collapsible defaultValue="manual-slip" className="w-full">
-            {items.map((item) => (
-              <AccordionItem key={item.value} value={item.value} className="px-2 sm:px-4">
-                <AccordionTrigger className="text-left text-base font-semibold text-foreground hover:no-underline">
-                  {item.title}
-                </AccordionTrigger>
-                <AccordionContent className="text-sm leading-relaxed text-muted-foreground">
-                  {item.body}
-                </AccordionContent>
-              </AccordionItem>
-            ))}
-          </Accordion>
+        <div className="mt-10 grid gap-5 md:grid-cols-2">
+          <div className="rounded-2xl border border-success/30 bg-success/5 p-6 md:p-7">
+            <p className="text-sm font-semibold uppercase tracking-wider text-foreground">
+              Valora V.1 ช่วยเรื่อง
+            </p>
+            <ul className="mt-4 space-y-3">
+              {focusOn.map((f) => (
+                <li key={f} className="flex items-start gap-3 text-sm text-foreground/90">
+                  <span
+                    className="mt-0.5 inline-flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-success/15 text-success"
+                    aria-hidden
+                  >
+                    <Check className="h-3.5 w-3.5" />
+                  </span>
+                  {f}
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          <div className="rounded-2xl border bg-card p-6 md:p-7">
+            <p className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+              ยังไม่ใช่ (ในเวอร์ชันนี้)
+            </p>
+            <ul className="mt-4 space-y-3">
+              {notYet.map((n) => (
+                <li key={n} className="flex items-start gap-3 text-sm text-muted-foreground">
+                  <span
+                    className="mt-0.5 inline-flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground"
+                    aria-hidden
+                  >
+                    <Minus className="h-3.5 w-3.5" />
+                  </span>
+                  {n}
+                </li>
+              ))}
+            </ul>
+          </div>
         </div>
+
+        <p className="mt-8 text-center text-sm leading-relaxed text-muted-foreground">
+          เราตั้งใจทำเครื่องมือที่เรียบง่ายและใช้ได้จริงสำหรับร้านเล็กก่อน
+          แล้วค่อย ๆ ขยายตามฟีดแบ็กของร้านจริง
+        </p>
       </div>
     </section>
   );
