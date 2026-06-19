@@ -1,7 +1,7 @@
 import AppLayout from "@/components/AppLayout";
 import DataQualityBadge from "@/components/DataQualityBadge";
 import AssumptionsDrawer from "@/components/AssumptionsDrawer";
-import PlanningOverviewCard from "@/components/planning/PlanningOverviewCard";
+import PlanningOverviewCard, { type TargetProfitMetricsSummary } from "@/components/planning/PlanningOverviewCard";
 import OverheadExpensesManager from "@/components/planning/OverheadExpensesManager";
 import PlanningAssumptionsCard from "@/components/planning/PlanningAssumptionsCard";
 import ProductProfitTable from "@/components/planning/ProductProfitTable";
@@ -31,6 +31,14 @@ type BaselineLoadState = {
   status: "loading" | "live" | "fallback" | "error";
   data: PlanningBaselineAdapterResult | null;
   error?: string;
+};
+
+type LoadBaselineOptions = {
+  allowFallback?: boolean;
+};
+
+type LoadAssumptionsOptions = {
+  strict?: boolean;
 };
 
 const FALLBACK_WARNING = "กำลังใช้ข้อมูลประมาณการจากเครื่องนี้ ไม่ใช่ข้อมูลล่าสุดจากระบบ";
@@ -93,21 +101,34 @@ export default function ScenarioPage() {
   // Reusable baseline loader — also re-run after overhead/assumption edits so the
   // overview KPIs and per-cup overhead refresh. The one-time seed guard below keeps
   // the simulator sliders from being reset on these refetches.
-  const loadBaseline = useCallback(async () => {
-    setBaselineState((prev) => ({ ...prev, status: "loading", error: undefined }));
-    try {
-      const response = await storeAdminApi.getPlanningBaseline();
-      if (!mountedRef.current) return;
-      setBaselineState({ status: "live", data: adaptPlanningBaseline(response) });
-    } catch (error: any) {
-      if (!mountedRef.current) return;
-      setBaselineState({
-        status: "fallback",
-        data: fallbackBaseline,
-        error: error?.message || "planning_baseline_failed",
-      });
-    }
-  }, [fallbackBaseline]);
+  const loadBaseline = useCallback(
+    async ({ allowFallback = true }: LoadBaselineOptions = {}) => {
+      setBaselineState((prev) => ({ ...prev, status: "loading", error: undefined }));
+      try {
+        const response = await storeAdminApi.getPlanningBaseline();
+        if (!mountedRef.current) return;
+        setBaselineState({ status: "live", data: adaptPlanningBaseline(response) });
+      } catch (error: unknown) {
+        if (!mountedRef.current) return;
+        const message = error instanceof Error ? error.message : "planning_baseline_failed";
+        if (allowFallback) {
+          setBaselineState({
+            status: "fallback",
+            data: fallbackBaseline,
+            error: message,
+          });
+          return;
+        }
+        setBaselineState((prev) => ({
+          ...prev,
+          status: prev.data ? prev.status : "error",
+          error: message,
+        }));
+        throw error;
+      }
+    },
+    [fallbackBaseline],
+  );
 
   const loadOverheadExpenses = useCallback(async () => {
     try {
@@ -120,16 +141,20 @@ export default function ScenarioPage() {
     }
   }, []);
 
-  const loadAssumptions = useCallback(async () => {
-    try {
-      const data = await storeAdminApi.getPlanningAssumptions();
-      if (mountedRef.current) setAssumptions(data);
-    } catch {
-      // Non-fatal — assumptions card falls back to empty inputs.
-    } finally {
-      if (mountedRef.current) setAssumptionsLoading(false);
-    }
-  }, []);
+  const loadAssumptions = useCallback(
+    async ({ strict = false }: LoadAssumptionsOptions = {}) => {
+      try {
+        const data = await storeAdminApi.getPlanningAssumptions();
+        if (mountedRef.current) setAssumptions(data);
+      } catch (error) {
+        if (strict) throw error;
+        // Non-fatal — assumptions card falls back to empty inputs.
+      } finally {
+        if (mountedRef.current) setAssumptionsLoading(false);
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     void loadBaseline();
@@ -193,8 +218,13 @@ export default function ScenarioPage() {
       toast({ variant: "destructive", description: "ไม่สามารถบันทึกข้อมูลได้ กรุณาลองใหม่อีกครั้ง" });
       throw error;
     }
-    toast({ description: "บันทึกสมมติฐานแล้ว" });
-    await Promise.all([loadAssumptions(), loadBaseline()]);
+
+    try {
+      await Promise.all([loadAssumptions({ strict: true }), loadBaseline({ allowFallback: false })]);
+      toast({ description: "บันทึกสมมติฐานแล้ว ระบบอัปเดตภาพรวมกำไรและจุดคุ้มทุนเรียบร้อย" });
+    } catch {
+      toast({ variant: "destructive", description: "บันทึกแล้ว แต่ไม่สามารถอัปเดตภาพรวมได้ กรุณารีเฟรชหน้าอีกครั้ง" });
+    }
   };
 
   const handleRefreshExpenses = async () => {
@@ -218,6 +248,14 @@ export default function ScenarioPage() {
   }, [baselineState, fallbackBaseline]);
 
   const activeBaseline = baselineState.data ?? fallbackBaseline;
+  const overheadSummary = activeBaseline?.overhead ?? null;
+  const derivedTargetProfit =
+    activeBaseline?.overhead?.target_profit_monthly ?? assumptions?.target_profit_monthly ?? null;
+  const targetProfitMonthly = derivedTargetProfit;
+  const expectedCupsPlan = overheadSummary?.expected_cups_per_month ?? assumptions?.expected_cups_per_month ?? null;
+  const operatingDaysPlan =
+    overheadSummary?.operating_days_per_month ?? assumptions?.operating_days_per_month ?? null;
+  const monthlyOverhead = overheadSummary?.monthly_overhead ?? null;
 
   // Calculations (pure engine)
   const baselineKPIs = useMemo<ScenarioKPIs>(() => {
@@ -238,9 +276,40 @@ export default function ScenarioPage() {
   const baselineWarnings = collectWarnings(activeBaseline, baselineState.status);
 
   // Section 4 (product profitability) — full menu list + overhead overlay flag.
+  const targetProfitMetrics = useMemo<TargetProfitMetricsSummary>(() => {
+    if (
+      monthlyOverhead === null ||
+      targetProfitMonthly === null ||
+      !Number.isFinite(monthlyOverhead) ||
+      !Number.isFinite(targetProfitMonthly)
+    ) {
+      return { canCalculate: false, reason: "missing_data" };
+    }
+    const grossProfitPerCup = baselineAveragePrice - baselineAverageCost;
+    if (!Number.isFinite(grossProfitPerCup) || grossProfitPerCup <= 0) {
+      return { canCalculate: false, reason: "non_positive_margin" };
+    }
+    const requiredCups = (monthlyOverhead + targetProfitMonthly) / grossProfitPerCup;
+    if (!Number.isFinite(requiredCups) || requiredCups <= 0) {
+      return { canCalculate: false, reason: "missing_data" };
+    }
+    const requiredCupsPerDay =
+      operatingDaysPlan && operatingDaysPlan > 0 ? requiredCups / operatingDaysPlan : null;
+    const gapCups =
+      expectedCupsPlan != null && Number.isFinite(expectedCupsPlan) ? requiredCups - expectedCupsPlan : null;
+    return { canCalculate: true, requiredCups, requiredCupsPerDay, gapCups };
+  }, [
+    baselineAveragePrice,
+    baselineAverageCost,
+    monthlyOverhead,
+    targetProfitMonthly,
+    operatingDaysPlan,
+    expectedCupsPlan,
+  ]);
+
   const baselineItems = activeBaseline?.items ?? [];
   const hasOverheadOverlay =
-    Boolean(activeBaseline?.overhead && (activeBaseline.overhead.expense_count ?? 0) > 0) &&
+    Boolean(overheadSummary && (overheadSummary.expense_count ?? 0) > 0) &&
     baselineItems.some((item) => item.overheadPerUnit != null);
 
   const dataQualityStatus: "live" | "fallback" | "loading" =
@@ -344,13 +413,15 @@ export default function ScenarioPage() {
         <PlanningOverviewCard
           averagePrice={baselineAveragePrice}
           averageCost={baselineAverageCost}
-          overhead={activeBaseline?.overhead ?? null}
+          overhead={overheadSummary}
           loading={baselineIsLoading}
           dataQualityLevel={dataQualityLevel}
           dataQualityStatus={dataQualityStatus}
           dataQualityTimestamp={dataQualityTimestamp}
           statusTag={baselineStatusTag}
           warnings={baselineWarnings}
+          targetProfitMonthly={derivedTargetProfit}
+          targetProfitMetrics={targetProfitMetrics}
         />
 
         {/* ── 2. สมมติฐานการวางแผน (only editable place for cups/days/target) ─── */}
