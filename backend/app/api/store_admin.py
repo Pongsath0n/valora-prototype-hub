@@ -4157,6 +4157,194 @@ def _load_order_items_map(client: Client, order_ids: List[str]) -> Dict[str, Lis
 # ─── Planning Baseline Helpers ─────────────────────────────────────────────
 
 
+_PLANNING_ASSUMPTION_DEFAULTS = {
+    "expected_cups_per_month": 300,
+    "operating_days_per_month": 20,
+    "target_profit_monthly": 0.0,
+    "overhead_allocation_method": "per_cup",
+}
+
+_OVERHEAD_PERIOD_MULTIPLIERS = {
+    "daily": 30.0,
+    "weekly": 4.345,
+    "monthly": 1.0,
+}
+
+
+def _normalize_overhead_period(value: Any) -> str:
+    if not value:
+        return "monthly"
+    text = str(value).strip().lower()
+    return text if text in _OVERHEAD_PERIOD_MULTIPLIERS else "monthly"
+
+
+def _load_active_overhead_expenses(client: Client, store_id: str) -> List[Dict[str, Any]]:
+    select_cols = "id, name, category, amount, period, is_active"
+    try:
+        resp = (
+            client.table("overhead_expenses")
+            .select(select_cols)
+            .eq("store_id", store_id)
+            .eq("is_active", True)
+            .execute()
+        )
+    except Exception as exc:  # pragma: no cover - supabase guard
+        logger.warning(
+            "overhead_expense_lookup_failed store=%s error=%s",
+            _short_identifier(store_id),
+            _safe_error_detail(exc),
+        )
+        return []
+
+    err = getattr(resp, "error", None)
+    if err:
+        logger.warning(
+            "overhead_expense_query_error store=%s detail=%s",
+            _short_identifier(store_id),
+            getattr(err, "message", err),
+        )
+        return []
+
+    rows = getattr(resp, "data", None) or []
+    sanitized: List[Dict[str, Any]] = []
+    for row in rows:
+        amount = _parse_float(row.get("amount"))
+        period = _normalize_overhead_period(row.get("period"))
+        sanitized.append({**row, "amount": amount, "period": period})
+    return sanitized
+
+
+def _summarize_overhead_expenses(expenses: List[Dict[str, Any]]) -> Dict[str, Any]:
+    total = 0.0
+    category_breakdown: Dict[str, float] = {}
+    for expense in expenses:
+        amount = _parse_float(expense.get("amount"))
+        period = _normalize_overhead_period(expense.get("period"))
+        multiplier = _OVERHEAD_PERIOD_MULTIPLIERS.get(period, 1.0)
+        monthly_amount = amount * multiplier
+        total += monthly_amount
+
+        category = (expense.get("category") or "uncategorized").strip() or "uncategorized"
+        category_breakdown[category] = category_breakdown.get(category, 0.0) + monthly_amount
+
+    return {
+        "monthly_overhead": total,
+        "expense_count": len(expenses),
+        "category_breakdown": category_breakdown,
+    }
+
+
+def _normalize_planning_assumptions(row: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    defaults = dict(_PLANNING_ASSUMPTION_DEFAULTS)
+    if not row:
+        return defaults
+
+    expected = int(_parse_float(row.get("expected_cups_per_month")))
+    operating_days = int(_parse_float(row.get("operating_days_per_month")))
+    target_profit = _parse_float(row.get("target_profit_monthly"))
+    allocation = (row.get("overhead_allocation_method") or defaults["overhead_allocation_method"]).strip()
+
+    if expected <= 0:
+        expected = defaults["expected_cups_per_month"]
+    if operating_days <= 0:
+        operating_days = defaults["operating_days_per_month"]
+    if not allocation:
+        allocation = defaults["overhead_allocation_method"]
+
+    return {
+        "expected_cups_per_month": expected,
+        "operating_days_per_month": operating_days,
+        "target_profit_monthly": target_profit,
+        "overhead_allocation_method": allocation,
+    }
+
+
+def _load_planning_assumptions(client: Client, store_id: str) -> Dict[str, Any]:
+    select_cols = (
+        "expected_cups_per_month, operating_days_per_month, "
+        "target_profit_monthly, overhead_allocation_method"
+    )
+    try:
+        resp = (
+            client.table("planning_assumptions")
+            .select(select_cols)
+            .eq("store_id", store_id)
+            .limit(1)
+            .execute()
+        )
+    except Exception as exc:  # pragma: no cover - supabase guard
+        logger.warning(
+            "planning_assumptions_lookup_failed store=%s error=%s",
+            _short_identifier(store_id),
+            _safe_error_detail(exc),
+        )
+        return dict(_PLANNING_ASSUMPTION_DEFAULTS)
+
+    err = getattr(resp, "error", None)
+    if err:
+        logger.warning(
+            "planning_assumptions_query_error store=%s detail=%s",
+            _short_identifier(store_id),
+            getattr(err, "message", err),
+        )
+        return dict(_PLANNING_ASSUMPTION_DEFAULTS)
+
+    rows = getattr(resp, "data", None) or []
+    row = rows[0] if rows else None
+    return _normalize_planning_assumptions(row)
+
+
+def _build_overhead_planning_summary(
+    items: List[Dict[str, Any]],
+    assumptions: Dict[str, Any],
+    overhead_stats: Dict[str, Any],
+) -> Dict[str, Any]:
+    expected_cups = assumptions.get("expected_cups_per_month") or _PLANNING_ASSUMPTION_DEFAULTS["expected_cups_per_month"]
+    operating_days = assumptions.get("operating_days_per_month") or _PLANNING_ASSUMPTION_DEFAULTS["operating_days_per_month"]
+
+    if expected_cups <= 0:
+        expected_cups = _PLANNING_ASSUMPTION_DEFAULTS["expected_cups_per_month"]
+    if operating_days <= 0:
+        operating_days = _PLANNING_ASSUMPTION_DEFAULTS["operating_days_per_month"]
+
+    monthly_overhead = _parse_float(overhead_stats.get("monthly_overhead"))
+    overhead_per_cup = monthly_overhead / expected_cups if expected_cups > 0 else 0.0
+
+    gross_values: List[float] = []
+    for entry in items:
+        if entry.get("gross_profit") is None:
+            continue
+        gross_value = _parse_float(entry.get("gross_profit"))
+        if gross_value > 0:
+            gross_values.append(gross_value)
+
+    average_gross_profit = sum(gross_values) / len(gross_values) if gross_values else 0.0
+
+    if average_gross_profit > 0:
+        break_even_cups_per_month: Optional[float] = monthly_overhead / average_gross_profit
+        break_even_cups_per_day: Optional[float] = (
+            break_even_cups_per_month / operating_days if operating_days > 0 else None
+        )
+    else:
+        break_even_cups_per_month = None
+        break_even_cups_per_day = None
+
+    allocation_method = assumptions.get("overhead_allocation_method") or _PLANNING_ASSUMPTION_DEFAULTS[
+        "overhead_allocation_method"
+    ]
+
+    return {
+        "monthly_overhead": monthly_overhead,
+        "expected_cups_per_month": expected_cups,
+        "operating_days_per_month": operating_days,
+        "overhead_per_cup": overhead_per_cup,
+        "break_even_cups_per_month": break_even_cups_per_month,
+        "break_even_cups_per_day": break_even_cups_per_day,
+        "allocation_method": allocation_method,
+        "target_profit_monthly": assumptions.get("target_profit_monthly") or 0.0,
+    }
+
+
 def _fetch_store_identity(client: Client, store_id: str) -> Dict[str, Optional[str]]:
     try:
         resp = client.table("stores").select("name, timezone").eq("id", store_id).limit(1).execute()
@@ -4524,6 +4712,37 @@ def _build_planning_payload(client: Client, store_id: str, lookback_days: int) -
         warning_summary["manual_cost_ingredients_count"],
     )
 
+    overhead_expenses = _load_active_overhead_expenses(client, store_id)
+    overhead_stats = _summarize_overhead_expenses(overhead_expenses)
+    planning_assumptions = _load_planning_assumptions(client, store_id)
+    overhead_payload = _build_overhead_planning_summary(items, planning_assumptions, overhead_stats)
+
+    overhead_block = {
+        **overhead_payload,
+        "expense_count": overhead_stats.get("expense_count", 0),
+    }
+    category_breakdown = overhead_stats.get("category_breakdown") or {}
+    if category_breakdown:
+        overhead_block["category_breakdown"] = category_breakdown
+
+    overhead_per_unit = overhead_block.get("overhead_per_cup")
+    for entry in items:
+        entry["direct_cost_per_unit"] = entry.get("current_unit_cost")
+        entry["gross_profit_per_unit"] = entry.get("gross_profit")
+        entry["overhead_per_unit"] = overhead_per_unit
+        if overhead_per_unit is not None and entry.get("gross_profit") is not None:
+            entry["net_profit_after_overhead_per_unit"] = entry["gross_profit"] - overhead_per_unit
+        else:
+            entry["net_profit_after_overhead_per_unit"] = None
+
+    baseline = {
+        "lookback_days": lookback_days,
+        "mix_source": mix_source,
+        "price_source": "products.base_price",
+        "cost_source": baseline_cost_source,
+        "overhead": overhead_block,
+    }
+
     return {
         "store": {
             "id": store_id,
@@ -4532,12 +4751,7 @@ def _build_planning_payload(client: Client, store_id: str, lookback_days: int) -
             "timezone_display": timezone_display,
             "generated_at": generated_at,
         },
-        "baseline": {
-            "lookback_days": lookback_days,
-            "mix_source": mix_source,
-            "price_source": "products.base_price",
-            "cost_source": baseline_cost_source,
-        },
+        "baseline": baseline,
         "items": items,
         "warnings": warnings,
         "warning_summary": warning_summary,
