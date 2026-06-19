@@ -1,4 +1,9 @@
-import type { PlanningBaselineItem, PlanningBaselineResponse, PlanningBaselineWarningSummary } from "@/services/storeAdminApi";
+import type {
+  PlanningBaselineItem,
+  PlanningBaselineOverhead,
+  PlanningBaselineResponse,
+  PlanningBaselineWarningSummary,
+} from "@/services/storeAdminApi";
 import type { MenuRow } from "@/services/types";
 
 export type PlanningBaselineMenuSummary = {
@@ -12,6 +17,11 @@ export type PlanningBaselineMenuSummary = {
   recipeComplete: boolean;
   historicalMixPercent: number | null;
   has_addon_cost_gap?: boolean;
+  // Product-level overhead/profit overlay (null when backend omits the fields).
+  directCostPerUnit: number | null;
+  grossProfitPerUnit: number | null;
+  overheadPerUnit: number | null;
+  netProfitAfterOverheadPerUnit: number | null;
 };
 
 export type PlanningBaselineAdapterResult = {
@@ -31,6 +41,8 @@ export type PlanningBaselineAdapterResult = {
   mixFallbackApplied: boolean;
   hasAddonCostGaps: boolean;
   warningSummary?: PlanningBaselineWarningSummary;
+  /** Overhead summary block from the backend baseline (null when unavailable). */
+  overhead: PlanningBaselineOverhead | null;
 };
 
 const MIX_WARNING_MESSAGES: Record<string, string> = {
@@ -50,6 +62,14 @@ function safeNumber(value: unknown): number {
   if (typeof value === "number" && Number.isFinite(value)) return value;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+/** Preserve null/undefined (so "no data" stays hidden) but coerce finite numbers. */
+function nullableNumber(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function normalizeWeights(items: PlanningBaselineItem[]): { weight: number; item: PlanningBaselineItem }[] {
@@ -112,6 +132,10 @@ function toMenuSummary(item: PlanningBaselineItem): PlanningBaselineMenuSummary 
     recipeComplete: Boolean(item.recipe_complete),
     historicalMixPercent: typeof item.historical_mix_percent === "number" ? item.historical_mix_percent : null,
     has_addon_cost_gap: item.has_addon_cost_gap,
+    directCostPerUnit: nullableNumber(item.direct_cost_per_unit),
+    grossProfitPerUnit: nullableNumber(item.gross_profit_per_unit),
+    overheadPerUnit: nullableNumber(item.overhead_per_unit),
+    netProfitAfterOverheadPerUnit: nullableNumber(item.net_profit_after_overhead_per_unit),
   };
 }
 
@@ -152,6 +176,7 @@ export function adaptPlanningBaseline(response: PlanningBaselineResponse): Plann
     mixFallbackApplied,
     hasAddonCostGaps,
     warningSummary,
+    overhead: response.baseline.overhead ?? null,
   };
 
   result.derivedWarnings = buildDerivedWarnings(result);
@@ -184,6 +209,10 @@ export function buildFallbackBaselineFromMenu(menuRows: MenuRow[]): PlanningBase
     costStatus: "estimated",
     recipeComplete: false,
     historicalMixPercent: row.mix ?? null,
+    directCostPerUnit: row.totalCost ?? null,
+    grossProfitPerUnit: row.price - row.totalCost,
+    overheadPerUnit: null,
+    netProfitAfterOverheadPerUnit: null,
   }));
 
   return {
@@ -203,5 +232,6 @@ export function buildFallbackBaselineFromMenu(menuRows: MenuRow[]): PlanningBase
     mixFallbackApplied: mixSum === 0,
     hasAddonCostGaps: false,
     warningSummary: undefined,
+    overhead: null,
   };
 }

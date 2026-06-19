@@ -388,6 +388,75 @@ export type DashboardSummaryResponse = {
   dashboard_revenue_kpi?: DashboardRevenueKpi;
 };
 
+// ─── Planning: Overhead expenses & assumptions ─────────────────────────────
+export const OVERHEAD_CATEGORIES = [
+  "rent",
+  "water",
+  "electricity",
+  "internet",
+  "labor",
+  "equipment",
+  "transport",
+  "marketing",
+  "other",
+] as const;
+export type OverheadCategory = (typeof OVERHEAD_CATEGORIES)[number];
+
+export const OVERHEAD_PERIODS = ["daily", "weekly", "monthly"] as const;
+export type OverheadPeriod = (typeof OVERHEAD_PERIODS)[number];
+
+export type OverheadExpense = {
+  id: string;
+  store_id?: string;
+  name: string;
+  category: OverheadCategory;
+  amount: number;
+  period: OverheadPeriod;
+  is_active: boolean;
+  note?: string | null;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type OverheadExpensePayload = {
+  name: string;
+  category: OverheadCategory;
+  amount: number;
+  period: OverheadPeriod;
+  is_active?: boolean;
+  note?: string | null;
+};
+
+export type OverheadExpenseUpdatePayload = Partial<OverheadExpensePayload>;
+
+export type PlanningAssumptions = {
+  expected_cups_per_month: number;
+  operating_days_per_month: number;
+  target_profit_monthly: number;
+  overhead_allocation_method: "per_cup";
+  store_id?: string;
+};
+
+export type PlanningAssumptionsPayload = {
+  expected_cups_per_month?: number;
+  operating_days_per_month?: number;
+  target_profit_monthly?: number;
+  overhead_allocation_method?: "per_cup";
+};
+
+export type PlanningBaselineOverhead = {
+  monthly_overhead: number;
+  expected_cups_per_month: number;
+  operating_days_per_month: number;
+  overhead_per_cup: number;
+  break_even_cups_per_month: number | null;
+  break_even_cups_per_day: number | null;
+  allocation_method: "per_cup";
+  expense_count: number;
+  target_profit_monthly: number;
+  category_breakdown?: Record<string, number>;
+};
+
 export type PlanningBaselineIngredientLine = {
   ingredient_id?: string | null;
   name?: string | null;
@@ -426,6 +495,11 @@ export type PlanningBaselineItem = {
   has_addon_cost_gap?: boolean;
   addon_cost_status?: string | null;
   recipe_issue_codes?: string[];
+  // Product-level overhead/profit overlay (planning overhead phase).
+  direct_cost_per_unit?: number | null;
+  gross_profit_per_unit?: number | null;
+  overhead_per_unit?: number | null;
+  net_profit_after_overhead_per_unit?: number | null;
 };
 
 export type PlanningBaselineWarningSummary = {
@@ -452,6 +526,7 @@ export type PlanningBaselineResponse = {
     mix_source?: string | null;
     price_source?: string | null;
     cost_source?: string | null;
+    overhead?: PlanningBaselineOverhead | null;
   };
   items: PlanningBaselineItem[];
   warnings: string[];
@@ -767,6 +842,45 @@ export const storeAdminApi = {
 
   async getPlanningBaseline(): Promise<PlanningBaselineResponse> {
     return request("/api/store-admin/planning/baseline");
+  },
+
+  // ─── Planning: overhead expenses ──────────────────────────────────────────
+  async listOverheadExpenses(): Promise<OverheadExpense[]> {
+    const data = await request<{ items: OverheadExpense[] }>("/api/store-admin/planning/overhead-expenses");
+    return data.items ?? [];
+  },
+
+  async createOverheadExpense(payload: OverheadExpensePayload): Promise<OverheadExpense> {
+    return request<OverheadExpense>("/api/store-admin/planning/overhead-expenses", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async updateOverheadExpense(expenseId: string, payload: OverheadExpenseUpdatePayload): Promise<OverheadExpense> {
+    return request<OverheadExpense>(`/api/store-admin/planning/overhead-expenses/${expenseId}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  /** Soft delete — backend sets is_active=false and returns the updated row. */
+  async deactivateOverheadExpense(expenseId: string): Promise<OverheadExpense> {
+    return request<OverheadExpense>(`/api/store-admin/planning/overhead-expenses/${expenseId}`, {
+      method: "DELETE",
+    });
+  },
+
+  // ─── Planning: assumptions ────────────────────────────────────────────────
+  async getPlanningAssumptions(): Promise<PlanningAssumptions> {
+    return request<PlanningAssumptions>("/api/store-admin/planning/assumptions");
+  },
+
+  async updatePlanningAssumptions(payload: PlanningAssumptionsPayload): Promise<PlanningAssumptions> {
+    return request<PlanningAssumptions>("/api/store-admin/planning/assumptions", {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    });
   },
 
   async getSalesReport(filters: SalesReportFiltersPayload): Promise<SalesReportResponse> {

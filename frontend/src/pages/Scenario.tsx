@@ -1,17 +1,27 @@
 import AppLayout from "@/components/AppLayout";
 import DataQualityBadge from "@/components/DataQualityBadge";
 import AssumptionsDrawer from "@/components/AssumptionsDrawer";
-import { useEffect, useMemo, useRef, useState } from "react";
+import OverheadSummaryCard from "@/components/planning/OverheadSummaryCard";
+import OverheadExpensesManager from "@/components/planning/OverheadExpensesManager";
+import PlanningAssumptionsCard from "@/components/planning/PlanningAssumptionsCard";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Save, Clock, Info, FileText, Trash2, AlertTriangle } from "lucide-react";
 import { shopService, fixedCostService, menuService, scenarioService } from "@/services/mockStorage";
 import { calcScenarioKPIs } from "@/services/calculationEngine";
 import type { SavedScenario, ScenarioKPIs } from "@/services/types";
-import { storeAdminApi } from "@/services/storeAdminApi";
+import {
+  storeAdminApi,
+  type OverheadExpense,
+  type OverheadExpensePayload,
+  type PlanningAssumptions,
+  type PlanningAssumptionsPayload,
+} from "@/services/storeAdminApi";
 import {
   adaptPlanningBaseline,
   buildFallbackBaselineFromMenu,
   type PlanningBaselineAdapterResult,
 } from "@/services/planningBaselineAdapter";
+import { useToast } from "@/hooks/use-toast";
 
 const now = new Date().toLocaleString("th-TH", { dateStyle: "medium", timeStyle: "short" });
 const baselineDateFormatter = new Intl.DateTimeFormat("th-TH", { dateStyle: "medium", timeStyle: "short" });
@@ -133,29 +143,124 @@ export default function ScenarioPage() {
     scenarioService.get()
   );
 
+  // Overhead expenses + planning assumptions (Owner overhead/hidden-cost loop).
+  const { toast } = useToast();
+  const mountedRef = useRef(true);
+  const [overheadExpenses, setOverheadExpenses] = useState<OverheadExpense[]>([]);
+  const [overheadLoading, setOverheadLoading] = useState(true);
+  const [overheadRefreshing, setOverheadRefreshing] = useState(false);
+  const [assumptions, setAssumptions] = useState<PlanningAssumptions | null>(null);
+  const [assumptionsLoading, setAssumptionsLoading] = useState(true);
+
   useEffect(() => {
-    let cancelled = false;
-    async function fetchBaseline() {
-      setBaselineState((prev) => ({ ...prev, status: "loading", error: undefined }));
-      try {
-        const response = await storeAdminApi.getPlanningBaseline();
-        if (cancelled) return;
-        const adapted = adaptPlanningBaseline(response);
-        setBaselineState({ status: "live", data: adapted });
-      } catch (error: any) {
-        if (cancelled) return;
-        setBaselineState({
-          status: "fallback",
-          data: fallbackBaseline,
-          error: error?.message || "planning_baseline_failed",
-        });
-      }
-    }
-    void fetchBaseline();
+    mountedRef.current = true;
     return () => {
-      cancelled = true;
+      mountedRef.current = false;
     };
+  }, []);
+
+  // Reusable baseline loader — also re-run after overhead/assumption edits so the
+  // summary card and per-cup overhead refresh. The one-time seed guard below keeps
+  // the simulator sliders from being reset on these refetches.
+  const loadBaseline = useCallback(async () => {
+    setBaselineState((prev) => ({ ...prev, status: "loading", error: undefined }));
+    try {
+      const response = await storeAdminApi.getPlanningBaseline();
+      if (!mountedRef.current) return;
+      setBaselineState({ status: "live", data: adaptPlanningBaseline(response) });
+    } catch (error: any) {
+      if (!mountedRef.current) return;
+      setBaselineState({
+        status: "fallback",
+        data: fallbackBaseline,
+        error: error?.message || "planning_baseline_failed",
+      });
+    }
   }, [fallbackBaseline]);
+
+  const loadOverheadExpenses = useCallback(async () => {
+    try {
+      const items = await storeAdminApi.listOverheadExpenses();
+      if (mountedRef.current) setOverheadExpenses(items);
+    } catch {
+      // Keep any previously loaded rows; surfaced via toast on explicit actions.
+    } finally {
+      if (mountedRef.current) setOverheadLoading(false);
+    }
+  }, []);
+
+  const loadAssumptions = useCallback(async () => {
+    try {
+      const data = await storeAdminApi.getPlanningAssumptions();
+      if (mountedRef.current) setAssumptions(data);
+    } catch {
+      // Non-fatal — assumptions card falls back to empty inputs.
+    } finally {
+      if (mountedRef.current) setAssumptionsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadBaseline();
+  }, [loadBaseline]);
+
+  useEffect(() => {
+    void loadOverheadExpenses();
+    void loadAssumptions();
+  }, [loadOverheadExpenses, loadAssumptions]);
+
+  const handleCreateExpense = async (payload: OverheadExpensePayload) => {
+    try {
+      await storeAdminApi.createOverheadExpense(payload);
+    } catch (error) {
+      toast({ variant: "destructive", description: "ไม่สามารถบันทึกข้อมูลได้ กรุณาลองใหม่อีกครั้ง" });
+      throw error;
+    }
+    toast({ description: "เพิ่มรายการต้นทุนแฝงแล้ว" });
+    await Promise.all([loadOverheadExpenses(), loadBaseline()]);
+  };
+
+  const handleUpdateExpense = async (id: string, payload: Partial<OverheadExpensePayload>) => {
+    try {
+      await storeAdminApi.updateOverheadExpense(id, payload);
+    } catch (error) {
+      toast({ variant: "destructive", description: "ไม่สามารถบันทึกข้อมูลได้ กรุณาลองใหม่อีกครั้ง" });
+      throw error;
+    }
+    toast({ description: "บันทึกการแก้ไขแล้ว" });
+    await Promise.all([loadOverheadExpenses(), loadBaseline()]);
+  };
+
+  const handleDeactivateExpense = async (id: string) => {
+    try {
+      await storeAdminApi.deactivateOverheadExpense(id);
+    } catch (error) {
+      toast({ variant: "destructive", description: "ไม่สามารถบันทึกข้อมูลได้ กรุณาลองใหม่อีกครั้ง" });
+      throw error;
+    }
+    toast({ description: "ปิดใช้งานรายการแล้ว" });
+    await Promise.all([loadOverheadExpenses(), loadBaseline()]);
+  };
+
+  const handleSaveAssumptions = async (payload: PlanningAssumptionsPayload) => {
+    try {
+      await storeAdminApi.updatePlanningAssumptions(payload);
+    } catch (error) {
+      toast({ variant: "destructive", description: "ไม่สามารถบันทึกข้อมูลได้ กรุณาลองใหม่อีกครั้ง" });
+      throw error;
+    }
+    toast({ description: "บันทึกสมมติฐานแล้ว" });
+    await Promise.all([loadAssumptions(), loadBaseline()]);
+  };
+
+  const handleRefreshExpenses = async () => {
+    setOverheadRefreshing(true);
+    try {
+      await Promise.all([loadOverheadExpenses(), loadBaseline()]);
+    } finally {
+      if (mountedRef.current) setOverheadRefreshing(false);
+    }
+  };
 
   useEffect(() => {
     if (hasSeededBaseline.current) return;
@@ -196,6 +301,10 @@ export default function ScenarioPage() {
   ];
   const baselineWarnings = collectWarnings(activeBaseline, baselineState.status);
   const baselineMenuPreview = (activeBaseline?.items ?? []).slice(0, 5);
+  const hasOverheadOverlay =
+    Boolean(activeBaseline?.overhead && (activeBaseline.overhead.expense_count ?? 0) > 0) &&
+    baselineMenuPreview.some((item) => item.overheadPerUnit != null);
+  const menuPreviewColSpan = hasOverheadOverlay ? 7 : 5;
   const baselineGrossMarginPercent = baselineAveragePrice > 0 ? (cmBaseline / baselineAveragePrice) * 100 : null;
   const dataQualityStatus: "live" | "fallback" | "loading" =
     baselineState.status === "live"
@@ -374,6 +483,8 @@ export default function ScenarioPage() {
                         <th className="py-2 pr-2 text-right">ราคา</th>
                         <th className="py-2 pr-2 text-right">ต้นทุน</th>
                         <th className="py-2 pr-2 text-right">กำไร/แก้ว</th>
+                        {hasOverheadOverlay && <th className="py-2 pr-2 text-right">ต้นทุนแฝง/แก้ว</th>}
+                        {hasOverheadOverlay && <th className="py-2 pr-2 text-right">กำไรหลังต้นทุนแฝง</th>}
                         <th className="py-2">สถานะต้นทุน</th>
                       </tr>
                     </thead>
@@ -388,13 +499,29 @@ export default function ScenarioPage() {
                             <td className="py-2 pr-2 text-right">{formatTHB(item.basePrice)}</td>
                             <td className="py-2 pr-2 text-right">{formatTHB(item.currentUnitCost)}</td>
                             <td className="py-2 pr-2 text-right">{`${formatTHB(grossProfit)} • ${formatPercent(marginPercent)}`}</td>
+                            {hasOverheadOverlay && (
+                              <td className="py-2 pr-2 text-right tabular-nums text-muted-foreground">
+                                {item.overheadPerUnit != null ? formatTHB(item.overheadPerUnit) : "—"}
+                              </td>
+                            )}
+                            {hasOverheadOverlay && (
+                              <td className="py-2 pr-2 text-right tabular-nums font-medium">
+                                {item.netProfitAfterOverheadPerUnit != null ? (
+                                  <span className={item.netProfitAfterOverheadPerUnit >= 0 ? "text-success" : "text-destructive"}>
+                                    {formatTHB(item.netProfitAfterOverheadPerUnit)}
+                                  </span>
+                                ) : (
+                                  "—"
+                                )}
+                              </td>
+                            )}
                             <td className={`py-2 text-xs font-medium ${statusMeta.tone}`}>{statusMeta.label}</td>
                           </tr>
                         );
                       })}
                       {baselineMenuPreview.length === 0 && (
                         <tr>
-                          <td colSpan={5} className="py-4 text-center text-sm text-muted-foreground">
+                          <td colSpan={menuPreviewColSpan} className="py-4 text-center text-sm text-muted-foreground">
                             ยังไม่มีเมนูสำหรับวางแผน โปรดเพิ่มเมนูและสูตรก่อนใช้งาน
                           </td>
                         </tr>
@@ -406,6 +533,25 @@ export default function ScenarioPage() {
             </>
           )}
         </div>
+
+        {/* ── Owner Overhead / Hidden-cost loop (ต้นทุนแฝง) ───────────────── */}
+        <OverheadSummaryCard overhead={activeBaseline?.overhead ?? null} loading={baselineIsLoading} />
+
+        <OverheadExpensesManager
+          expenses={overheadExpenses}
+          loading={overheadLoading}
+          refreshing={overheadRefreshing}
+          onRefresh={() => void handleRefreshExpenses()}
+          onCreate={handleCreateExpense}
+          onUpdate={handleUpdateExpense}
+          onDeactivate={handleDeactivateExpense}
+        />
+
+        <PlanningAssumptionsCard
+          assumptions={assumptions}
+          loading={assumptionsLoading}
+          onSave={handleSaveAssumptions}
+        />
 
         <div className="grid lg:grid-cols-5 gap-6">
           {/* LEFT: Sliders */}
