@@ -9,6 +9,7 @@ import {
 } from "@/features/store/customerIdentity";
 import { customerApi, type CustomerOrderItemOptions } from "@/services/customerApi";
 import { useLineLinkToken } from "@/components/customer/CustomerThemeLayout";
+import OrderFlowNav from "@/components/customer/OrderFlowNav";
 import {
   type CartItem,
   clearCart,
@@ -210,6 +211,11 @@ export default function OrderConfirmPage() {
         <h1 className="text-2xl font-bold">ยืนยันคำสั่งซื้อ</h1>
         <p className="text-sm text-muted-foreground">โปรดตรวจสอบข้อมูลก่อนส่งให้ร้านค้า</p>
       </div>
+
+      {/* Review-step navigation (before submission): go back to the cart, or
+          jump to the menu to change items/sweetness/add-ons. The cart draft is
+          preserved in localStorage, so neither action loses the order draft. */}
+      <OrderFlowNav backTo="/liff/cart" editItemsTo="/liff/menu" />
 
       <section className="bw-card p-4">
         <div className="flex items-center justify-between">

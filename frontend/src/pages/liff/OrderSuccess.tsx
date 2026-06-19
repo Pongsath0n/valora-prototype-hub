@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 
 import { customerApi, type CustomerOrderSummary } from "@/services/customerApi";
 import { customerOrderStatus, customerPaymentStatus, type CustomerStatusTone } from "@/lib/customerStatus";
+import { ORDER_NAV_LABELS } from "@/components/customer/OrderFlowNav";
 import {
   clearCart,
   getLastOrderId,
@@ -51,6 +52,12 @@ type PaymentInstructions = {
 const PAYMENT_CONFIG_FALLBACK =
   "ร้านยังไม่ได้ตั้งค่าข้อมูลบัญชีรับชำระเงิน กรุณาติดต่อร้านโดยตรงเพื่อชำระเงิน";
 
+const DEFAULT_ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp"];
+const DEFAULT_MAX_MB = 5;
+const SLIP_SUBMITTED_MESSAGE = "ส่งสลิปแล้ว รอร้านตรวจสอบ";
+
+type UploadState = "idle" | "uploading" | "success" | "error";
+
 export default function OrderSuccessPage() {
   const [orderId, setOrderId] = useState<string | null>(() => getLastOrderId());
   const [order, setOrder] = useState<CustomerOrderSummary | null>(null);
@@ -60,6 +67,11 @@ export default function OrderSuccessPage() {
   const [publicToken, setPublicToken] = useState<string | null>(() => getLastOrderToken());
   const [instructions, setInstructions] = useState<PaymentInstructions | null>(null);
   const [instructionsFailed, setInstructionsFailed] = useState(false);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [uploadState, setUploadState] = useState<UploadState>("idle");
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [hasUploadedSlipInSession, setHasUploadedSlipInSession] = useState(false);
+  const [remoteSlipSubmitted, setRemoteSlipSubmitted] = useState(false);
 
   useEffect(() => {
     if (!orderId) {
@@ -117,6 +129,28 @@ export default function OrderSuccessPage() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!publicToken) {
+      setRemoteSlipSubmitted(false);
+      return;
+    }
+    let cancelled = false;
+    customerApi
+      .getOrderStatusByToken(publicToken)
+      .then((status) => {
+        if (cancelled) return;
+        setRemoteSlipSubmitted(Boolean(status?.payment?.slip_submitted));
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setRemoteSlipSubmitted(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [publicToken]);
+
   const statusBadges = useMemo(() => {
     if (!order) return null;
     return {
@@ -125,11 +159,54 @@ export default function OrderSuccessPage() {
     };
   }, [order]);
 
-  const isPaid = (order?.payment_status ?? "").toLowerCase() === "paid";
+  const paymentStatus = (order?.payment_status ?? "").toLowerCase();
+  const isPaid = paymentStatus === "paid" || paymentStatus === "payment_confirmed";
+  const slipSubmitted = hasUploadedSlipInSession || remoteSlipSubmitted;
   const displayOrderNo = order?.order_number ?? order?.order_no ?? orderNo;
   const statusLink = publicToken
     ? `/order/status?token=${encodeURIComponent(publicToken)}`
     : "/order/status";
+  const allowedTypes = instructions?.allowed_file_types?.length
+    ? instructions.allowed_file_types
+    : DEFAULT_ALLOWED_TYPES;
+  const maxMb = instructions?.max_file_mb ?? DEFAULT_MAX_MB;
+
+  async function handleUpload(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!publicToken) {
+      setUploadError("ไม่พบโทเคนสำหรับอัปโหลดสลิป กรุณาเปิดหน้าสถานะออเดอร์เพื่ออัปโหลด");
+      return;
+    }
+    if (!selectedFile) {
+      setUploadError("กรุณาเลือกไฟล์หลักฐาน");
+      return;
+    }
+    if (!allowedTypes.includes(selectedFile.type)) {
+      setUploadError("ประเภทไฟล์ไม่รองรับ (รองรับ JPG / PNG / WEBP)");
+      return;
+    }
+    if (selectedFile.size > maxMb * 1024 * 1024) {
+      setUploadError(`ไฟล์ต้องไม่เกิน ${maxMb}MB`);
+      return;
+    }
+    setUploadState("uploading");
+    setUploadError(null);
+    try {
+      const summary = await customerApi.uploadPaymentSlip(publicToken, selectedFile);
+      setUploadState("success");
+      setSelectedFile(null);
+      setHasUploadedSlipInSession(true);
+      setRemoteSlipSubmitted(Boolean(summary?.payment?.slip_submitted ?? true));
+      // Reflect the new payment status (typically pending_review) so the inline
+      // success/waiting state shows without forcing a manual refresh.
+      setOrder((prev) =>
+        prev ? { ...prev, payment_status: summary?.payment_status ?? "pending_review" } : prev,
+      );
+    } catch (err: any) {
+      setUploadState("error");
+      setUploadError(err?.message || "อัปโหลดไม่สำเร็จ โปรดลองใหม่อีกครั้ง");
+    }
+  }
 
   function handleCopyOrderNo() {
     if (!displayOrderNo) return;
@@ -145,6 +222,11 @@ export default function OrderSuccessPage() {
     setLastOrderNo(null);
     setPublicToken(null);
     setLastOrderToken(null);
+    setHasUploadedSlipInSession(false);
+    setRemoteSlipSubmitted(false);
+    setUploadState("idle");
+    setSelectedFile(null);
+    setUploadError(null);
   }
 
   if (!orderId) {
@@ -223,11 +305,11 @@ export default function OrderSuccessPage() {
               </div>
             </div>
 
-            {!isPaid ? (
-              <ol className="space-y-1.5 rounded-2xl border border-primary/20 bg-primary/5 p-4 text-sm">
+            {!isPaid && !slipSubmitted ? (
+              <ol className="space-y-1.5 rounded-2xl border border-primary/25 bg-primary/5 p-4 text-sm">
                 <p className="font-semibold text-foreground">ขั้นตอนถัดไป</p>
                 <li className="text-muted-foreground">1. โอนเงินตามยอดที่แสดง</li>
-                <li className="text-muted-foreground">2. อัปโหลดสลิปการโอน</li>
+                <li className="text-muted-foreground">2. อัปโหลดสลิปการโอน (ในหน้านี้ได้เลย)</li>
                 <li className="text-muted-foreground">3. รอร้านตรวจสอบและยืนยันออเดอร์</li>
               </ol>
             ) : null}
@@ -237,48 +319,123 @@ export default function OrderSuccessPage() {
         )}
       </section>
 
-      {/* ── Payment instruction card ── */}
-      {!isPaid ? (
+      {/* ── Payment + slip upload (merged into the order flow) ── */}
+      {isPaid ? (
         <section className="bw-card p-5">
-          <p className="text-xs font-semibold text-primary/70">ช่องทางการชำระเงิน</p>
-          {instructions?.enabled ? (
-            <div className="mt-1 space-y-2 text-sm">
-              <h2 className="text-lg font-semibold">{instructions.method_label}</h2>
-              {instructions.bank_name ? (
-                <p><span className="text-muted-foreground">ธนาคาร:</span> {instructions.bank_name}</p>
-              ) : null}
-              {instructions.account_name ? (
-                <p><span className="text-muted-foreground">ชื่อบัญชี:</span> {instructions.account_name}</p>
-              ) : null}
-              {instructions.account_number ? (
-                <p><span className="text-muted-foreground">เลขบัญชี:</span> {instructions.account_number}</p>
-              ) : null}
-              {instructions.promptpay_id ? (
-                <p><span className="text-muted-foreground">PromptPay:</span> {instructions.promptpay_id}</p>
-              ) : null}
-              {order ? (
-                <p><span className="text-muted-foreground">ยอดโอน:</span> <span className="font-semibold">{formatCurrency(order.total_amount)}</span></p>
-              ) : null}
-              {instructions.note_lines?.length ? (
-                <ul className="list-disc space-y-0.5 pl-4 text-xs text-muted-foreground">
-                  {instructions.note_lines.map((note, idx) => (
-                    <li key={`${note}-${idx}`}>{note}</li>
-                  ))}
-                </ul>
-              ) : null}
+          <div className="flex items-start gap-3 rounded-2xl border border-emerald-300 bg-emerald-50 p-4">
+            <span
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-lg font-bold text-emerald-700 animate-check-pop"
+              aria-hidden
+            >
+              ✓
+            </span>
+            <div>
+              <p className="text-base font-semibold text-emerald-900">ร้านยืนยันการชำระเงินแล้ว</p>
+              <p className="mt-0.5 text-sm text-emerald-800/90">
+                ขอบคุณค่ะ ติดตามสถานะการเตรียมออเดอร์ได้จากปุ่มด้านล่าง
+              </p>
+            </div>
+          </div>
+        </section>
+      ) : (
+        <section className="bw-card p-5">
+          {slipSubmitted ? (
+            <div
+              className="flex items-start gap-3 rounded-2xl border border-sky-300 bg-sky-50 p-4"
+              role="status"
+              aria-live="polite"
+            >
+              <span
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-sky-100 text-lg font-bold text-sky-700 animate-check-pop"
+                aria-hidden
+              >
+                ✓
+              </span>
+              <div className="min-w-0">
+                <p className="text-base font-semibold text-sky-900">{SLIP_SUBMITTED_MESSAGE}</p>
+                <p className="mt-0.5 text-sm text-sky-800/90">
+                  ร้านจะตรวจสอบยอดโอนและยืนยันออเดอร์ของคุณโดยเร็ว ติดตามสถานะได้จากปุ่มด้านล่าง
+                </p>
+              </div>
             </div>
           ) : (
-            <p className="mt-2 text-sm text-muted-foreground">
-              {PAYMENT_CONFIG_FALLBACK}
-            </p>
+            <>
+              <p className="text-xs font-semibold uppercase tracking-wide text-primary">ช่องทางการชำระเงิน</p>
+              {instructions?.enabled ? (
+                <div className="mt-2 space-y-2 text-sm text-foreground">
+                  <h2 className="text-lg font-semibold">{instructions.method_label}</h2>
+                  {instructions.bank_name ? (
+                    <p><span className="text-muted-foreground">ธนาคาร:</span> {instructions.bank_name}</p>
+                  ) : null}
+                  {instructions.account_name ? (
+                    <p><span className="text-muted-foreground">ชื่อบัญชี:</span> {instructions.account_name}</p>
+                  ) : null}
+                  {instructions.account_number ? (
+                    <p><span className="text-muted-foreground">เลขบัญชี:</span> {instructions.account_number}</p>
+                  ) : null}
+                  {instructions.promptpay_id ? (
+                    <p><span className="text-muted-foreground">PromptPay:</span> {instructions.promptpay_id}</p>
+                  ) : null}
+                  {order ? (
+                    <p><span className="text-muted-foreground">ยอดโอน:</span> <span className="font-semibold">{formatCurrency(order.total_amount)}</span></p>
+                  ) : null}
+                  {instructions.note_lines?.length ? (
+                    <ul className="list-disc space-y-0.5 pl-4 text-xs text-muted-foreground">
+                      {instructions.note_lines.map((note, idx) => (
+                        <li key={`${note}-${idx}`}>{note}</li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </div>
+              ) : (
+                <p className="mt-2 rounded-xl bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+                  {PAYMENT_CONFIG_FALLBACK}
+                </p>
+              )}
+              {instructionsFailed && !instructions ? (
+                <p className="mt-2 rounded-xl bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+                  โหลดข้อมูลการชำระเงินไม่สำเร็จ — คุณยังอัปโหลดสลิปด้านล่างได้ตามปกติ หรือเปิดหน้าเช็กสถานะภายหลัง
+                </p>
+              ) : null}
+
+              {/* Inline slip upload — no separate page or manual navigation required */}
+              <div className="mt-4 border-t pt-4">
+                <h2 className="text-base font-semibold">อัปโหลดสลิปการโอน</h2>
+                <form onSubmit={handleUpload} className="mt-3 space-y-3">
+                  <p className="text-sm text-muted-foreground">
+                    แนบหลักฐานการโอนเงิน (สลิป) เพื่อให้ร้านตรวจสอบและยืนยันออเดอร์ของคุณได้ทันที
+                  </p>
+                  <input
+                    type="file"
+                    accept={allowedTypes.join(",")}
+                    aria-label="เลือกไฟล์สลิปการโอน"
+                    onChange={(event) => {
+                      setSelectedFile(event.target.files?.[0] ?? null);
+                      setUploadError(null);
+                    }}
+                    className="w-full rounded-xl border border-input bg-card px-3 py-2 text-sm file:mr-4 file:rounded-full file:border-0 file:bg-primary/10 file:px-4 file:py-1.5 file:text-sm file:font-semibold file:text-primary"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    รองรับไฟล์ JPG / PNG / WEBP ขนาดไม่เกิน {maxMb}MB — หลังอัปโหลด ร้านจะตรวจสอบและยืนยันออเดอร์
+                  </p>
+                  {uploadError ? (
+                    <p className="rounded-xl border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm font-medium text-destructive">
+                      {uploadError}
+                    </p>
+                  ) : null}
+                  <button
+                    type="submit"
+                    disabled={uploadState === "uploading" || !selectedFile}
+                    className="bw-cta"
+                  >
+                    {uploadState === "uploading" ? "กำลังอัปโหลด..." : "ส่งหลักฐานการโอน"}
+                  </button>
+                </form>
+              </div>
+            </>
           )}
-          {instructionsFailed && !instructions ? (
-            <p className="mt-2 text-xs text-muted-foreground">
-              โหลดข้อมูลการชำระเงินไม่สำเร็จ — เปิดหน้าเช็กสถานะเพื่อลองใหม่ หรือติดต่อร้านโดยตรง
-            </p>
-          ) : null}
         </section>
-      ) : null}
+      )}
 
       {/* ── Order item summary ── */}
       {order ? (
@@ -304,19 +461,17 @@ export default function OrderSuccessPage() {
         </section>
       ) : null}
 
-      {/* ── Actions (priority order) ── */}
+      {/* ── Actions ── slip upload is inline above; these are optional shortcuts.
+          "ดูสถานะของออเดอร์" appears only once a public order token exists. ── */}
       <div className="space-y-3">
-        {!isPaid ? (
-          <a href={statusLink} className="bw-cta">
-            อัปโหลดสลิปการโอน
-          </a>
+        {publicToken ? (
+          <Link to={statusLink} className="bw-btn-outline">
+            {ORDER_NAV_LABELS.status}
+          </Link>
         ) : null}
-        <a href={statusLink} className="bw-btn-outline">
-          ดูสถานะออเดอร์
-        </a>
         <Link
           to="/liff/menu"
-          className="inline-flex w-full items-center justify-center rounded-full border px-4 py-2 text-sm font-medium text-muted-foreground"
+          className="inline-flex w-full items-center justify-center rounded-full border border-input px-4 py-2 text-sm font-medium text-foreground"
         >
           สั่งเพิ่ม
         </Link>
@@ -329,7 +484,7 @@ export default function OrderSuccessPage() {
         </button>
       </div>
 
-      {/* Soft dev-mode note — intentionally low-key and at the bottom */}
+      {/* Soft dev-mode note — low-key, kept at the bottom */}
       <p className="text-center text-xs text-muted-foreground/80">
         การแจ้งเตือนผ่าน LINE อยู่ระหว่างทดสอบ หากไม่ได้รับข้อความ สามารถติดตามสถานะได้จากหน้านี้
       </p>

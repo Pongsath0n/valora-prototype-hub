@@ -297,31 +297,35 @@
 /* Brewway/Valora Customer Cafe Theme - scoped warm palette for customer flow only */
 @layer base {
   .brewway-customer {
-    --background: 36 80% 96%;
-    --foreground: 16 28% 20%;
+    /* Customer order flow palette — tuned for mobile / LINE in-app browser
+       readability. Darker text + clearer borders give stronger hierarchy
+       without leaving the warm Brewway cafe tone. Scoped: does NOT affect the
+       Staff/Owner (:root) theme. */
+    --background: 38 70% 94%;
+    --foreground: 20 35% 15%;
     --card: 0 0% 100%;
-    --card-foreground: 16 28% 20%;
+    --card-foreground: 20 35% 15%;
     --popover: 0 0% 100%;
-    --popover-foreground: 16 28% 20%;
-    --primary: 26 40% 39%;
-    --primary-foreground: 36 80% 97%;
-    --secondary: 36 60% 92%;
-    --secondary-foreground: 26 45% 30%;
-    --muted: 35 42% 91%;
-    --muted-foreground: 18 16% 40%;
-    --accent: 29 45% 59%;
+    --popover-foreground: 20 35% 15%;
+    --primary: 25 50% 33%;
+    --primary-foreground: 38 80% 97%;
+    --secondary: 36 58% 90%;
+    --secondary-foreground: 25 48% 25%;
+    --muted: 35 42% 90%;
+    --muted-foreground: 22 26% 32%;
+    --accent: 29 48% 52%;
     --accent-foreground: 0 0% 100%;
-    --destructive: 0 72% 51%;
+    --destructive: 0 72% 45%;
     --destructive-foreground: 0 0% 100%;
-    --border: 33 35% 86%;
-    --input: 33 35% 86%;
-    --ring: 26 40% 39%;
+    --border: 30 30% 75%;
+    --input: 28 30% 70%;
+    --ring: 25 50% 33%;
     --radius: 0.875rem;
-    --success: 160 84% 30%;
+    --success: 160 84% 28%;
     --success-foreground: 0 0% 100%;
-    --warning: 30 92% 44%;
+    --warning: 30 92% 40%;
     --warning-foreground: 0 0% 100%;
-    --info: 239 70% 60%;
+    --info: 224 64% 50%;
     --info-foreground: 0 0% 100%;
   }
 }
@@ -338,7 +342,7 @@
 
   .bw-card {
     @apply rounded-2xl border bg-card;
-    box-shadow: 0 1px 2px hsl(26 40% 30% / 0.04), 0 8px 20px -12px hsl(26 40% 30% / 0.18);
+    box-shadow: 0 1px 2px hsl(26 40% 22% / 0.07), 0 10px 24px -14px hsl(26 40% 22% / 0.24);
   }
 
   .bw-chip {
@@ -359,17 +363,28 @@
 
   .bw-cta {
     @apply inline-flex min-h-[48px] w-full items-center justify-center gap-2 rounded-full bg-primary px-5 text-base font-semibold text-primary-foreground transition-colors disabled:cursor-not-allowed disabled:opacity-60;
+    box-shadow: 0 6px 16px -8px hsl(25 50% 28% / 0.55);
   }
 
   .bw-cta:not(:disabled):hover {
-    background-color: hsl(25 48% 30%);
+    background-color: hsl(25 52% 27%);
   }
 
   .bw-btn-outline {
-    @apply inline-flex min-h-[48px] w-full items-center justify-center gap-2 rounded-full border border-primary/35 bg-card px-5 text-base font-semibold text-primary transition-colors;
+    @apply inline-flex min-h-[48px] w-full items-center justify-center gap-2 rounded-full border-2 border-primary/45 bg-card px-5 text-base font-semibold text-primary transition-colors;
   }
 
   .bw-btn-outline:hover {
+    background-color: hsl(var(--secondary));
+  }
+
+  /* Compact, readable customer order-flow navigation buttons
+     (ย้อนกลับ / แก้ไขรายการ / ดูสถานะของออเดอร์). */
+  .bw-nav-btn {
+    @apply inline-flex min-h-[44px] flex-1 items-center justify-center gap-1.5 rounded-full border border-input bg-card px-4 py-2 text-sm font-semibold text-foreground transition-colors;
+  }
+
+  .bw-nav-btn:hover {
     background-color: hsl(var(--secondary));
   }
 
@@ -382,7 +397,7 @@
   }
 
   .bw-input {
-    @apply w-full min-w-0 max-w-full rounded-xl border bg-card px-4 py-3 text-base text-foreground placeholder:text-muted-foreground/70 focus:border-primary focus:outline-none focus:ring-2 focus:ring-ring/30 transition-shadow;
+    @apply w-full min-w-0 max-w-full rounded-xl border border-input bg-card px-4 py-3 text-base text-foreground placeholder:text-muted-foreground/70 focus:border-primary focus:outline-none focus:ring-2 focus:ring-ring/45 transition-shadow;
   }
 
   input[type="datetime-local"].bw-input {
