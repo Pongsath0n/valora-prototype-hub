@@ -864,11 +864,23 @@ export const storeAdminApi = {
     });
   },
 
-  /** Soft delete — backend sets is_active=false and returns the updated row. */
+  /** Soft delete — backend keeps the row and sets is_active=false (default DELETE). */
   async deactivateOverheadExpense(expenseId: string): Promise<OverheadExpense> {
     return request<OverheadExpense>(`/api/store-admin/planning/overhead-expenses/${expenseId}`, {
       method: "DELETE",
     });
+  },
+
+  /**
+   * True hard delete — backend permanently removes the row (hard=true). Safe
+   * because no other table references overhead_expenses and overhead is
+   * recomputed live from the active rows on every planning request.
+   */
+  async deleteOverheadExpense(expenseId: string): Promise<{ status: string; id: string }> {
+    return request<{ status: string; id: string }>(
+      `/api/store-admin/planning/overhead-expenses/${expenseId}?hard=true`,
+      { method: "DELETE" },
+    );
   },
 
   // ─── Planning: assumptions ────────────────────────────────────────────────

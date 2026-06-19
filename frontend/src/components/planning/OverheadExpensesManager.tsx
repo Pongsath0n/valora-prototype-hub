@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Loader2, Pencil, Plus, RefreshCw } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Loader2, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -32,6 +32,7 @@ type Props = {
   onCreate: (payload: OverheadExpensePayload) => Promise<void>;
   onUpdate: (id: string, payload: Partial<OverheadExpensePayload>) => Promise<void>;
   onDeactivate: (id: string) => Promise<void>;
+  onDelete: (id: string) => Promise<void>;
 };
 
 type FormState = {
@@ -43,6 +44,8 @@ type FormState = {
   note: string;
 };
 
+type StatusFilter = "all" | "active" | "inactive";
+
 const emptyForm: FormState = {
   name: "",
   category: "rent",
@@ -52,7 +55,13 @@ const emptyForm: FormState = {
   note: "",
 };
 
-/** Section B — ต้นทุนแฝง / ค่าใช้จ่ายประจำ (list + add/edit modal + deactivate). */
+const STATUS_FILTERS: { key: StatusFilter; label: string }[] = [
+  { key: "all", label: "ทั้งหมด" },
+  { key: "active", label: "ใช้งานอยู่" },
+  { key: "inactive", label: "ปิดใช้งาน" },
+];
+
+/** Section 3 — ต้นทุนแฝง / ค่าใช้จ่ายประจำ (list + filters + add/edit + deactivate + true delete). */
 export default function OverheadExpensesManager({
   expenses,
   loading,
@@ -61,6 +70,7 @@ export default function OverheadExpensesManager({
   onCreate,
   onUpdate,
   onDeactivate,
+  onDelete,
 }: Props) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<OverheadExpense | null>(null);
@@ -69,6 +79,15 @@ export default function OverheadExpensesManager({
   const [formError, setFormError] = useState("");
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [deleting, setDeleting] = useState<OverheadExpense | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+
+  const visibleExpenses = useMemo(() => {
+    if (statusFilter === "active") return expenses.filter((e) => e.is_active !== false);
+    if (statusFilter === "inactive") return expenses.filter((e) => e.is_active === false);
+    return expenses;
+  }, [expenses, statusFilter]);
 
   const openCreate = () => {
     setEditing(null);
@@ -147,11 +166,22 @@ export default function OverheadExpensesManager({
     }
   };
 
+  const handleConfirmDelete = async () => {
+    if (!deleting) return;
+    setDeleteBusy(true);
+    try {
+      await onDelete(deleting.id);
+      setDeleting(null);
+    } finally {
+      setDeleteBusy(false);
+    }
+  };
+
   return (
     <div className="stat-card space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="text-lg font-semibold text-foreground">ต้นทุนแฝง / ค่าใช้จ่ายประจำ</h2>
+          <h2 className="text-lg font-semibold text-foreground">3. ต้นทุนแฝง / ค่าใช้จ่ายประจำ</h2>
           <p className="mt-0.5 max-w-xl text-xs text-muted-foreground">
             เพิ่มค่าเช่า ค่าน้ำ ค่าไฟ หรือค่าใช้จ่ายประจำ เพื่อให้ระบบคำนวณกำไรหลังต้นทุนแฝงได้แม่นขึ้น
           </p>
@@ -177,6 +207,23 @@ export default function OverheadExpensesManager({
         </div>
       </div>
 
+      <div className="inline-flex items-center gap-0.5 rounded-lg border bg-muted/30 p-0.5 text-xs">
+        {STATUS_FILTERS.map((f) => (
+          <button
+            key={f.key}
+            type="button"
+            onClick={() => setStatusFilter(f.key)}
+            className={`rounded-md px-3 py-1 font-medium transition-colors ${
+              statusFilter === f.key
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            {f.label}
+          </button>
+        ))}
+      </div>
+
       {loading ? (
         <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
           กำลังโหลดข้อมูลต้นทุนแฝง...
@@ -184,6 +231,10 @@ export default function OverheadExpensesManager({
       ) : expenses.length === 0 ? (
         <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
           ยังไม่มีรายการต้นทุนแฝง
+        </div>
+      ) : visibleExpenses.length === 0 ? (
+        <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
+          ไม่มีรายการในตัวกรองนี้
         </div>
       ) : (
         <div className="overflow-x-auto">
@@ -199,7 +250,7 @@ export default function OverheadExpensesManager({
               </tr>
             </thead>
             <tbody>
-              {expenses.map((row) => {
+              {visibleExpenses.map((row) => {
                 const inactive = row.is_active === false;
                 const isConfirming = confirmingId === row.id;
                 const isBusy = busyId === row.id;
@@ -229,16 +280,7 @@ export default function OverheadExpensesManager({
                       )}
                     </td>
                     <td className="py-2.5 text-right">
-                      {inactive ? (
-                        <button
-                          type="button"
-                          onClick={() => handleReactivate(row.id)}
-                          disabled={isBusy}
-                          className="text-xs font-medium text-accent hover:text-accent/80 disabled:opacity-60"
-                        >
-                          {isBusy ? "กำลังเปิด..." : "เปิดใช้งาน"}
-                        </button>
-                      ) : isConfirming ? (
+                      {isConfirming ? (
                         <div className="flex items-center justify-end gap-2">
                           <span className="text-xs text-muted-foreground">ยืนยันปิดใช้งาน?</span>
                           <button
@@ -260,19 +302,39 @@ export default function OverheadExpensesManager({
                         </div>
                       ) : (
                         <div className="flex items-center justify-end gap-3">
+                          {inactive ? (
+                            <button
+                              type="button"
+                              onClick={() => handleReactivate(row.id)}
+                              disabled={isBusy}
+                              className="text-xs font-medium text-accent hover:text-accent/80 disabled:opacity-60"
+                            >
+                              {isBusy ? "กำลังเปิด..." : "เปิดใช้งาน"}
+                            </button>
+                          ) : (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => openEdit(row)}
+                                className="inline-flex items-center gap-1 text-xs font-medium text-accent hover:text-accent/80"
+                              >
+                                <Pencil className="h-3.5 w-3.5" /> แก้ไข
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setConfirmingId(row.id)}
+                                className="text-xs font-medium text-muted-foreground hover:text-destructive"
+                              >
+                                ปิดใช้งาน
+                              </button>
+                            </>
+                          )}
                           <button
                             type="button"
-                            onClick={() => openEdit(row)}
-                            className="inline-flex items-center gap-1 text-xs font-medium text-accent hover:text-accent/80"
+                            onClick={() => setDeleting(row)}
+                            className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-destructive"
                           >
-                            <Pencil className="h-3.5 w-3.5" /> แก้ไข
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setConfirmingId(row.id)}
-                            className="text-xs font-medium text-muted-foreground hover:text-destructive"
-                          >
-                            ปิดใช้งาน
+                            <Trash2 className="h-3.5 w-3.5" /> ลบ
                           </button>
                         </div>
                       )}
@@ -285,6 +347,7 @@ export default function OverheadExpensesManager({
         </div>
       )}
 
+      {/* Add / edit dialog */}
       <Dialog open={dialogOpen} onOpenChange={(open) => !submitting && setDialogOpen(open)}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
@@ -397,6 +460,44 @@ export default function OverheadExpensesManager({
             >
               {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
               บันทึก
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* True hard-delete confirm dialog */}
+      <Dialog open={Boolean(deleting)} onOpenChange={(open) => !deleteBusy && !open && setDeleting(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>ยืนยันการลบรายการต้นทุนแฝง</DialogTitle>
+            <DialogDescription>
+              เมื่อลบแล้ว รายการนี้จะหายจากระบบ และจะไม่ถูกนำไปใช้ในการวางแผนอีก
+            </DialogDescription>
+          </DialogHeader>
+
+          {deleting && (
+            <p className="rounded-lg bg-muted/40 px-3 py-2 text-sm text-foreground">
+              {deleting.name} • {overheadCategoryLabel(deleting.category)} • {formatBaht(deleting.amount)}
+            </p>
+          )}
+
+          <DialogFooter className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setDeleting(null)}
+              disabled={deleteBusy}
+              className="rounded-lg border px-4 py-2 text-sm font-medium text-foreground hover:bg-muted disabled:opacity-60"
+            >
+              ยกเลิก
+            </button>
+            <button
+              type="button"
+              onClick={handleConfirmDelete}
+              disabled={deleteBusy}
+              className="flex items-center gap-1.5 rounded-lg bg-destructive px-4 py-2 text-sm font-medium text-destructive-foreground transition-opacity hover:opacity-90 disabled:opacity-60"
+            >
+              {deleteBusy && <Loader2 className="h-4 w-4 animate-spin" />}
+              ลบถาวร
             </button>
           </DialogFooter>
         </DialogContent>

@@ -47,6 +47,10 @@ class FakeTableQuery:
         self.on_conflict = on_conflict
         return self
 
+    def delete(self) -> "FakeTableQuery":
+        self.action = "delete"
+        return self
+
     def eq(self, column: str, value: Any) -> "FakeTableQuery":
         self.filters.append((column, value))
         return self
@@ -100,6 +104,14 @@ class FakeTableQuery:
                 return FakeResponse(data=[dict(match)])
             new_row = self._insert_one(dict(self.payload))
             return FakeResponse(data=[dict(new_row)])
+
+        if self.action == "delete":
+            removed: List[Dict[str, Any]] = []
+            remaining: List[Dict[str, Any]] = []
+            for row in self.dataset:
+                (removed if self._matches(row) else remaining).append(row)
+            self.dataset[:] = remaining
+            return FakeResponse(data=[dict(row) for row in removed])
 
         raise AssertionError(f"Unsupported action {self.action}")
 
@@ -323,6 +335,30 @@ class PlanningOverheadApiTests(unittest.TestCase):
         with self._ctx_patch(self._ctx(client)):
             deleted = store_admin.deactivate_overhead_expense("exp-1", store_id=self.store_id)
         self.assertFalse(deleted["is_active"])
+        # Soft delete keeps the row in storage.
+        self.assertEqual(len(client.storage["overhead_expenses"]), 1)
+
+    def test_owner_can_hard_delete_overhead_expense(self) -> None:
+        seed = {
+            "overhead_expenses": [
+                {
+                    "id": "exp-1",
+                    "store_id": self.store_id,
+                    "name": "ค่าเช่า",
+                    "category": "rent",
+                    "amount": 4500,
+                    "period": "monthly",
+                    "is_active": True,
+                }
+            ]
+        }
+        client = FakeClient(seed)
+        with self._ctx_patch(self._ctx(client)):
+            result = store_admin.deactivate_overhead_expense("exp-1", store_id=self.store_id, hard=True)
+        self.assertEqual(result.get("status"), "deleted")
+        self.assertEqual(result.get("id"), "exp-1")
+        # Hard delete removes the row from storage entirely.
+        self.assertEqual(client.storage["overhead_expenses"], [])
 
     # Planning assumptions -----------------------------------------------
     def test_get_planning_assumptions_returns_defaults(self) -> None:

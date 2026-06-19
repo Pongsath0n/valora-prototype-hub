@@ -79,7 +79,7 @@ export default function PlanningAssumptionsCard({ assumptions, loading, onSave }
           <SlidersHorizontal className="h-5 w-5" />
         </div>
         <div>
-          <h2 className="text-lg font-semibold text-foreground">สมมติฐานการวางแผนกำไร</h2>
+          <h2 className="text-lg font-semibold text-foreground">2. สมมติฐานการวางแผน</h2>
           <p className="text-xs text-muted-foreground mt-0.5">
             ระบบจะใช้จำนวนแก้วต่อเดือนเพื่อเฉลี่ยต้นทุนแฝงต่อแก้ว
           </p>

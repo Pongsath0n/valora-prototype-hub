@@ -4969,13 +4969,45 @@ def update_overhead_expense(
 
 @router.delete("/planning/overhead-expenses/{expense_id}")
 def deactivate_overhead_expense(
-    expense_id: str, authorization: Optional[str] = Header(None), store_id: Optional[str] = None
+    expense_id: str,
+    authorization: Optional[str] = Header(None),
+    store_id: Optional[str] = None,
+    hard: bool = False,
 ) -> Dict[str, Any]:
+    """Remove an overhead expense.
+
+    Default (``hard=false``) is a *soft* delete: the row is kept and only
+    ``is_active`` flips to ``False`` so it stops being averaged into the
+    overhead-per-cup figure while history is preserved.
+
+    ``hard=true`` performs a *true* delete. This is safe because no other table
+    references ``overhead_expenses`` (no foreign keys / ``overhead_expense_id``
+    columns) and the planning baseline recomputes overhead live from the active
+    rows on every request -- it is never snapshotted onto orders or reports --
+    so permanently removing a row cannot orphan or corrupt downstream data.
+    Used when a recurring cost genuinely disappears from the business model
+    (e.g. a cafe moves from a rented shop to selling from home).
+    """
     ctx = _get_ctx(authorization)
     store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
     _require_manager(role)
 
     _fetch_overhead_row(ctx["client"], store_id_resolved, expense_id)
+
+    if hard:
+        resp = (
+            ctx["client"]
+            .table("overhead_expenses")
+            .delete()
+            .eq("id", expense_id)
+            .eq("store_id", store_id_resolved)
+            .execute()
+        )
+        err = getattr(resp, "error", None)
+        if err:
+            raise HTTPException(status_code=500, detail="overhead_delete_failed")
+        return {"status": "deleted", "id": expense_id}
+
     data = {"is_active": False, "updated_at": datetime.utcnow().isoformat()}
     resp = (
         ctx["client"]
