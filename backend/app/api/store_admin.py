@@ -761,6 +761,14 @@ def _mask_order_item_fields(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]
         for fld in _ORDER_ITEM_FINANCIAL_FIELDS:
             if fld in sanitized:
                 sanitized[fld] = None
+        for sensitive in (
+            "overhead_per_unit",
+            "net_profit_after_overhead_per_unit",
+            "direct_cost_per_unit",
+            "gross_profit_per_unit",
+        ):
+            if sensitive in sanitized:
+                sanitized.pop(sensitive, None)
         if "options" in sanitized:
             sanitized["options"] = mask_option_costs(sanitized.get("options"))
         masked.append(sanitized)
@@ -4772,6 +4780,257 @@ def _classify_baseline_cost_source(has_blocking_gap: bool, purchase_derived_coun
         return "mixed"
 
     return "manual"
+
+
+_OVERHEAD_CATEGORIES = {
+    "rent",
+    "water",
+    "electricity",
+    "internet",
+    "labor",
+    "equipment",
+    "transport",
+    "marketing",
+    "other",
+}
+
+_OVERHEAD_PERIODS = {"daily", "weekly", "monthly"}
+
+
+def _sanitize_overhead_payload(payload: Dict[str, Any], partial: bool = False) -> Dict[str, Any]:
+    data = {}
+    if not partial or "name" in payload:
+        name = (payload.get("name") or "").strip()
+        if not name:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="name_required")
+        data["name"] = name
+
+    if not partial or "category" in payload:
+        category = (payload.get("category") or "").strip().lower()
+        if category not in _OVERHEAD_CATEGORIES:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="category_invalid")
+        data["category"] = category
+
+    if not partial or "period" in payload:
+        period = (payload.get("period") or "").strip().lower()
+        if period not in _OVERHEAD_PERIODS:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="period_invalid")
+        data["period"] = period
+
+    if not partial or "amount" in payload:
+        try:
+            amount = float(payload.get("amount", 0))
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="amount_invalid")
+        if amount < 0:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="amount_non_negative")
+        data["amount"] = amount
+
+    if "is_active" in payload or not partial:
+        is_active = payload.get("is_active")
+        if is_active is None:
+            is_active = True
+        data["is_active"] = bool(is_active)
+
+    if "note" in payload:
+        data["note"] = (payload.get("note") or "").strip() or None
+    elif not partial:
+        data["note"] = None
+
+    return data
+
+
+def _sanitize_assumption_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    data: Dict[str, Any] = {}
+    if "expected_cups_per_month" in payload:
+        value = _parse_float(payload.get("expected_cups_per_month"))
+        if value <= 0:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="expected_cups_positive")
+        data["expected_cups_per_month"] = int(value)
+
+    if "operating_days_per_month" in payload:
+        value = _parse_float(payload.get("operating_days_per_month"))
+        if value <= 0:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="operating_days_positive")
+        data["operating_days_per_month"] = int(value)
+
+    if "target_profit_monthly" in payload:
+        value = _parse_float(payload.get("target_profit_monthly"))
+        if value < 0:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="target_profit_non_negative")
+        data["target_profit_monthly"] = value
+
+    if "overhead_allocation_method" in payload:
+        method = (payload.get("overhead_allocation_method") or "").strip().lower()
+        if method != "per_cup":
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="allocation_method_invalid")
+        data["overhead_allocation_method"] = method
+
+    if not data:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="payload_required")
+
+    return data
+
+
+def _fetch_overhead_row(client: Client, store_id: str, expense_id: str) -> Dict[str, Any]:
+    resp = (
+        client.table("overhead_expenses")
+        .select("*")
+        .eq("id", expense_id)
+        .eq("store_id", store_id)
+        .limit(1)
+        .execute()
+    )
+    err = getattr(resp, "error", None)
+    if err:
+        raise HTTPException(status_code=500, detail="overhead_lookup_failed")
+    rows = getattr(resp, "data", None) or []
+    if not rows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="overhead_not_found")
+    return rows[0]
+
+
+@router.get("/planning/overhead-expenses")
+def list_overhead_expenses(authorization: Optional[str] = Header(None), store_id: Optional[str] = None) -> Dict[str, Any]:
+    ctx = _get_ctx(authorization)
+    store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
+    _require_manager(role)
+
+    resp = (
+        ctx["client"]
+        .table("overhead_expenses")
+        .select("*")
+        .eq("store_id", store_id_resolved)
+        .order("created_at", desc=True)
+        .execute()
+    )
+    err = getattr(resp, "error", None)
+    if err:
+        raise HTTPException(status_code=500, detail="overhead_query_failed")
+    rows = getattr(resp, "data", None) or []
+    return {"items": rows}
+
+
+@router.post("/planning/overhead-expenses", status_code=status.HTTP_201_CREATED)
+def create_overhead_expense(
+    payload: Dict[str, Any], authorization: Optional[str] = Header(None), store_id: Optional[str] = None
+) -> Dict[str, Any]:
+    ctx = _get_ctx(authorization)
+    store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
+    _require_manager(role)
+
+    data = _sanitize_overhead_payload(payload, partial=False)
+    data["store_id"] = store_id_resolved
+
+    try:
+        resp = ctx["client"].table("overhead_expenses").insert(data).execute()
+    except Exception as exc:  # pragma: no cover - supabase guard
+        raise HTTPException(status_code=500, detail=f"overhead_create_failed:{_safe_error_detail(exc)}") from exc
+
+    err = getattr(resp, "error", None)
+    if err:
+        raise HTTPException(status_code=500, detail="overhead_create_failed")
+
+    rows = getattr(resp, "data", None) or []
+    return rows[0] if rows else data
+
+
+@router.patch("/planning/overhead-expenses/{expense_id}")
+def update_overhead_expense(
+    expense_id: str,
+    payload: Dict[str, Any],
+    authorization: Optional[str] = Header(None),
+    store_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    ctx = _get_ctx(authorization)
+    store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
+    _require_manager(role)
+
+    _fetch_overhead_row(ctx["client"], store_id_resolved, expense_id)
+    data = _sanitize_overhead_payload(payload, partial=True)
+    data["updated_at"] = datetime.utcnow().isoformat()
+
+    resp = (
+        ctx["client"]
+        .table("overhead_expenses")
+        .update(data)
+        .eq("id", expense_id)
+        .eq("store_id", store_id_resolved)
+        .execute()
+    )
+    err = getattr(resp, "error", None)
+    if err:
+        raise HTTPException(status_code=500, detail="overhead_update_failed")
+    rows = getattr(resp, "data", None) or []
+    if not rows:
+        raise HTTPException(status_code=500, detail="overhead_update_missing")
+    return rows[0]
+
+
+@router.delete("/planning/overhead-expenses/{expense_id}")
+def deactivate_overhead_expense(
+    expense_id: str, authorization: Optional[str] = Header(None), store_id: Optional[str] = None
+) -> Dict[str, Any]:
+    ctx = _get_ctx(authorization)
+    store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
+    _require_manager(role)
+
+    _fetch_overhead_row(ctx["client"], store_id_resolved, expense_id)
+    data = {"is_active": False, "updated_at": datetime.utcnow().isoformat()}
+    resp = (
+        ctx["client"]
+        .table("overhead_expenses")
+        .update(data)
+        .eq("id", expense_id)
+        .eq("store_id", store_id_resolved)
+        .execute()
+    )
+    err = getattr(resp, "error", None)
+    if err:
+        raise HTTPException(status_code=500, detail="overhead_deactivate_failed")
+    rows = getattr(resp, "data", None) or []
+    if not rows:
+        raise HTTPException(status_code=500, detail="overhead_deactivate_missing")
+    return rows[0]
+
+
+@router.get("/planning/assumptions")
+def get_planning_assumptions_endpoint(
+    authorization: Optional[str] = Header(None), store_id: Optional[str] = None
+) -> Dict[str, Any]:
+    ctx = _get_ctx(authorization)
+    store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
+    _require_manager(role)
+
+    assumptions = _load_planning_assumptions(ctx["client"], store_id_resolved)
+    return assumptions
+
+
+@router.patch("/planning/assumptions")
+def patch_planning_assumptions(
+    payload: Dict[str, Any], authorization: Optional[str] = Header(None), store_id: Optional[str] = None
+) -> Dict[str, Any]:
+    ctx = _get_ctx(authorization)
+    store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
+    _require_manager(role)
+
+    data = _sanitize_assumption_payload(payload)
+    existing = _load_planning_assumptions(ctx["client"], store_id_resolved)
+
+    upsert_payload = {**existing, **data, "store_id": store_id_resolved}
+
+    resp = (
+        ctx["client"]
+        .table("planning_assumptions")
+        .upsert(upsert_payload, on_conflict="store_id")
+        .execute()
+    )
+    err = getattr(resp, "error", None)
+    if err:
+        raise HTTPException(status_code=500, detail="assumptions_upsert_failed")
+
+    rows = getattr(resp, "data", None) or []
+    return rows[0] if rows else upsert_payload
 
 
 @router.get("/planning/baseline")
