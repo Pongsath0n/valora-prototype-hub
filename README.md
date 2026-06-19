@@ -1,259 +1,131 @@
-# Valora / Brewway
+# Valora / Brewway — ระบบช่วยวางแผนกำไรสำหรับร้านเล็กและ SMEs
 
-**Status:** Valora v1 is closed as **Soft Launch Ready**.
+**สถานะปัจจุบัน:** V.1 Closure / พร้อมเข้าสู่ช่วง Soft Launch
 
-Valora is a lightweight cafe operation and profit-planning system designed for small coffee shops and SME-style operations. The v1 scope focuses on making real order handling, payment review, cost awareness, stock intake, and LINE OA customer communication work together around one core engine: **Profit Planning**.
-
----
-
-## Status
-
-Valora v1 is closed as **Soft Launch Ready**.
-
-- Feature Complete
-- Ready for real-world controlled use by the owner/staff workflow
+Valora คือระบบช่วยเจ้าของร้านเล็กวางแผนกำไร เห็นต้นทุนจริง จุดคุ้มทุน และจำนวนยอดขายที่ต้องทำเพื่อให้ถึงเป้ากำไร โดยออกแบบให้เหมาะกับร้านกาแฟ ร้านเครื่องดื่ม ร้านอาหารขนาดเล็ก และ SMEs ที่ต้องการระบบช่วยตัดสินใจโดยไม่ซับซ้อนเหมือน ERP ขนาดใหญ่
 
 ---
 
-## Overview
+## ภาพรวมของโปรเจ็ค
 
-Valora / Brewway is a lightweight cafe operation and profit-planning system. It is built for a small coffee shop / SME use case and is **not intended to become a full ERP in v1**.
-
-The product helps an owner understand whether the shop is actually profitable by connecting daily orders, ingredient costs, recipes, and stock intake into a single planning view.
+Valora / Brewway เป็นระบบช่วยวางแผนกำไรและการดำเนินงานเบื้องต้นสำหรับร้านเล็ก โดยเชื่อมข้อมูลคำสั่งซื้อ ต้นทุนวัตถุดิบ สูตร และค่าใช้จ่ายประจำเข้าด้วยกันในมุมมองเดียว ผู้ใช้เห็นสถานะกำไรจริง เทียบกับจุดคุ้มทุน และจำลองสถานการณ์ได้ก่อนตัดสินใจขยายร้านหรือเพิ่มสินค้าใหม่
 
 ---
 
-## Core Principle: Profit Planning First
+## จุดยืนของระบบ
 
-The core product engine is **Profit Planning**. All supporting features exist only to make Profit Planning trustworthy and usable in real operations:
-
-- Customer order flow
-- Staff order/payment operation
-- Owner dashboard
-- Recipe/cost coverage
-- Stock intake / purchase-derived cost baseline
-- LINE OA order binding and notifications
-- Basic reporting
-- Storage and operational readiness
+- **Profit Planning** เป็นหัวใจหลัก ทุกฟังก์ชันอื่น เช่น การรับออเดอร์ ตรวจสลิป รายงาน และการแจ้งเตือน LINE OA ถูกออกแบบเพื่อสนับสนุนความแม่นยำของแผนกำไร
+- ระบบเน้นช่วยผู้ประกอบการขนาดเล็กและ SME ให้ตัดสินใจจากข้อมูลจริง โดยไม่ต้องใช้งาน ERP เต็มรูปแบบ
+- มี Owner dashboard ที่สรุปข้อมูลแผนกำไร 5 ส่วน พร้อมตัวชี้วัดเฉลี่ยต่อแก้วและรายเดือน เพื่อให้เจ้าของร้านเห็นภาพเดียวจบ
 
 ---
 
-## v1 Feature Scope
+## สิ่งที่ Valora V.1 ทำได้
 
-| Feature | Status |
-|---|---|
-| Customer web ordering | Included |
-| Pickup order flow | Included |
-| Payment slip upload | Included |
-| Staff payment review | Included |
-| Staff order queue | Included |
-| Order status management | Included |
-| Owner dashboard | Included |
-| Revenue KPI | Included |
-| Profit Planning baseline | Included |
-| Recipe completeness / cost coverage guard | Included |
-| Stock Intake MVP | Included |
-| Purchase-derived moving average cost support | Included |
-| LINE OA webhook | Included |
-| LINE link-token order binding | Included |
-| LINE customer profile name sync | Included |
-| LINE push notifications for important customer-value events | Included |
-| Reject slip / cancel notification with customer-safe reason | Included |
-| Customer display-name protection against mock/test placeholder names | Included |
-| Supabase Storage for payment slips, menu images, and purchase receipts | Included |
-| Health readiness endpoints | Included |
-| Local and cloud smoke/e2e verification workflow | Included |
+- วางแผนกำไรสำหรับร้านกาแฟ/SME ด้วยเครื่องยนต์ Profit Planning
+- คำนวณต้นทุนวัตถุดิบ/บรรจุภัณฑ์ตามสูตรเมนู (Recipe / direct cost)
+- จัดการต้นทุนแฝงและค่าใช้จ่ายประจำ พร้อมเฉลี่ยต่อแก้วตามแผน
+- ตั้งสมมติฐานการขายและนำไปผูกกับจุดคุ้มทุนต่อเดือน/ต่อวัน
+- คำนวณจำนวนแก้วที่ต้องขายเพื่อถึงเป้ากำไร และลำดับความสำคัญตามสถานะปัจจุบัน
+- วิเคราะห์กำไรรายสินค้าและดูผลกระทบต่อกำไรรวม
+- จำลองสถานการณ์ (Scenario simulation) เพื่อดูผลแผนใหม่ทันที
+- Owner planning dashboard ตามโครงสร้าง 5 ส่วน
+- รับออเดอร์ลูกค้าผ่านหน้าเว็บสาธารณะ พร้อมติดตามสถานะได้
+- ลูกค้าอัปโหลดสลิปการชำระเงิน และให้ Staff ตรวจสอบได้ในคิวงาน
+- Staff payment review / order queue / customer-safe notification
+- Owner/Staff แยกบทบาทสิทธิ์อย่างชัดเจน ส่วน Customer เห็นเฉพาะ flow สั่งซื้อและสถานะ
+- รองรับ LINE OA notification readiness, LINE link-token binding, และการแจ้งเตือนเหตุการณ์สำคัญ
+- Owner dashboard / reporting และ Landing Page ที่สื่อสาร positioning ของ V.1 แล้ว
 
 ---
 
-## What v1 Does Not Include
+## โครงสร้างหน้า `/app/planning`
 
-- Full POS workflow
-- Full CRM
-- LIFF / LINE Login
-- Rich Menu automation
-- Advanced analytics/reporting
-- Automated database cleanup/export job
-- Mobile polish for every page
-- Production user manual with screenshots
-- Advanced notification preferences
-- Supabase Pro upgrade
+ปัจจุบันใช้โครงสร้าง 5 ส่วนเพื่อให้เจ้าของร้านทบทวนแผนกำไรอย่างเป็นระบบ:
 
----
+1. **ภาพรวมการวางแผนกำไร** – แสดงสรุปยอดขายตามแผน กำไรเฉลี่ยต่อแก้ว และสถานะเทียบเป้ากำไร
+2. **สมมติฐานการวางแผน** – ระบุยอดขายเป้าหมาย จำนวนแก้วต่อวัน ราคาเฉลี่ย ช่องทางขาย และตัวเลขหลักที่ใช้ในแผน
+3. **ต้นทุนแฝง / ค่าใช้จ่ายประจำ** – รวมค่าเช่า ค่าแรง น้ำไฟ และต้นทุนแฝงอื่น ๆ พร้อมคำนวณต้นทุนแฝงเฉลี่ยต่อแก้วตามแผน
+4. **กำไรรายสินค้า** – รายการสินค้า/สูตรพร้อมกำไรขั้นต้นก่อนหักต้นทุนแฝง เพื่อเห็นว่ารายการใดมีน้ำหนักต่อกำไรรวม
+5. **ลองปรับแผน / จำลองสถานการณ์** – ใส่ตัวแปรใหม่แล้วเห็นผลลัพธ์ทันที ทั้งกำไรเฉลี่ย/แก้ว จุดคุ้มทุน และจำนวนแก้วที่ต้องขาย
 
-## User Roles
+### ตัวชี้วัดและตรรกะการวางแผน
 
-| Role | Responsibilities |
-|---|---|
-| **Owner** | Management overview, dashboard, reports, planning, system readiness, oversight |
-| **Staff** | Daily operations, order queue, payment review, order status updates, customer-facing fulfillment |
-| **Customer** | Public ordering flow, slip upload, order status tracking |
-| **System/Admin oversight** | Guarded system checks, audit logs, storage/health readiness |
+- ต้นทุนวัตถุดิบเฉลี่ยต่อแก้วจากสูตรและราคาวัตถุดิบล่าสุด
+- ต้นทุนแฝงเฉลี่ยต่อแก้วตามแผน (คำนวณจากค่าใช้จ่ายประจำหารด้วยจำนวนแก้วที่ตั้งไว้)
+- กำไรเฉลี่ยต่อแก้วตามแผน (รายได้ต่อแก้ว − ต้นทุนวัตถุดิบ − ต้นทุนแฝงเฉลี่ย)
+- จุดคุ้มทุนต่อเดือน/ต่อวัน
+- เป้ากำไรต่อเดือน/ต่อวัน และจำนวนแก้วที่ต้องขายเพื่อถึงเป้านั้น
+- สถานะเทียบเป้ากำไร (ต่ำกว่า เท่ากับ หรือสูงกว่าแผน)
+- สูตรจำนวนแก้วเพื่อถึงเป้ากำไร: `(ต้นทุนแฝงต่อเดือน + เป้ากำไรต่อเดือน) / กำไรขั้นต้นต่อแก้วก่อนหักต้นทุนแฝง`
 
----
+**จุดคุ้มทุน** หมายถึงยอดขายที่ครอบคลุมต้นทุนแฝง/ต้นทุนคงที่และเริ่มไม่ขาดทุน
 
-## Main Workflows
-
-1. **Customer places an order** via the public web ordering page.
-2. **Customer uploads a payment slip** for staff verification.
-3. **Staff reviews the payment slip** in the staff queue and approves or rejects it.
-4. **Staff manages order status** through the queue (accepted, preparing, ready for pickup, completed).
-5. **Owner reviews** the dashboard, revenue KPI, and profit planning baseline.
-6. **Stock intake** records are added to keep purchase-derived moving average costs current.
-7. **Recipe completeness guard** warns when a product cannot calculate its cost because ingredients or recipes are missing.
+**เป้ากำไร** หมายถึงยอดขายที่ครอบคลุมต้นทุนแฝง/ต้นทุนคงที่และยังได้กำไรตามเป้าที่ตั้งไว้ ซึ่งมีค่าเพิ่มจากจุดคุ้มทุนเสมอ
 
 ---
 
-## LINE OA Integration
+## อยู่ระหว่างพัฒนา: โมดูล POS หน้าร้าน
 
-### LINE Notification Policy
-
-LINE push notifications are sent **only** for:
-
-- Payment approved / slip verified
-- Ready for pickup
-- Payment rejected
-- Cancelled
-
-LINE push notifications are **not** sent for:
-
-- Accepted
-- Preparing
-- Completed
-- Internal status syncs
-
-### Message Content Rules
-
-**For payment rejected and cancelled:**
-
-- Do not include status URL
-- Include customer-safe reason
-- Include chat guidance
-- Include urgent contact phone: `0847371089`
-
-**For payment approved and ready for pickup:**
-
-- Do not repeat total amount unnecessarily
-- Keep message calm and customer-friendly
-
-### LINE OA Scope
-
-- LINE OA Messaging API only
-- Rich Menu may link or trigger order flow depending on setup
-- No LIFF in v1
-- No LINE Login in v1
-- No full CRM in v1
-
-### Known LINE Limitation
-
-If a customer opens `/order` directly from a URL or Rich Menu URI action, the system treats it as an anonymous web order and cannot know the LINE identity.
-
-If the customer starts from a LINE webhook-generated link (`/order?line_link_token=...`), the order is bound to LINE identity and can sync the LINE display name.
+- โมดูล POS สำหรับหน้าร้าน **อยู่ระหว่างพัฒนา** ไม่ถือเป็นฟีเจอร์ที่เสร็จสมบูรณ์ใน V.1
+- เป้าหมายเพื่อรองรับการขายหน้าร้าน (direct shop sales) และการทำรายการที่เคาน์เตอร์
+- จะออกแบบ workflow POS ให้สอดคล้องกับการทำงานหน้าร้านจริง และส่งข้อมูลยอดขายกลับเข้าสู่ระบบวิเคราะห์กำไร
+- ข้อมูลจาก POS ในอนาคตจะช่วยให้คำนวณรายได้ ต้นทุน และกำไรได้แม่นยำขึ้น แต่ยังไม่เปิดใช้งานในการ Soft Launch รอบนี้
 
 ---
 
-## Storage Buckets
+## สิ่งที่ Valora ยังไม่ใช่
 
-| Bucket | Visibility | Purpose |
-|---|---|---|
-| `payment-slips` | Private (signed URLs) | Customer payment slip images |
-| `menu-images` | Public | Menu item images |
-| `purchase-receipts` | Private (signed URLs) | Stock purchase receipt images |
+- ไม่ใช่ ERP เต็มรูปแบบหรือระบบบัญชีครบวงจร
+- ไม่ใช่ระบบภาษีหรือการยื่นแบบอัตโนมัติ
+- ไม่ใช่ระบบเงินเดือนหรือ Payroll
+- ไม่ใช่ระบบ Inventory Accounting ระดับองค์กร
+- ยังไม่ใช่ Full POS system และยังไม่รองรับ CRM เชิงลึก
 
----
-
-## Environment Variables
-
-### Storage
-
-```bash
-PAYMENT_SLIP_BUCKET=payment-slips
-PAYMENT_SLIP_MAX_MB=5
-MENU_IMAGE_BUCKET=menu-images
-MENU_IMAGE_MAX_MB=5
-PURCHASE_RECEIPT_BUCKET=purchase-receipts
-PURCHASE_RECEIPT_MAX_MB=5
-```
-
-### LINE OA
-
-```bash
-LINE_CHANNEL_ACCESS_TOKEN=
-LINE_CHANNEL_SECRET=
-LINE_SEND_MODE=live
-LINE_WEBHOOK_ENABLED=true
-LINE_PUSH_ENABLED=true
-LINE_ORDER_URL=
-LINE_STATUS_URL=
-LINE_LINK_TOKEN_TTL_MINUTES=30
-LINE_STORE_ID=
-LINE_WEBHOOK_URL=
-```
-
-> Do not commit real secret values. Copy from `.env.example` and fill in locally.
-
-### Supabase (required)
-
-```bash
-SUPABASE_URL=
-SUPABASE_ANON_KEY=
-SUPABASE_SERVICE_ROLE_KEY=
-```
+> Valora V.1 โฟกัสที่การวางแผนกำไรและการช่วยตัดสินใจของธุรกิจขนาดเล็กเท่านั้น
 
 ---
 
-## Local Development
+## Tech Stack
 
-### Prerequisites
+- **Frontend:** React + Vite + TypeScript
+- **Backend:** FastAPI
+- **Database / Auth / Storage:** Supabase
+- **Deployment:** Vercel (Frontend) + Railway (Backend)
+- **Messaging:** LINE OA Messaging API
 
-- Node.js v18+ and npm (frontend)
-- Python 3.10+ (backend)
-- Supabase project credentials
+---
 
-### Frontend
+## การรันระบบสำหรับพัฒนา
 
-```bash
-cd frontend
-npm install
-
-# Create frontend/.env from .env.example
-npm run dev
-# http://localhost:8080/
-```
+เตรียม Node.js v18+, npm, Python 3.10+, และ Supabase credentials ก่อนเริ่ม
 
 ### Backend
 
 ```bash
 cd backend
-python -m venv .venv
-./.venv/Scripts/Activate.ps1  # or source .venv/bin/activate on macOS/Linux
-pip install -r requirements.txt
-
-# Create backend/.env from .env.example
 uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 # http://127.0.0.1:8000
 ```
 
-### Database Assets
+### Frontend
 
-- Active schema: `database/supabase.sql`
-- Legacy archives: `database/archive/`
-- `database/supabase.sql` is the single source of truth
-
-### Utility Scripts
-
-- `scripts/seed-owner-user.mjs` — seed owner profile (requires `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `OWNER_PASSWORD`, `OWNER_EMAIL`)
+```bash
+cd frontend
+npm run dev
+# http://localhost:8080/
+```
 
 ---
 
-## Testing
+## คำสั่งทดสอบที่ใช้
 
 ### Backend
 
 ```bash
 cd backend
 python -m compileall app
-python -m pytest app/tests/test_line_notifications.py app/tests/test_customer_line_binding.py app/tests/test_store_admin_order_display.py
+python -m pytest app/tests/test_planning_overhead.py app/tests/test_planning_overhead_api.py app/tests/test_cost_engine.py
 ```
 
 ### Frontend
@@ -261,115 +133,44 @@ python -m pytest app/tests/test_line_notifications.py app/tests/test_customer_li
 ```bash
 cd frontend
 npm run build
+npx vitest run src/App.legacy-routes.test.tsx
 ```
 
-### Local-First Testing Rule
+### Project Smoke / Security
 
-All development and verification should run locally first:
-
-- Backend: `http://127.0.0.1:8000`
-- Frontend: `http://localhost:8080/`
-
-Cloud testing is deployment verification **after** local pass.
-
----
-
-## Deployment
-
-| Environment | URL |
-|---|---|
-| Backend local | `http://127.0.0.1:8000` |
-| Frontend local | `http://localhost:8080/` |
-| Backend production | `https://valora-prototype-hub-production.up.railway.app` |
-| Frontend production | `https://valora-system-hub.vercel.app` |
-
-- Frontend deploys from `frontend/` (Vercel or static hosting)
-- Backend runs via `uvicorn app.main:app` from `backend/` (Railway / container)
-
----
-
-## Health Checks
-
-```powershell
-Invoke-RestMethod https://valora-prototype-hub-production.up.railway.app/health/line-ready | ConvertTo-Json -Depth 10
-Invoke-RestMethod https://valora-prototype-hub-production.up.railway.app/health/storage | ConvertTo-Json -Depth 10
+```bash
+npm run e2e:planning-baseline-smoke
+npm run e2e:security-audit
 ```
 
 ---
 
-## Database Cleanup and Retention Policy
+## หมายเหตุด้านความปลอดภัยและบทบาทผู้ใช้
 
-### Do Not Clear Master Data
-
-- products
-- product_categories
-- ingredients
-- recipes
-- product_addons
-- product_addon_recipes
-- ingredient_purchases
-- sales_channels
-- channel_prices
-- customers (unless explicitly cleaning test/demo users)
-
-### Clean Only Sales Transaction Data After Export
-
-- orders
-- order_items
-- payments
-- order_status_logs
-- payment_status_logs
-- line_notification_logs
-- stock_movements (only where linked to order usage)
-- payment slip files already exported
-
-### Schedule
-
-- Start with monthly export.
-- If storage grows too fast, move to every 15 days.
-- Target usage estimate: around 300 cups/month.
-- Main Free Plan risk is storage from slip/receipt images, not database rows.
-- Avoid auto-delete in v1; use manual export + cleanup.
+- **Owner / Admin:** เห็นข้อมูลวางแผนกำไร ต้นทุน สมมติฐาน และรายงานทั้งหมด เพื่อควบคุมแผนและตรวจสอบสถานะระบบ
+- **Staff:** จัดการออเดอร์ ตรวจสลิป ปรับสถานะคำสั่งซื้อ แต่ไม่ควรเข้าถึงข้อมูลต้นทุน กำไร หรือค่าใช้จ่ายแฝง
+- **Customer:** ใช้งานเฉพาะหน้า public order/status flow ไม่เห็นข้อมูลภายในร้านหรือสมมติฐานกำไร
 
 ---
 
-## Known Limitations
+## ข้อควรระวัง
 
-Deferred to v1.1 or later:
-
-- LIFF / LINE Login
-- Rich Menu automation
-- Full POS workflow
-- Full CRM
-- Advanced notification preferences
-- Automated database cleanup/export job
-- Full production user manual with screenshots
-- Advanced analytics/reporting
-- Mobile polish for every page
-- Supabase Pro upgrade decision
+- ห้าม commit ไฟล์ `.env` หรือข้อมูลลับใด ๆ ลง repository
+- ห้ามเปิดเผย token, Supabase keys หรือ LINE OA secrets ในเอกสารสาธารณะ
+- เพิ่ม LINE OA keys เฉพาะเมื่อพร้อม deploy และอยู่ในขั้นตอน configuration สุดท้ายเท่านั้น
+- ตรวจสอบและผ่านการทดสอบในเครื่องให้ครบก่อนขึ้นระบบจริงหรือทดสอบบน cloud
 
 ---
 
-## v1 Closure Statement
+## สถานะปัจจุบัน
 
-Valora v1 is closed. The system is **Soft Launch Ready** for real-world controlled use by the owner and staff workflow. It is not claimed to be perfect or fully enterprise production-ready.
-
-Only blocker bugs should be fixed in v1. New features go to the v1.1 backlog.
+Valora V.1 ปิดงานเรียบร้อย (V.1 Closure) และพร้อมเข้าสู่ช่วง **Soft Launch** แบบควบคุมคุณภาพ เน้นแก้ไขเฉพาะ blocker bug หากมี และเก็บ feedback สำหรับเวอร์ชันถัดไป
 
 ---
 
-## v1.1 Backlog / Suggested Next Phase
-
-**v1 Stabilization / Soft Launch Monitoring**
-
-- Monitor real order flow during soft launch
-- Fix blocker bugs only
-- Collect owner/staff feedback for v1.1 prioritization
-- Evaluate Supabase Pro upgrade when storage or row limits approach
-- Plan LIFF or LINE Login if customer binding friction is confirmed
-- Rich Menu automation if staff request faster order triggers
-
----
+## Contact
+สำหรับคำถามหรือข้อสงสัย ติดต่อทีมพัฒนา
+pongsathon.officialwork@gmail.com
 
 ## License
 
