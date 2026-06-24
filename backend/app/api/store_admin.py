@@ -110,6 +110,7 @@ _ORDER_ITEM_FINANCIAL_FIELDS: Set[str] = {"unit_cost", "line_cost", "line_profit
 SWEETNESS_LEVELS: Tuple[int, ...] = (0, 25, 50, 75, 100)
 DEFAULT_SWEETNESS = 100
 CUSTOMER_NAME_FALLBACK = "ลูกค้าไม่ระบุชื่อ"
+KIOSK_CUSTOMER_FALLBACK = "Walk-in Customer"
 _MENU_IMAGE_ALLOWED_TYPES: Set[str] = {
     "image/jpeg",
     "image/jpg",
@@ -522,6 +523,18 @@ class OrderItemUpdate(BaseModel):
     options: Optional[Dict[str, Any]] = None
 
 
+class KioskOrderCustomer(BaseModel):
+    name: Optional[str] = None
+    phone: Optional[str] = None
+
+
+class KioskOrderCreate(BaseModel):
+    items: List[OrderItemPayload]
+    payment_method: Literal["promptpay", "cash"]
+    customer: Optional[KioskOrderCustomer] = None
+    note: Optional[str] = None
+
+
 class SalesReportFilters(BaseModel):
     start_date: Optional[str] = None
     end_date: Optional[str] = None
@@ -806,6 +819,13 @@ def _safe_float(value: Any) -> float:
         return float(value)
     except (TypeError, ValueError):
         return 0.0
+
+
+def _strip_text(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
 
 
 _PAYMENTS_COLUMN_CACHE: Dict[str, Optional[bool]] = {}
@@ -1215,6 +1235,105 @@ def _sanitize_channel_payload(payload: SalesChannelCreate | SalesChannelUpdate, 
         data.pop("fee_value")  # cannot update fee_value without fee_type context
 
     return data
+
+
+def _sanitize_kiosk_order_items(items: List[OrderItemPayload]) -> List[Dict[str, Any]]:
+    if not items:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="items_required")
+    sanitized: List[Dict[str, Any]] = []
+    for raw in items:
+        sanitized.append(_sanitize_order_item_payload(raw))
+    return sanitized
+
+
+def _resolve_kiosk_channel(client: Client, store_id: str) -> Optional[str]:
+    resp = (
+        client.table("sales_channels")
+        .select("id, name")
+        .eq("store_id", store_id)
+        .eq("name", "kiosk")
+        .limit(1)
+        .execute()
+    )
+    err = getattr(resp, "error", None)
+    if err:
+        return None
+    rows = getattr(resp, "data", None) or []
+    if not rows:
+        return None
+    return str(rows[0].get("id")) if rows[0].get("id") else None
+
+
+def _ensure_customer_record_for_kiosk(client: Client, store_id: str, customer: Optional[KioskOrderCustomer]) -> Tuple[Optional[str], str, Optional[str]]:
+    name = _strip_text((customer or {}).get("name")) or KIOSK_CUSTOMER_FALLBACK
+    phone = _strip_text((customer or {}).get("phone"))
+    return None, name, phone
+
+
+def _mask_order_for_staff(order: Dict[str, Any]) -> Dict[str, Any]:
+    masked = _mask_financial_fields(order)
+    masked["items"] = _mask_order_item_fields(order.get("items") or [])
+    return masked
+
+
+def _map_created_order_with_items(
+    client: Client,
+    store_id: str,
+    order_id: str,
+    is_staff: bool,
+) -> Dict[str, Any]:
+    rows = (
+        client.table("orders")
+        .select(_order_select_columns(client))
+        .eq("id", order_id)
+        .eq("store_id", store_id)
+        .limit(1)
+        .execute()
+    )
+    if getattr(rows, "error", None):
+        raise HTTPException(status_code=500, detail="order_lookup_failed")
+    order_row = (getattr(rows, "data", None) or [])[0]
+    items_query = (
+        client.table("order_items")
+        .select(order_item_select_clause(client))
+        .eq("order_id", order_id)
+        .order("created_at", desc=False)
+    )
+    if order_items_supports_store_scope(client):
+        items_query = items_query.eq("store_id", store_id)
+    item_resp = items_query.execute()
+    if getattr(item_resp, "error", None):
+        raise HTTPException(status_code=500, detail="order_items_query_failed")
+    items = [_map_order_item(row) for row in getattr(item_resp, "data", None) or []]
+    latest_payments = _load_latest_payments(client, [str(order_id)])
+    mapped = _map_order(order_row, None, None, latest_payments.get(str(order_id)))
+    mapped["items"] = items
+    return _mask_order_for_staff(mapped) if is_staff else mapped
+
+
+def _create_paid_payment(
+    client: Client,
+    store_id: str,
+    order_id: str,
+    amount: float,
+    method: str,
+    confirmed_by: Optional[str],
+) -> Dict[str, Any]:
+    payload: Dict[str, Any] = {
+        "order_id": order_id,
+        "amount": amount,
+        "method": method,
+        "status": "paid",
+        "confirmed_by": confirmed_by,
+        "confirmed_at": datetime.utcnow().isoformat(),
+        "store_id": store_id if _payments_supports_store_scope(client) else None,
+    }
+    payload = _prune_payment_columns(client, payload)
+    resp = client.table("payments").insert(payload).execute()
+    if getattr(resp, "error", None):
+        raise HTTPException(status_code=500, detail="payment_create_failed")
+    rows = getattr(resp, "data", None) or []
+    return rows[0] if rows else payload
 
 
 def _sanitize_price_payload(payload: ChannelPriceCreate | ChannelPriceUpdate, partial: bool = False) -> Dict[str, Any]:
@@ -6127,6 +6246,137 @@ def create_order(payload: OrderCreate, authorization: Optional[str] = Header(Non
     initial_status = str(created.get("status") or data.get("status") or "pending_payment")
     _write_order_status_log(ctx["client"], order_id, None, initial_status, ctx.get("user_id"), payload.note)
     return {"id": order_id, "status": "created"}
+
+
+@router.post("/kiosk/orders", status_code=status.HTTP_201_CREATED)
+def create_kiosk_order(payload: KioskOrderCreate, authorization: Optional[str] = Header(None), store_id: Optional[str] = None) -> Dict[str, Any]:
+    ctx = _get_ctx(authorization)
+    store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
+    _require_staff_or_above(role)
+    normalized_role = _normalize_store_role(role)
+    is_staff = normalized_role == "staff"
+
+    client = ctx["client"]
+    sanitized_items = _sanitize_kiosk_order_items(payload.items or [])
+    channel_id_value = _resolve_kiosk_channel(client, store_id_resolved)
+
+    item_snapshots: List[Dict[str, Any]] = []
+    for item in sanitized_items:
+        _ensure_product_in_store(client, item["product_id"], store_id_resolved)
+        snapshot = prepare_order_item_snapshot(
+            client,
+            store_id_resolved,
+            product_id=item["product_id"],
+            quantity=item["quantity"],
+            channel_id=channel_id_value,
+            raw_options=item.get("options"),
+        )
+        item_snapshots.append(snapshot)
+
+    subtotal = sum(float(snapshot.get("total_price") or 0) for snapshot in item_snapshots)
+    total_cost = sum(float(snapshot.get("total_cost") or 0) for snapshot in item_snapshots)
+    channel_fee_value = resolve_channel_fee(client, store_id_resolved, channel_id_value, subtotal)
+    discount_amount = 0.0
+    total_amount = subtotal + channel_fee_value - discount_amount
+    gross_profit = total_amount - total_cost - channel_fee_value
+
+    customer_id, customer_name, customer_phone = _ensure_customer_record_for_kiosk(client, store_id_resolved, payload.customer)
+    note_value = _strip_text(payload.note)
+    order_no = generate_order_number(client)
+
+    order_payload: Dict[str, Any] = {
+        "store_id": store_id_resolved,
+        "channel_id": channel_id_value,
+        "order_type": "manual",
+        "pickup_type": "walk_in",
+        "status": "accepted",
+        "payment_status": "paid",
+        "subtotal": subtotal,
+        "discount_amount": discount_amount,
+        "total_amount": total_amount,
+        "total_cost": total_cost,
+        "gross_profit": gross_profit,
+        "note": note_value,
+        "order_no": order_no,
+    }
+    if customer_id:
+        order_payload["customer_id"] = customer_id
+    if customer_name and _orders_has_column(client, "customer_name"):
+        order_payload["customer_name"] = customer_name
+    if customer_phone and _orders_has_column(client, "customer_phone"):
+        order_payload["customer_phone"] = customer_phone
+    fee_column = None
+    if _orders_has_column(client, "channel_fee"):
+        fee_column = "channel_fee"
+    elif _orders_has_column(client, "channel_fee_total"):
+        fee_column = "channel_fee_total"
+    if fee_column:
+        order_payload[fee_column] = channel_fee_value
+    if _orders_has_column(client, "order_source"):
+        order_payload["order_source"] = "kiosk"
+    if _orders_has_column(client, "channel"):
+        order_payload["channel"] = "kiosk"
+    if _orders_has_column(client, "order_status"):
+        order_payload["order_status"] = "accepted"
+    if _orders_has_column(client, "payment_method"):
+        order_payload["payment_method"] = payload.payment_method
+
+    attempt_data = {key: value for key, value in order_payload.items() if value is not None}
+    order_resp = None
+    max_attempts = len(attempt_data) + 1
+    for _ in range(max_attempts):
+        try:
+            order_resp = client.table("orders").insert(attempt_data).execute()
+            insert_err = getattr(order_resp, "error", None)
+        except Exception as exc:
+            insert_err = exc
+        if not insert_err:
+            break
+        missing_column = _extract_missing_column(insert_err)
+        if missing_column and missing_column in attempt_data:
+            logger.warning("kiosk_order_missing_column column=%s", missing_column)
+            attempt_data.pop(missing_column, None)
+            continue
+        if _is_unique_violation(insert_err, "order_no"):
+            attempt_data["order_no"] = generate_order_number(client)
+            continue
+        raise HTTPException(status_code=500, detail="kiosk_order_create_failed")
+    else:
+        raise HTTPException(status_code=500, detail="kiosk_order_create_failed:max_attempts")
+
+    order_rows = getattr(order_resp, "data", None) or []
+    if not order_rows:
+        raise HTTPException(status_code=500, detail="kiosk_order_create_missing")
+    order_id = str(order_rows[0].get("id"))
+
+    store_scope_supported = order_items_supports_store_scope(client)
+    order_item_records: List[Dict[str, Any]] = []
+    for snapshot in item_snapshots:
+        record = build_order_item_record(
+            snapshot,
+            order_id=order_id,
+            store_id=store_id_resolved if store_scope_supported else None,
+            product_name=snapshot.get("product_name"),
+        )
+        order_item_records.append(prune_order_item_columns(client, record))
+
+    items_resp = client.table("order_items").insert(order_item_records).execute()
+    if getattr(items_resp, "error", None):
+        raise HTTPException(status_code=500, detail="kiosk_order_items_failed")
+
+    _create_paid_payment(
+        client,
+        store_id_resolved,
+        order_id,
+        total_amount,
+        payload.payment_method,
+        ctx.get("user_id"),
+    )
+
+    recalculate_order_totals(client, store_id_resolved, order_id)
+    _write_order_status_log(client, order_id, None, "accepted", ctx.get("user_id"), note_value)
+
+    return _map_created_order_with_items(client, store_id_resolved, order_id, is_staff)
 
 
 @router.get("/orders/{order_id}")
