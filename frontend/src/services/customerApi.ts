@@ -110,6 +110,35 @@ type CustomerOrderCreatePayload = {
   line_link_token?: string;
 };
 
+function extractMenuItems(payload: unknown): CustomerMenuItem[] | null {
+  if (Array.isArray(payload)) {
+    return payload;
+  }
+
+  if (!payload || typeof payload !== "object") {
+    return null;
+  }
+
+  const objectPayload = payload as Record<string, unknown>;
+  const directItems = (objectPayload as { items?: unknown }).items;
+  if (Array.isArray(directItems)) {
+    return directItems;
+  }
+
+  const nestedData = (objectPayload as { data?: unknown }).data;
+  if (Array.isArray(nestedData)) {
+    return nestedData;
+  }
+  if (nestedData && typeof nestedData === "object") {
+    const nestedItems = (nestedData as { items?: unknown }).items;
+    if (Array.isArray(nestedItems)) {
+      return nestedItems;
+    }
+  }
+
+  return null;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 10_000);
@@ -159,8 +188,19 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const customerApi = {
   async listMenu(): Promise<CustomerMenuItem[]> {
-    const data = await request<{ items: CustomerMenuItem[] }>("/api/customer/menu");
-    return (data.items ?? []).filter((x) => x.available);
+    const data = await request<{ items?: CustomerMenuItem[]; store_id?: string } | CustomerMenuItem[]>(
+      "/api/customer/menu",
+      {
+        cache: "no-store",
+      },
+    );
+
+    const items = extractMenuItems(data);
+    if (!Array.isArray(items)) {
+      throw new Error("ไม่พบข้อมูลจากระบบ");
+    }
+
+    return items.filter((x) => x.available);
   },
 
   async getMenuDetail(productId: string): Promise<CustomerMenuItem> {
