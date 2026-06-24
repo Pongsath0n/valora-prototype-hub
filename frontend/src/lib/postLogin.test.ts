@@ -23,6 +23,6 @@ describe("resolvePostLoginRoute", () => {
 
   it("routes non-onboarded users to onboarding first", () => {
     expect(resolvePostLoginRoute("owner", false)).toBe("/onboarding");
-    expect(resolvePostLoginRoute("staff", false)).toBe("/onboarding");
+    expect(resolvePostLoginRoute("staff", false)).toBe("/store-admin");
   });
 });

@@ -13,6 +13,11 @@ vi.mock("@/components/admin/AdminLayout", () => ({
   default: ({ children }: { children: React.ReactNode }) => <div data-testid="admin-layout">{children}</div>,
 }));
 
+const mockRoleState = { role: "owner" as string | null, loading: false, refreshRole: vi.fn() };
+vi.mock("@/contexts/RoleContext", () => ({
+  useProfileRole: () => mockRoleState,
+}));
+
 const mockedListOrders = vi.fn();
 const mockedListPayments = vi.fn();
 const mockedUpdateOrderStatus = vi.fn();

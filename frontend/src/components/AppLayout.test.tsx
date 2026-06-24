@@ -8,6 +8,11 @@ vi.mock("@/components/LogoBrand", () => ({
   default: () => <div data-testid="logo-brand" />,
 }));
 
+const mockAuthState = { user: { id: "user_1" }, session: null, loading: false, signOut: vi.fn() };
+vi.mock("@/contexts/AuthContext", () => ({
+  useAuth: () => mockAuthState,
+}));
+
 const mockRoleState = { role: "owner" as string | null, loading: false, refreshRole: vi.fn() };
 vi.mock("@/contexts/RoleContext", () => ({
   useProfileRole: () => mockRoleState,
