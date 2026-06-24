@@ -23,7 +23,7 @@ describe("SystemLayout", () => {
     );
 
     const backLink = screen.getByRole("link", { name: "กลับไปแดชบอร์ดธุรกิจ" });
-    expect(backLink).toHaveAttribute("href", "/app/dashboard");
+    expect(backLink).toHaveAttribute("href", "/owner/dashboard");
   });
 
   it("does not show a duplicate Storage Check nav entry", () => {

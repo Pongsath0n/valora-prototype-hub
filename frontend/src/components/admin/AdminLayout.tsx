@@ -33,27 +33,26 @@ const storeNavSections: { title: string; items: StoreNavItem[] }[] = [
     title: "งานประจำวัน",
     items: [
       // POS is a deferred prototype — intentionally not in production navigation.
-      { title: "แดชบอร์ด", path: "/store-admin", icon: LayoutDashboard, end: true },
-      { title: "ออเดอร์", path: "/store-admin/orders", icon: ClipboardList },
-      { title: "ลูกค้า", path: "/store-admin/customers", icon: Users },
+      { title: "แดชบอร์ด", path: "/staff", icon: LayoutDashboard, end: true },
+      { title: "ออเดอร์", path: "/staff/orders", icon: ClipboardList },
+      { title: "ลูกค้า", path: "/staff/customers", icon: Users },
     ],
   },
   {
     title: "การจัดการร้าน",
     items: [
-      { title: "เมนู", path: "/store-admin/menus", icon: Soup, roles: MANAGER_NAV_ROLES },
+      { title: "เมนู", path: "/owner/menus", icon: Soup, roles: MANAGER_NAV_ROLES },
       { title: "ช่องทางขาย", path: "/store-admin/channels", icon: Store, roles: MANAGER_NAV_ROLES },
       { title: "ราคาตามช่องทาง", path: "/store-admin/channel-pricing", icon: CreditCard, roles: MANAGER_NAV_ROLES },
-      { title: "วัตถุดิบ", path: "/store-admin/ingredients", icon: Settings, roles: MANAGER_NAV_ROLES },
-      { title: "สูตรและต้นทุน", path: "/store-admin/recipes", icon: Settings, roles: MANAGER_NAV_ROLES },
-      // Reports link points to the canonical business reports route (/app/reports);
-      // /store-admin/reports already redirects there in production.
-      { title: "รายงาน", path: "/app/reports", icon: LayoutDashboard, roles: MANAGER_NAV_ROLES },
+      { title: "วัตถุดิบ", path: "/owner/cost-items", icon: Settings, roles: MANAGER_NAV_ROLES },
+      { title: "สูตรและต้นทุน", path: "/owner/recipes", icon: Settings, roles: MANAGER_NAV_ROLES },
+      // Reports link points to the canonical owner reports route (/owner/reports).
+      { title: "รายงาน", path: "/owner/reports", icon: LayoutDashboard, roles: MANAGER_NAV_ROLES },
     ],
   },
 ];
 
-const PLACEHOLDER_PATHS = new Set(["/store-admin/pos", "/store-admin/reports"]);
+const PLACEHOLDER_PATHS = new Set(["/store-admin/pos", "/store-admin/reports", "/staff/pos", "/staff/reports"]);
 const shouldHidePlaceholderNav = () => !import.meta.env.DEV;
 
 function StoreNavItem({
@@ -122,7 +121,7 @@ export default function AdminLayout({
     .filter((section) => section.items.length > 0);
 
   const canAccessBusinessPortal = role ? MANAGER_NAV_ROLES.includes(role) : false;
-  const backLinkPath = canAccessBusinessPortal ? "/app/dashboard" : "/store-admin";
+  const backLinkPath = canAccessBusinessPortal ? "/owner/dashboard" : "/staff";
   const backLinkLabel = canAccessBusinessPortal ? "กลับไปหน้าร้าน" : "กลับไปแดชบอร์ดร้าน";
 
   async function handleLogout() {

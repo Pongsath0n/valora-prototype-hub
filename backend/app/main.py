@@ -9,7 +9,12 @@ from app.api.line import router as line_router
 from app.api.store_admin import router as store_admin_router
 from app.api.system_console import router as system_router
 
-LOCAL_DEFAULT_ORIGINS = ["http://localhost:8080", "http://127.0.0.1:8080"]
+LOCAL_DEFAULT_ORIGINS = [
+    "http://localhost:8080",
+    "http://127.0.0.1:8080",
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+]
 
 
 def get_allowed_origins() -> list[str]:

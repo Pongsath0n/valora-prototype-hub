@@ -72,12 +72,12 @@ for (const match of adminLayout.matchAll(navItemRegex)) {
 // ── Check B: Route guards ───────────────────────────────────────────────────
 const appRoutes = read("frontend/src/App.tsx");
 const managerRoutes = [
-  "/store-admin/menus",
-  "/store-admin/ingredients",
-  "/store-admin/recipes",
+  "/owner/menus",
+  "/owner/cost-items",
+  "/owner/recipes",
   "/store-admin/channels",
   "/store-admin/channel-pricing",
-  "/store-admin/reports",
+  "/owner/reports",
 ];
 managerRoutes.forEach((route) => {
   assertCondition(
@@ -88,19 +88,9 @@ managerRoutes.forEach((route) => {
 });
 
 const businessRoutes = [
-  "/app/dashboard",
-  "/app/scenario",
-  "/app/promo",
-  "/app/delivery",
-  "/app/reports",
-  "/app/menu",
-  "/app/ingredients",
-  "/app/recipes",
-  "/app/channels",
-  "/app/channel-pricing",
-  "/app/pos",
-  "/app/orders",
-  "/app/orders/:id",
+  "/owner/dashboard",
+  "/owner/profit-planning",
+  "/owner/reports",
   "/app/settings",
 ];
 
@@ -183,7 +173,7 @@ const resetDbMatches = findOccurrences(path.join(repoRoot, "frontend", "src"), "
 assertCondition(resetDbMatches.length === 0, "Forbidden string 'Reset Database' detected", { matches: resetDbMatches });
 
 // ── Check F: Formatter usage still enforced on staff routes ──────────────────
-const staffRoutes = ["/store-admin/orders", "/store-admin/pos", "/store-admin/customers"];
+const staffRoutes = ["/staff/orders", "/store-admin/pos", "/staff/customers"];
 staffRoutes.forEach((routePath) => {
   assertCondition(
     appRoutes.includes(`path=\"${routePath}\" element={<AdminRoute>`),

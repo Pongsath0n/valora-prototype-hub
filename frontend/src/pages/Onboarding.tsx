@@ -55,7 +55,7 @@ export default function OnboardingPage() {
     localStorage.setItem("valora:onboarded", "1");
     // Staff never belong in the owner business portal — send them to the store
     // workspace so finishing onboarding cannot bounce them into Access Denied.
-    navigate(role === "staff" ? "/store-admin" : "/app/dashboard");
+    navigate(role === "staff" ? "/staff" : "/owner/dashboard");
   };
 
 

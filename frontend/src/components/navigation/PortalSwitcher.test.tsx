@@ -26,10 +26,10 @@ describe("PortalSwitcher role visibility", () => {
     renderSwitcher();
 
     const hrefs = allHrefs();
-    expect(hrefs).toContain("/app/planning");
-    expect(hrefs).toContain("/app/dashboard");
-    expect(hrefs).toContain("/app/reports");
-    expect(hrefs).toContain("/store-admin");
+    expect(hrefs).toContain("/owner/profit-planning");
+    expect(hrefs).toContain("/owner/dashboard");
+    expect(hrefs).toContain("/owner/reports");
+    expect(hrefs).toContain("/staff");
     expect(hrefs).toContain("/system");
   });
 
@@ -46,10 +46,10 @@ describe("PortalSwitcher role visibility", () => {
     renderSwitcher();
 
     const hrefs = allHrefs();
-    expect(hrefs).toEqual(["/store-admin"]);
-    expect(hrefs).not.toContain("/app/planning");
-    expect(hrefs).not.toContain("/app/dashboard");
-    expect(hrefs).not.toContain("/app/reports");
+    expect(hrefs).toEqual(["/staff"]);
+    expect(hrefs).not.toContain("/owner/profit-planning");
+    expect(hrefs).not.toContain("/owner/dashboard");
+    expect(hrefs).not.toContain("/owner/reports");
     expect(hrefs.some((h) => h?.startsWith("/system"))).toBe(false);
   });
 });

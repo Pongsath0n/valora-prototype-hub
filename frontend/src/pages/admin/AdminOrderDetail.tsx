@@ -227,7 +227,7 @@ export default function AdminOrderDetailPage() {
       <AdminLayout title="รายละเอียดออเดอร์" subtitle="">
         <div className="stat-card">
           <p>ไม่พบออเดอร์</p>
-          <Link to="/store-admin/orders" className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground transition-colors">
+          <Link to="/staff/orders" className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground transition-colors">
             <ArrowLeft className="w-4 h-4" /> กลับไปที่คิวออเดอร์
           </Link>
         </div>

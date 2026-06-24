@@ -243,8 +243,8 @@ function inspectFrontendGuards() {
       }
 
       if (file.name === "AdminLayout.tsx") {
-        const recipeRoles = detectNavRoles(content, "/store-admin/recipes");
-        const ingredientRoles = detectNavRoles(content, "/store-admin/ingredients");
+        const recipeRoles = detectNavRoles(content, "/owner/recipes");
+        const ingredientRoles = detectNavRoles(content, "/owner/cost-items");
         guardFacts.recipesHidden = Array.isArray(recipeRoles) && recipeRoles.length && !recipeRoles.includes("staff");
         guardFacts.ingredientsHidden = Array.isArray(ingredientRoles) && ingredientRoles.length && !ingredientRoles.includes("staff");
         checks.push({ file: file.name, guard: "recipes_nav_roles", roles: recipeRoles });

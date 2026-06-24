@@ -418,7 +418,7 @@ export default function DashboardPage() {
         </div>
 
         <Link
-          to="/app/planning"
+          to="/owner/profit-planning"
           className="block rounded-2xl border border-primary/30 bg-primary/5 p-5 shadow-md transition hover:border-primary/60"
         >
           <p className="text-xs font-semibold uppercase tracking-[0.3em] text-primary/70">Profit Planning</p>
@@ -492,7 +492,7 @@ export default function DashboardPage() {
                 <div className="mt-1 text-xs text-amber-900/70">กดที่ปุ่มด้านล่างเพื่อตรวจสลิป</div>
               </div>
               <Link
-                to="/store-admin/orders"
+                to="/staff/orders"
                 className="mt-3 inline-flex w-full items-center justify-center rounded-xl border border-amber-900/20 bg-amber-900/10 px-3 py-2 text-sm font-semibold text-amber-900 transition hover:bg-amber-900/20"
               >
                 เปิดหน้าตรวจสลิป

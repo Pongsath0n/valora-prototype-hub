@@ -206,7 +206,7 @@ function inspectFrontendGuards() {
       if (f.name === "AdminLayout.tsx") {
         const managerNavRolesPattern = /MANAGER_NAV_ROLES[^=]*=\s*\[[^\]]*"owner"[^\]]*"admin"[^\]]*"manager"[^\]]*\]/;
         const itemGuard = (pathLabel) =>
-          new RegExp(`title:\\s*"${pathLabel}"[\\s\\S]*?path:\\s*"/store-admin/[^"\\n]+"[\\s\\S]*?roles\\s*:\\s*(MANAGER_NAV_ROLES|\\[[^\\]]*"owner"[^\\]]*"admin"[^\\]]*"manager"[^\\]]*\\])`);
+          new RegExp(`title:\\s*"${pathLabel}"[\\s\\S]*?path:\\s*"/(?:store-admin|owner)/[^"\\n]+"[\\s\\S]*?roles\\s*:\\s*(MANAGER_NAV_ROLES|\\[[^\\]]*"owner"[^\\]]*"admin"[^\\]]*"manager"[^\\]]*\\])`);
         const hasRecipeRoleGuard = itemGuard("สูตรและต้นทุน").test(content);
         const hasPricingRoleGuard = itemGuard("ราคาตามช่องทาง").test(content);
         const filtersByRole = /items\.filter\(\(item\) => {[^}]*item\.roles\.includes\(role\)/.test(content);

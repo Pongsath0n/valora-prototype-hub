@@ -1,8 +1,15 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { render, screen } from "@testing-library/react";
 import { AdminLegacyRedirect, ScenarioLegacyRedirect, isPosDeferred, shouldRedirectLegacyConfig } from "./App";
 import { shouldShowDevCreateOrderForm } from "./pages/admin/AdminOrders";
+
+vi.mock("@/contexts/AuthContext", () => ({
+  useAuth: () => ({ user: { id: "test-user" }, loading: false }),
+}));
+vi.mock("@/contexts/RoleContext", () => ({
+  useProfileRole: () => ({ role: "owner", loading: false }),
+}));
 
 function LocationProbe() {
   const location = useLocation();
@@ -31,17 +38,17 @@ describe("AdminLegacyRedirect", () => {
 });
 
 describe("ScenarioLegacyRedirect", () => {
-  it("redirects /app/scenario to the canonical /app/planning route", () => {
+  it("redirects /app/scenario to the canonical /owner/profit-planning route", () => {
     render(
       <MemoryRouter initialEntries={["/app/scenario?case=price-up#results"]}>
         <Routes>
           <Route path="/app/scenario" element={<ScenarioLegacyRedirect />} />
-          <Route path="/app/planning" element={<LocationProbe />} />
+          <Route path="/owner/profit-planning" element={<LocationProbe />} />
         </Routes>
       </MemoryRouter>,
     );
 
-    expect(screen.getByText("/app/planning?case=price-up#results")).toBeInTheDocument();
+    expect(screen.getByText("/owner/profit-planning?case=price-up#results")).toBeInTheDocument();
   });
 
   it("does not create a redirect loop (planning route renders without further navigation)", () => {
@@ -49,7 +56,7 @@ describe("ScenarioLegacyRedirect", () => {
       <MemoryRouter initialEntries={["/app/scenario"]}>
         <Routes>
           <Route path="/app/scenario" element={<ScenarioLegacyRedirect />} />
-          <Route path="/app/planning" element={<div>planning-page</div>} />
+          <Route path="/owner/profit-planning" element={<div>planning-page</div>} />
         </Routes>
       </MemoryRouter>,
     );
@@ -66,7 +73,7 @@ describe("POS deferral", () => {
 });
 
 describe("Prototype/legacy route gating", () => {
-  it("redirects legacy /app/* config prototypes to canonical /store-admin/* in production", () => {
+  it("redirects legacy /app/* config prototypes to canonical /owner/* in production", () => {
     expect(shouldRedirectLegacyConfig(false)).toBe(true); // production → redirect
     expect(shouldRedirectLegacyConfig(true)).toBe(false); // dev → legacy reachable
   });

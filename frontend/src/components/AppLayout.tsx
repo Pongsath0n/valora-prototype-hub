@@ -51,25 +51,25 @@ const OWNER_NAV_SECTIONS: OwnerNavSection[] = [
   {
     title: "ภาพรวมธุรกิจ",
     items: [
-      { title: "แดชบอร์ดธุรกิจ", path: "/app/dashboard", icon: LayoutDashboard },
+      { title: "แดชบอร์ดธุรกิจ", path: "/owner/dashboard", icon: LayoutDashboard },
     ],
   },
   {
     title: "การวางแผนกำไร",
     items: [
-      { title: "วางแผนกำไร", path: "/app/planning", icon: TrendingUp },
+      { title: "วางแผนกำไร", path: "/owner/profit-planning", icon: TrendingUp },
     ],
   },
   {
     title: "ผลประกอบการ",
     items: [
-      { title: "รายงานสรุป", path: "/app/reports", icon: BarChart3 },
+      { title: "รายงานสรุป", path: "/owner/reports", icon: BarChart3 },
     ],
   },
   {
     title: "เมนู ราคา และช่องทางขาย",
     items: [
-      { title: "เมนูและหมวดหมู่", path: "/store-admin/menus", icon: Soup },
+      { title: "เมนูและหมวดหมู่", path: "/owner/menus", icon: Soup },
       { title: "ช่องทางขาย", path: "/store-admin/channels", icon: Store },
       { title: "ราคาตามช่องทาง", path: "/store-admin/channel-pricing", icon: Store },
     ],
@@ -77,15 +77,15 @@ const OWNER_NAV_SECTIONS: OwnerNavSection[] = [
   {
     title: "ต้นทุนและสูตร",
     items: [
-      { title: "วัตถุดิบ", path: "/store-admin/ingredients", icon: Soup },
-      { title: "สูตรและต้นทุน", path: "/store-admin/recipes", icon: BookOpenCheck },
+      { title: "วัตถุดิบ", path: "/owner/cost-items", icon: Soup },
+      { title: "สูตรและต้นทุน", path: "/owner/recipes", icon: BookOpenCheck },
     ],
   },
   {
     title: "ภาพรวมลูกค้าและออเดอร์",
     items: [
-      { title: "ลูกค้า", path: "/store-admin/customers", icon: Users },
-      { title: "ออเดอร์ (ติดตามภาพรวม)", path: "/store-admin/orders", icon: ClipboardList },
+      { title: "ลูกค้า", path: "/staff/customers", icon: Users },
+      { title: "ออเดอร์ (ติดตามภาพรวม)", path: "/staff/orders", icon: ClipboardList },
     ],
   },
   {
@@ -105,10 +105,10 @@ const utilityNav = [
 ];
 
 const mobileNav = [
-  { title: "ภาพรวม", path: "/app/dashboard", icon: LayoutDashboard },
-  { title: "วางแผนกำไร", path: "/app/planning", icon: TrendingUp },
-  { title: "รายงาน", path: "/app/reports", icon: BarChart3 },
-  { title: "ออเดอร์", path: "/store-admin/orders", icon: ClipboardList },
+  { title: "ภาพรวม", path: "/owner/dashboard", icon: LayoutDashboard },
+  { title: "วางแผนกำไร", path: "/owner/profit-planning", icon: TrendingUp },
+  { title: "รายงาน", path: "/owner/reports", icon: BarChart3 },
+  { title: "ออเดอร์", path: "/staff/orders", icon: ClipboardList },
   { title: "ตั้งค่า", path: "/app/settings", icon: Settings },
 ];
 

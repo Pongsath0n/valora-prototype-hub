@@ -101,7 +101,7 @@ export default function SystemLayout({
             บัญชี
           </p>
           <NavLink
-            to="/app/dashboard"
+            to="/owner/dashboard"
             className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-sidebar-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground transition-colors cursor-pointer"
           >
             <ArrowLeft className="w-4 h-4 flex-shrink-0" />
@@ -148,7 +148,7 @@ export default function SystemLayout({
             ))}
             <div className="pt-3 mt-3 border-t border-sidebar-border space-y-0.5">
               <NavLink
-                to="/app/dashboard"
+                to="/owner/dashboard"
                 onClick={() => setSidebarOpen(false)}
                 className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-sidebar-foreground hover:bg-sidebar-accent/60 transition-colors"
               >

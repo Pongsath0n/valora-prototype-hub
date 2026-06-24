@@ -25,26 +25,26 @@ const ALL_ROLES: AppRole[] = ["owner", "admin", "manager", "staff"];
 export const BUSINESS_PORTAL_NAV: PortalNavItem[] = [
   {
     title: "แดชบอร์ดธุรกิจ",
-    path: "/app/dashboard",
+    path: "/owner/dashboard",
     icon: LayoutDashboard,
     roles: ["owner", "admin", "manager"],
   },
   {
     title: "วางแผนกำไร",
-    path: "/app/planning",
+    path: "/owner/profit-planning",
     icon: TrendingUp,
     roles: ["owner", "admin", "manager"],
     description: "เครื่องมือหลักของ Valora — จำลองสถานการณ์กำไรและจุดคุ้มทุน",
   },
   {
     title: "รายงาน",
-    path: "/app/reports",
+    path: "/owner/reports",
     icon: BarChart3,
     roles: ["owner", "admin", "manager"],
   },
   {
     title: "Store Admin",
-    path: "/store-admin",
+    path: "/staff",
     icon: ClipboardList,
     roles: ALL_ROLES,
   },

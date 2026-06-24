@@ -2,9 +2,9 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes, useLocation, useParams } from "react-router-dom";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
-import { RoleProvider } from "@/contexts/RoleContext";
+import { RoleProvider, useProfileRole } from "@/contexts/RoleContext";
 import { BUSINESS_PORTAL_ROLES, STORE_ADMIN_ROLES, SYSTEM_CONSOLE_ROLES, STORE_MANAGER_ROLES, useRoleGuard } from "@/lib/guards";
 
 import Landing from "./pages/Landing";
@@ -91,14 +91,14 @@ function legacyOrCanonical(legacyElement: React.ReactNode, canonicalPath: string
  * render a clear "prototype/testing only" banner). Reuses the same DEV/prod gate
  * as the legacy config prototypes.
  */
-function prototypeOrRedirect(prototypeElement: React.ReactNode, fallbackPath = "/app/dashboard") {
+function prototypeOrRedirect(prototypeElement: React.ReactNode, fallbackPath = "/owner/dashboard") {
   return redirectLegacyConfig ? <Navigate to={fallbackPath} replace /> : prototypeElement;
 }
 
 /** Legacy alias: /app/scenario → canonical Profit Planning route. */
 export function ScenarioLegacyRedirect() {
   const location = useLocation();
-  return <Navigate to={{ pathname: "/app/planning", search: location.search, hash: location.hash }} replace />;
+  return <Navigate to={{ pathname: "/owner/profit-planning", search: location.search, hash: location.hash }} replace />;
 }
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -139,10 +139,27 @@ function SystemRoute({ children }: { children: React.ReactNode }) {
 
 export function AdminLegacyRedirect() {
   const location = useLocation();
+  const { user, loading: authLoading } = useAuth();
+  const { role, loading: roleLoading } = useProfileRole();
   const legacyMatch = location.pathname.match(/^\/admin(.*)$/);
   const suffix = legacyMatch?.[1] ?? "";
+
+  if (!suffix || suffix === "/") {
+    if (authLoading || roleLoading) {
+      return <div className="min-h-screen flex items-center justify-center">กำลังโหลด...</div>;
+    }
+    if (!user) return <Navigate to="/login" replace />;
+    if (role === "staff") return <Navigate to="/staff" replace />;
+    return <Navigate to="/owner/dashboard" replace />;
+  }
+
   const targetPath = `/store-admin${suffix}` || "/store-admin";
   return <Navigate to={{ pathname: targetPath, search: location.search, hash: location.hash }} replace />;
+}
+
+function StaffOrderDetailRedirect() {
+  const { id } = useParams();
+  return <Navigate to={`/staff/orders/${id}`} replace />;
 }
 
 function AppRoutes() {
@@ -151,36 +168,53 @@ function AppRoutes() {
       <Route path="/" element={<Landing />} />
       <Route path="/login" element={<Login />} />
       <Route path="/client-access" element={<Navigate to="/login" replace />} />
+      <Route path="/auth/login" element={<Navigate to="/login" replace />} />
+      <Route path="/auth/signup" element={<Navigate to="/login" replace />} />
 
       <Route path="/onboarding" element={<ProtectedRoute><Onboarding /></ProtectedRoute>} />
-      <Route path="/dashboard" element={<Navigate to="/app/dashboard" replace />} />
-      {/* Store Admin Dashboard */}
-      <Route path="/store-admin" element={<AdminRoute><AdminDashboardPage /></AdminRoute>} />
-      <Route path="/store-admin/menus" element={<ManagerRoute><AdminProductsPage /></ManagerRoute>} />
-      <Route path="/store-admin/ingredients" element={<ManagerRoute><StoreAdminIngredientsPage /></ManagerRoute>} />
-      <Route path="/store-admin/recipes" element={<ManagerRoute><StoreAdminRecipesPage /></ManagerRoute>} />
+      <Route path="/dashboard" element={<Navigate to="/owner/dashboard" replace />} />
+
+      {/* ── Canonical Staff routes ── */}
+      <Route path="/staff" element={<AdminRoute><AdminDashboardPage /></AdminRoute>} />
+      <Route path="/staff/orders" element={<AdminRoute><AdminOrdersPage /></AdminRoute>} />
+      <Route path="/staff/orders/:id" element={<AdminRoute><AdminOrderDetailPage /></AdminRoute>} />
+      <Route path="/staff/customers" element={<AdminRoute><CustomersPage /></AdminRoute>} />
+
+      {/* ── Canonical Owner routes ── */}
+      <Route path="/owner/dashboard" element={<ProtectedRoute><BusinessRoute><Dashboard /></BusinessRoute></ProtectedRoute>} />
+      <Route path="/owner/profit-planning" element={<ProtectedRoute><BusinessRoute><Scenario /></BusinessRoute></ProtectedRoute>} />
+      <Route path="/owner/reports" element={<ProtectedRoute><BusinessRoute><Reports /></BusinessRoute></ProtectedRoute>} />
+      <Route path="/owner/menus" element={<ManagerRoute><AdminProductsPage /></ManagerRoute>} />
+      <Route path="/owner/recipes" element={<ManagerRoute><StoreAdminRecipesPage /></ManagerRoute>} />
+      <Route path="/owner/cost-items" element={<ManagerRoute><StoreAdminIngredientsPage /></ManagerRoute>} />
+
+      {/* ── Legacy /store-admin redirects → canonical ── */}
+      <Route path="/store-admin" element={<Navigate to="/staff" replace />} />
+      <Route path="/store-admin/orders" element={<Navigate to="/staff/orders" replace />} />
+      <Route path="/store-admin/orders/:id" element={<StaffOrderDetailRedirect />} />
+      <Route path="/store-admin/customers" element={<Navigate to="/staff/customers" replace />} />
+      <Route path="/store-admin/menus" element={<Navigate to="/owner/menus" replace />} />
+      <Route path="/store-admin/recipes" element={<Navigate to="/owner/recipes" replace />} />
+      <Route path="/store-admin/ingredients" element={<Navigate to="/owner/cost-items" replace />} />
+      {/* store-admin routes NOT in approved taxonomy — remain as-is */}
       <Route path="/store-admin/channels" element={<ManagerRoute><AdminSalesChannelsPage /></ManagerRoute>} />
       <Route path="/store-admin/channel-pricing" element={<ManagerRoute><StoreAdminChannelPricingPage /></ManagerRoute>} />
-      {/* Store-admin POS placeholder: dev-only. In production it redirects to the store dashboard. */}
       <Route
         path="/store-admin/pos"
         element={
           shouldDeferPos ? (
-            <Navigate to="/store-admin" replace />
+            <Navigate to="/staff" replace />
           ) : (
             <AdminRoute><StoreAdminPOSPage /></AdminRoute>
           )
         }
       />
-      <Route path="/store-admin/orders" element={<AdminRoute><AdminOrdersPage /></AdminRoute>} />
-      <Route path="/store-admin/orders/:id" element={<AdminRoute><AdminOrderDetailPage /></AdminRoute>} />
-      <Route path="/store-admin/customers" element={<AdminRoute><CustomersPage /></AdminRoute>} />
       <Route
         path="/store-admin/reports"
         element={
           shouldRedirectStoreReports ? (
             <ManagerRoute>
-              <Navigate to="/app/reports" replace />
+              <Navigate to="/owner/reports" replace />
             </ManagerRoute>
           ) : (
             <ManagerRoute>
@@ -200,40 +234,34 @@ function AppRoutes() {
       <Route path="/system/storage" element={<Navigate to="/system/health#storage" replace />} />
       <Route path="/system/audit-logs" element={<SystemRoute><SystemAuditLogsPage /></SystemRoute>} />
 
-      <Route path="/app/dashboard" element={<ProtectedRoute><BusinessRoute><Dashboard /></BusinessRoute></ProtectedRoute>} />
-      {/* Canonical Profit Planning route — core business engine of Valora */}
-      <Route path="/app/planning" element={<ProtectedRoute><BusinessRoute><Scenario /></BusinessRoute></ProtectedRoute>} />
+      {/* ── Legacy /app/* redirects → canonical ── */}
+      <Route path="/app/dashboard" element={<Navigate to="/owner/dashboard" replace />} />
+      <Route path="/app/planning" element={<Navigate to="/owner/profit-planning" replace />} />
       <Route path="/app/scenario" element={<ScenarioLegacyRedirect />} />
-      {/* Promo/Delivery are localStorage-only mock prototypes — redirect to the
-          owner dashboard in production; reachable (clearly labelled) only in DEV. */}
+      <Route path="/app/reports" element={<Navigate to="/owner/reports" replace />} />
+      {/* /app/* routes NOT in approved taxonomy — remain as-is */}
       <Route path="/app/promo" element={prototypeOrRedirect(<ProtectedRoute><BusinessRoute><Promo /></BusinessRoute></ProtectedRoute>)} />
       <Route path="/app/delivery" element={prototypeOrRedirect(<ProtectedRoute><BusinessRoute><Delivery /></BusinessRoute></ProtectedRoute>)} />
-      <Route path="/app/reports" element={<ProtectedRoute><BusinessRoute><Reports /></BusinessRoute></ProtectedRoute>} />
-      {/* Legacy config prototypes — redirect to canonical /store-admin/* in production */}
-      <Route path="/app/menu" element={legacyOrCanonical(<ProtectedRoute><BusinessRoute><MenuManagement /></BusinessRoute></ProtectedRoute>, "/store-admin/menus")} />
-      <Route path="/app/ingredients" element={legacyOrCanonical(<ProtectedRoute><BusinessRoute><IngredientsStock /></BusinessRoute></ProtectedRoute>, "/store-admin/ingredients")} />
-      <Route path="/app/recipes" element={legacyOrCanonical(<ProtectedRoute><BusinessRoute><RecipeCosting /></BusinessRoute></ProtectedRoute>, "/store-admin/recipes")} />
+      <Route path="/app/menu" element={legacyOrCanonical(<ProtectedRoute><BusinessRoute><MenuManagement /></BusinessRoute></ProtectedRoute>, "/owner/menus")} />
+      <Route path="/app/ingredients" element={legacyOrCanonical(<ProtectedRoute><BusinessRoute><IngredientsStock /></BusinessRoute></ProtectedRoute>, "/owner/cost-items")} />
+      <Route path="/app/recipes" element={legacyOrCanonical(<ProtectedRoute><BusinessRoute><RecipeCosting /></BusinessRoute></ProtectedRoute>, "/owner/recipes")} />
       <Route path="/app/channels" element={legacyOrCanonical(<ProtectedRoute><BusinessRoute><SalesChannels /></BusinessRoute></ProtectedRoute>, "/store-admin/channels")} />
       <Route path="/app/channel-pricing" element={legacyOrCanonical(<ProtectedRoute><BusinessRoute><ChannelPricing /></BusinessRoute></ProtectedRoute>, "/store-admin/channel-pricing")} />
-      {/* POS prototype: dev-only. In production it redirects to Profit Planning. */}
       <Route
         path="/app/pos"
         element={
           shouldDeferPos ? (
-            <Navigate to="/app/planning" replace />
+            <Navigate to="/owner/profit-planning" replace />
           ) : (
             <ProtectedRoute><BusinessRoute><POSManualOrder /></BusinessRoute></ProtectedRoute>
           )
         }
       />
-      {/* /app/orders is a localStorage prototype (same mock orderService as POS).
-          The real, backend-backed order workspace is /store-admin/orders — in
-          production these routes redirect there. */}
       <Route
         path="/app/orders"
         element={
           shouldDeferPos ? (
-            <Navigate to="/store-admin/orders" replace />
+            <Navigate to="/staff/orders" replace />
           ) : (
             <ProtectedRoute><BusinessRoute><OrdersPage /></BusinessRoute></ProtectedRoute>
           )
@@ -243,7 +271,7 @@ function AppRoutes() {
         path="/app/orders/:id"
         element={
           shouldDeferPos ? (
-            <Navigate to="/store-admin/orders" replace />
+            <Navigate to="/staff/orders" replace />
           ) : (
             <ProtectedRoute><BusinessRoute><OrderDetailPage /></BusinessRoute></ProtectedRoute>
           )

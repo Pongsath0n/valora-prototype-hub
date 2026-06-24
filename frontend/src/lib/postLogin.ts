@@ -13,7 +13,7 @@ import type { AppRole } from "@/lib/guards";
  *   (/app/dashboard), where Profit Planning (/app/planning) is the primary entry.
  */
 export function resolvePostLoginRoute(role: AppRole | string | null, hasOnboarded: boolean): string {
-  if (role === "staff") return "/store-admin";
+  if (role === "staff") return "/staff";
   if (!hasOnboarded) return "/onboarding";
-  return "/app/dashboard";
+  return "/owner/dashboard";
 }

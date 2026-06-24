@@ -1,6 +1,6 @@
 import { supabase } from "@/lib/supabase";
 
-const BACKEND_BASE = (import.meta.env.VITE_BACKEND_URL ?? "http://127.0.0.1:8000").replace(/\/$/, "");
+const BACKEND_BASE = (import.meta.env.VITE_BACKEND_URL ?? "http://127.0.0.1:8080").replace(/\/$/, "");
 
 export type FeeType = "none" | "percent" | "fixed";
 export type ChannelType = "direct" | "delivery" | "manual";

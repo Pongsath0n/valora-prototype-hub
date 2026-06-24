@@ -37,26 +37,26 @@ describe("AdminLayout navigation", () => {
     renderLayout();
 
     const staffBackLink = screen.getByRole("link", { name: "กลับไปแดชบอร์ดร้าน" });
-    expect(staffBackLink).toHaveAttribute("href", "/store-admin");
+    expect(staffBackLink).toHaveAttribute("href", "/staff");
 
     const hrefs = allHrefs();
-    expect(hrefs).toContain("/store-admin");
-    expect(hrefs).toContain("/store-admin/orders");
-    expect(hrefs).toContain("/store-admin/customers");
+    expect(hrefs).toContain("/staff");
+    expect(hrefs).toContain("/staff/orders");
+    expect(hrefs).toContain("/staff/customers");
 
     // No POS, planning, reports, config/cost, or system access for staff.
     expect(screen.queryByText("POS")).toBeNull();
     for (const forbidden of [
       "/store-admin/pos",
       "/app/pos",
-      "/app/planning",
-      "/app/dashboard",
-      "/app/reports",
-      "/store-admin/menus",
+      "/owner/profit-planning",
+      "/owner/dashboard",
+      "/owner/reports",
+      "/owner/menus",
       "/store-admin/channels",
       "/store-admin/channel-pricing",
-      "/store-admin/ingredients",
-      "/store-admin/recipes",
+      "/owner/cost-items",
+      "/owner/recipes",
       "/store-admin/reports",
       "/system",
     ]) {
@@ -69,13 +69,13 @@ describe("AdminLayout navigation", () => {
     renderLayout();
 
     const backLink = screen.getByRole("link", { name: "กลับไปหน้าร้าน" });
-    expect(backLink).toHaveAttribute("href", "/app/dashboard");
+    expect(backLink).toHaveAttribute("href", "/owner/dashboard");
 
     const hrefs = allHrefs();
-    expect(hrefs).toContain("/store-admin/menus");
-    expect(hrefs).toContain("/store-admin/ingredients");
-    expect(hrefs).toContain("/store-admin/recipes");
-    expect(hrefs).toContain("/app/reports");
+    expect(hrefs).toContain("/owner/menus");
+    expect(hrefs).toContain("/owner/cost-items");
+    expect(hrefs).toContain("/owner/recipes");
+    expect(hrefs).toContain("/owner/reports");
     expect(hrefs).not.toContain("/store-admin/reports");
     expect(hrefs).not.toContain("/store-admin/pos");
     expect(screen.queryByText("POS")).toBeNull();

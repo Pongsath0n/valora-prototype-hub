@@ -38,7 +38,7 @@ describe("AppLayout owner navigation", () => {
     renderLayout();
 
     expect(screen.getAllByText("การวางแผนกำไร").length).toBeGreaterThan(0);
-    expect(allHrefs()).toContain("/app/planning");
+    expect(allHrefs()).toContain("/owner/profit-planning");
   });
 
   it("does not show POS, legacy /app config routes, or /admin links", () => {
@@ -63,21 +63,21 @@ describe("AppLayout owner navigation", () => {
     expect(screen.queryByText("POS")).toBeNull();
   });
 
-  it("uses canonical /store-admin/* config routes and exposes the System Console to owners", () => {
+  it("uses canonical /owner/* and /staff/* routes and exposes the System Console to owners", () => {
     mockRoleState.role = "owner";
     renderLayout();
 
     const hrefs = allHrefs();
     for (const expected of [
-      "/app/dashboard",
-      "/app/reports",
-      "/store-admin/menus",
+      "/owner/dashboard",
+      "/owner/reports",
+      "/owner/menus",
       "/store-admin/channels",
       "/store-admin/channel-pricing",
-      "/store-admin/ingredients",
-      "/store-admin/recipes",
-      "/store-admin/customers",
-      "/store-admin/orders",
+      "/owner/cost-items",
+      "/owner/recipes",
+      "/staff/customers",
+      "/staff/orders",
       "/system",
       "/system/users",
       "/system/roles",
@@ -110,7 +110,7 @@ describe("AppLayout owner navigation", () => {
       expect(hrefs.filter((h) => h === systemPath).length).toBe(1);
     }
     // Profit Planning still present
-    expect(hrefs).toContain("/app/planning");
+    expect(hrefs).toContain("/owner/profit-planning");
   });
 
   it("hides system console links from non-owner roles", () => {
@@ -120,6 +120,6 @@ describe("AppLayout owner navigation", () => {
     const hrefs = allHrefs();
     expect(hrefs).not.toContain("/system");
     expect(hrefs).not.toContain("/system/users");
-    expect(hrefs).toContain("/app/planning");
+    expect(hrefs).toContain("/owner/profit-planning");
   });
 });

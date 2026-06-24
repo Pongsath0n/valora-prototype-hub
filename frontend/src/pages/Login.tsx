@@ -70,8 +70,20 @@ export default function LoginPage() {
 
         const hasOnboarded = localStorage.getItem("valora:onboarded") === "1";
         navigate(resolvePostLoginRoute(role, hasOnboarded), { replace: true });
-      } catch {
-        showError("บัญชีนี้ยังไม่ได้รับสิทธิ์การใช้งาน");
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "";
+        const permissionErrors = new Set([
+          "no_store_membership",
+          "insufficient_role",
+          "store_access_denied",
+          "owner_role_required",
+          "unauthorized",
+        ]);
+        if (permissionErrors.has(message)) {
+          showError("บัญชีนี้ยังไม่ได้รับสิทธิ์การใช้งาน");
+        } else {
+          showError(LOGIN_ERROR_MESSAGES.unexpected);
+        }
       }
     } catch {
       showError(LOGIN_ERROR_MESSAGES.unexpected);

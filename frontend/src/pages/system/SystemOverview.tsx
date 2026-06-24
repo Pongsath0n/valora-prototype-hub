@@ -69,7 +69,7 @@ export default function SystemOverviewPage() {
         <p className="text-sm text-muted-foreground">
           พื้นที่สำหรับดูแลระบบกลาง ไม่เกี่ยวกับการขายหน้าร้าน หากต้องการจัดการออเดอร์หรือเมนู
           ให้ไปที่{" "}
-          <Link to="/store-admin" className="underline">
+          <Link to="/staff" className="underline">
             Valora Store Admin
           </Link>
           .
