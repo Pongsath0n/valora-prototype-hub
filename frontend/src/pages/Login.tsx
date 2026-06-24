@@ -3,39 +3,60 @@ import { useNavigate } from "react-router-dom";
 import { supabase } from "@/lib/supabase";
 import { storeAdminApi } from "@/services/storeAdminApi";
 import { resolvePostLoginRoute } from "@/lib/postLogin";
-import { AlertCircle, Loader2 } from "lucide-react";
+import { AlertCircle, CheckCircle2, Loader2 } from "lucide-react";
 import LogoBrand from "@/components/LogoBrand";
+import {
+  FORGOT_PASSWORD_SUCCESS_MESSAGE,
+  LOGIN_ERROR_MESSAGES,
+  getLoginValidationMessage,
+} from "./loginMessages";
 
 export default function LoginPage() {
   const navigate = useNavigate();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState("");
+  const [isResettingPassword, setIsResettingPassword] = useState(false);
+  const [feedback, setFeedback] = useState<{
+    type: "error" | "success";
+    message: string;
+  } | null>(null);
+
+  const showError = (message: string) => setFeedback({ type: "error", message });
+  const showSuccess = (message: string) => setFeedback({ type: "success", message });
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError("");
+    if (isLoading) return;
+    setFeedback(null);
+
+    const validationMessage = getLoginValidationMessage(email, password);
+    if (validationMessage) {
+      showError(validationMessage);
+      return;
+    }
+
     setIsLoading(true);
 
     try {
+      const trimmedEmail = email.trim();
       const { data: signInData, error: authError } = await supabase.auth.signInWithPassword({
-        email: email.trim(),
+        email: trimmedEmail,
         password,
       });
 
       if (authError) {
-        setError(
+        showError(
           authError.message === "Invalid login credentials"
-            ? "อีเมลหรือรหัสผ่านไม่ถูกต้อง"
-            : authError.message
+            ? LOGIN_ERROR_MESSAGES.invalidCredentials
+            : LOGIN_ERROR_MESSAGES.unexpected
         );
         return;
       }
 
       const userId = signInData?.user?.id;
       if (!userId) {
-        setError("เกิดข้อผิดพลาด ไม่พบข้อมูลผู้ใช้");
+        showError(LOGIN_ERROR_MESSAGES.unexpected);
         return;
       }
 
@@ -43,19 +64,42 @@ export default function LoginPage() {
         const me = await storeAdminApi.getMe();
         const role = (me.role ?? null) as string | null;
         if (!role) {
-          setError("บัญชีนี้ยังไม่ได้รับสิทธิ์การใช้งาน");
+          showError("บัญชีนี้ยังไม่ได้รับสิทธิ์การใช้งาน");
           return;
         }
 
         const hasOnboarded = localStorage.getItem("valora:onboarded") === "1";
         navigate(resolvePostLoginRoute(role, hasOnboarded), { replace: true });
       } catch {
-        setError("บัญชีนี้ยังไม่ได้รับสิทธิ์การใช้งาน");
+        showError("บัญชีนี้ยังไม่ได้รับสิทธิ์การใช้งาน");
       }
     } catch {
-      setError("เกิดข้อผิดพลาด กรุณาลองใหม่");
+      showError(LOGIN_ERROR_MESSAGES.unexpected);
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleForgotPassword = async () => {
+    if (isResettingPassword || isLoading) return;
+
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail) {
+      showError(LOGIN_ERROR_MESSAGES.emptyEmail);
+      return;
+    }
+
+    setFeedback(null);
+    setIsResettingPassword(true);
+
+    try {
+      const { error: resetError } = await supabase.auth.resetPasswordForEmail(trimmedEmail);
+      if (resetError) throw resetError;
+      showSuccess(FORGOT_PASSWORD_SUCCESS_MESSAGE);
+    } catch {
+      showError(LOGIN_ERROR_MESSAGES.unexpected);
+    } finally {
+      setIsResettingPassword(false);
     }
   };
 
@@ -100,10 +144,31 @@ export default function LoginPage() {
             />
           </div>
 
-          {error && (
-            <div className="flex items-center gap-2 text-destructive bg-destructive/10 px-3 py-2.5 rounded-lg text-sm">
-              <AlertCircle className="w-4 h-4 flex-shrink-0" />
-              <span>{error}</span>
+          <div className="text-right">
+            <button
+              type="button"
+              onClick={handleForgotPassword}
+              disabled={isResettingPassword || isLoading}
+              className="text-xs font-medium text-primary hover:underline disabled:opacity-60"
+            >
+              {isResettingPassword ? "กำลังส่งลิงก์..." : "ลืมรหัสผ่าน?"}
+            </button>
+          </div>
+
+          {feedback && (
+            <div
+              className={`flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm ${
+                feedback.type === "error"
+                  ? "text-destructive bg-destructive/10"
+                  : "text-emerald-600 bg-emerald-50 dark:text-emerald-100 dark:bg-emerald-500/10"
+              }`}
+            >
+              {feedback.type === "error" ? (
+                <AlertCircle className="w-4 h-4 flex-shrink-0" />
+              ) : (
+                <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
+              )}
+              <span>{feedback.message}</span>
             </div>
           )}
 
