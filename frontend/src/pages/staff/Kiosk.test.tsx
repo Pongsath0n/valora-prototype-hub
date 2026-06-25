@@ -273,4 +273,59 @@ describe("/staff/kiosk route", () => {
     fireEvent.click(confirmButton);
     await waitFor(() => expect(mockCreateKioskOrder).not.toHaveBeenCalled());
   });
+
+  it("recovers when payment settings initially fail and retry succeeds", async () => {
+    mockGetPaymentSettings.mockRejectedValueOnce(new Error("network_down"));
+    mockGetPaymentSettings.mockResolvedValueOnce(PAYMENT_SETTINGS_RESPONSE);
+
+    renderKioskPage();
+
+    await waitFor(() => expect(mockListMenu).toHaveBeenCalled());
+    fireEvent.click(await screen.findByLabelText(/เพิ่ม Iced Latte/i));
+    fireEvent.click(await screen.findByRole("button", { name: "เพิ่มลงรายการ" }));
+    fireEvent.click(screen.getByRole("button", { name: "ไปขั้นตอนการชำระเงิน" }));
+
+    expect(await screen.findByText("network_down")).toBeInTheDocument();
+    const confirmButton = screen.getByRole("button", { name: "ยืนยันว่าได้รับชำระแล้ว" });
+    expect(confirmButton).toBeDisabled();
+    const retryButton = screen.getByRole("button", { name: "ลองโหลดอีกครั้ง" });
+
+    fireEvent.click(retryButton);
+
+    await waitFor(() => expect(mockGetPaymentSettings).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.getByRole("button", { name: /PromptPay/ })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("button", { name: "ยืนยันว่าได้รับชำระแล้ว" })).not.toBeDisabled());
+
+    fireEvent.click(screen.getByRole("button", { name: "ยืนยันว่าได้รับชำระแล้ว" }));
+
+    await waitFor(() => expect(mockCreateKioskOrder).toHaveBeenCalled());
+    const payload = mockCreateKioskOrder.mock.calls.at(-1)?.[0];
+    expect(payload).toBeDefined();
+    expect(payload).toMatchObject({
+      items: [
+        {
+          product_id: "prod_1",
+          quantity: 1,
+          options: { sweetness: 75 },
+        },
+      ],
+      payment_method: "promptpay",
+    });
+
+    const forbiddenKeys = [
+      "promptpay_qr_url",
+      "promptpay_qr_storage_path",
+      "total_cost",
+      "gross_profit",
+      "margin",
+      "channel_fee",
+      "channel_fee_total",
+    ];
+    forbiddenKeys.forEach((key) => {
+      expect(payload).not.toHaveProperty(key);
+      payload.items.forEach((item: Record<string, unknown>) => {
+        expect(item).not.toHaveProperty(key);
+      });
+    });
+  });
 });
