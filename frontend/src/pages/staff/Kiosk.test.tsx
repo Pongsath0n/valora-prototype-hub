@@ -8,6 +8,7 @@ import StaffKioskPage from "./Kiosk";
 
 const mockListMenu = vi.fn();
 const mockCreateKioskOrder = vi.fn();
+const mockGetPaymentSettings = vi.fn();
 const mockToast = vi.fn();
 
 vi.mock("@/components/admin/AdminLayout", () => ({
@@ -33,6 +34,7 @@ vi.mock("@/services/storeAdminApi", async () => {
     storeAdminApi: {
       ...actual.storeAdminApi,
       createKioskOrder: (...args: unknown[]) => mockCreateKioskOrder(...args),
+      getPaymentSettings: (...args: unknown[]) => mockGetPaymentSettings(...args),
     },
   };
 });
@@ -80,6 +82,19 @@ const ORDER_RESPONSE = {
   latest_payment: { method: "cash" },
 };
 
+const PAYMENT_SETTINGS_RESPONSE = {
+  store_id: "store_1",
+  settings: {
+    store_id: "store_1",
+    promptpay_display_name: "Valora Cafe",
+    is_promptpay_enabled: true,
+    is_cash_enabled: true,
+    promptpay_qr_storage_path: "store_1/qr.png",
+    promptpay_qr_file_name: "qr.png",
+    promptpay_qr_url: "https://cdn.example.com/qr.png",
+  },
+};
+
 function renderKioskPage() {
   return render(
     <MemoryRouter>
@@ -90,8 +105,12 @@ function renderKioskPage() {
 
 describe("/staff/kiosk route", () => {
   beforeEach(() => {
+    mockListMenu.mockReset();
     mockListMenu.mockResolvedValue(MENU_FIXTURE);
+    mockCreateKioskOrder.mockReset();
     mockCreateKioskOrder.mockResolvedValue(ORDER_RESPONSE);
+    mockGetPaymentSettings.mockReset();
+    mockGetPaymentSettings.mockResolvedValue(PAYMENT_SETTINGS_RESPONSE);
     mockToast.mockReset();
   });
 
@@ -103,13 +122,15 @@ describe("/staff/kiosk route", () => {
     );
 
     await waitFor(() => expect(mockListMenu).toHaveBeenCalled());
+    await waitFor(() => expect(mockGetPaymentSettings).toHaveBeenCalled());
     expect(await screen.findByText("เลือกเมนูและปรับรายละเอียด")).toBeInTheDocument();
   });
 
-  it("lets staff add menu items, toggle payment methods, and submit orders", async () => {
+  it("shows QR image and display name when payment settings provide them", async () => {
     renderKioskPage();
 
     await waitFor(() => expect(mockListMenu).toHaveBeenCalled());
+    await waitFor(() => expect(mockGetPaymentSettings).toHaveBeenCalled());
     fireEvent.click(await screen.findByLabelText(/เพิ่ม Iced Latte/i));
 
     const dialog = await screen.findByRole("dialog");
@@ -131,10 +152,8 @@ describe("/staff/kiosk route", () => {
     fireEvent.change(screen.getByPlaceholderText("เบอร์โทร"), { target: { value: "0812345678" } });
 
     fireEvent.click(screen.getByRole("button", { name: "ไปขั้นตอนการชำระเงิน" }));
-    expect(screen.getByText("QR ร้านแบบไม่ระบุยอด")).toBeInTheDocument();
-    expect(screen.getByText("ลูกค้าต้องกรอกยอดให้ตรงกับยอดที่แสดง")).toBeInTheDocument();
-    expect(screen.getByText("พนักงานตรวจสลิปก่อนกดยืนยัน")).toBeInTheDocument();
-
+    expect(await screen.findByAltText("QR พร้อมเพย์ของร้าน")).toHaveAttribute("src", "https://cdn.example.com/qr.png");
+    expect(screen.getByText("Valora Cafe")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /เงินสด/ }));
     expect(screen.getByText("เตรียมเงินทอน")).toBeInTheDocument();
 
@@ -160,5 +179,98 @@ describe("/staff/kiosk route", () => {
 
     expect(await screen.findByText("Q-10")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /ไปคิวออเดอร์/ })).toHaveAttribute("href", "/staff/orders");
+  });
+
+  it("falls back to placeholder when PromptPay QR URL is missing", async () => {
+    mockGetPaymentSettings.mockResolvedValueOnce({
+      ...PAYMENT_SETTINGS_RESPONSE,
+      settings: {
+        ...PAYMENT_SETTINGS_RESPONSE.settings,
+        promptpay_qr_url: null,
+        promptpay_display_name: null,
+      },
+    });
+
+    renderKioskPage();
+
+    await waitFor(() => expect(mockListMenu).toHaveBeenCalled());
+    await waitFor(() => expect(mockGetPaymentSettings).toHaveBeenCalled());
+    fireEvent.click(await screen.findByLabelText(/เพิ่ม Iced Latte/i));
+    fireEvent.click(await screen.findByRole("button", { name: "เพิ่มลงรายการ" }));
+    fireEvent.click(screen.getByRole("button", { name: "ไปขั้นตอนการชำระเงิน" }));
+
+    expect(screen.queryByAltText("QR พร้อมเพย์ของร้าน")).not.toBeInTheDocument();
+    expect(screen.getByText("QR ร้านแบบไม่ระบุยอด")).toBeInTheDocument();
+  });
+
+  it("hides PromptPay when disabled and auto-switches to cash", async () => {
+    mockGetPaymentSettings.mockResolvedValueOnce({
+      ...PAYMENT_SETTINGS_RESPONSE,
+      settings: {
+        ...PAYMENT_SETTINGS_RESPONSE.settings,
+        is_promptpay_enabled: false,
+        promptpay_qr_url: "https://cdn.example.com/qr.png",
+      },
+    });
+
+    renderKioskPage();
+
+    await waitFor(() => expect(mockListMenu).toHaveBeenCalled());
+    await waitFor(() => expect(mockGetPaymentSettings).toHaveBeenCalled());
+    fireEvent.click(await screen.findByLabelText(/เพิ่ม Iced Latte/i));
+    fireEvent.click(await screen.findByRole("button", { name: "เพิ่มลงรายการ" }));
+    fireEvent.click(screen.getByRole("button", { name: "ไปขั้นตอนการชำระเงิน" }));
+
+    expect(screen.queryByRole("button", { name: /PromptPay/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /เงินสด/ })).toBeInTheDocument();
+    expect(screen.getByText("เตรียมเงินทอน")).toBeInTheDocument();
+  });
+
+  it("hides cash when disabled and keeps PromptPay active", async () => {
+    mockGetPaymentSettings.mockResolvedValueOnce({
+      ...PAYMENT_SETTINGS_RESPONSE,
+      settings: {
+        ...PAYMENT_SETTINGS_RESPONSE.settings,
+        is_cash_enabled: false,
+      },
+    });
+
+    renderKioskPage();
+
+    await waitFor(() => expect(mockListMenu).toHaveBeenCalled());
+    await waitFor(() => expect(mockGetPaymentSettings).toHaveBeenCalled());
+    fireEvent.click(await screen.findByLabelText(/เพิ่ม Iced Latte/i));
+    fireEvent.click(await screen.findByRole("button", { name: "เพิ่มลงรายการ" }));
+    fireEvent.click(screen.getByRole("button", { name: "ไปขั้นตอนการชำระเงิน" }));
+
+    expect(screen.queryByRole("button", { name: /เงินสด/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /PromptPay/ })).toBeInTheDocument();
+    expect(screen.getByText("QR ร้านแบบไม่ระบุยอด")).toBeInTheDocument();
+  });
+
+  it("blocks submission when no payment methods are available", async () => {
+    mockGetPaymentSettings.mockResolvedValueOnce({
+      ...PAYMENT_SETTINGS_RESPONSE,
+      settings: {
+        ...PAYMENT_SETTINGS_RESPONSE.settings,
+        is_promptpay_enabled: false,
+        is_cash_enabled: false,
+      },
+    });
+
+    renderKioskPage();
+
+    await waitFor(() => expect(mockListMenu).toHaveBeenCalled());
+    await waitFor(() => expect(mockGetPaymentSettings).toHaveBeenCalled());
+    fireEvent.click(await screen.findByLabelText(/เพิ่ม Iced Latte/i));
+    fireEvent.click(await screen.findByRole("button", { name: "เพิ่มลงรายการ" }));
+    fireEvent.click(screen.getByRole("button", { name: "ไปขั้นตอนการชำระเงิน" }));
+
+    const confirmButton = screen.getByRole("button", { name: "ยืนยันว่าได้รับชำระแล้ว" });
+    expect(confirmButton).toBeDisabled();
+    expect(screen.getByText(/ยังไม่ได้เปิดช่องทางรับชำระเงิน/)).toBeInTheDocument();
+
+    fireEvent.click(confirmButton);
+    await waitFor(() => expect(mockCreateKioskOrder).not.toHaveBeenCalled());
   });
 });

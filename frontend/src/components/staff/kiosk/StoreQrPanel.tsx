@@ -13,6 +13,8 @@ type StoreQrPanelProps = {
    * settings or object storage) WITHOUT any other change to this component.
    */
   qrImageUrl?: string | null;
+  /** Optional display name/account alias shown under the QR image. */
+  displayName?: string | null;
   className?: string;
 };
 
@@ -26,6 +28,7 @@ type StoreQrPanelProps = {
 export default function StoreQrPanel({
   amount,
   qrImageUrl = STORE_QR_CONFIG.qrImageUrl,
+  displayName,
   className,
 }: StoreQrPanelProps) {
   return (
@@ -42,6 +45,8 @@ export default function StoreQrPanel({
           <QrCode className="h-16 w-16 text-muted-foreground" aria-hidden />
         )}
       </div>
+
+      {displayName ? <p className="mt-3 text-sm font-semibold text-foreground">{displayName}</p> : null}
 
       <p className="mt-4 text-sm font-semibold text-foreground">{QR_COPY.title}</p>
 

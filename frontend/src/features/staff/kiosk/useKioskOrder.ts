@@ -6,6 +6,7 @@ import {
   storeAdminApi,
   type ApiOrder,
   type KioskOrderPayload,
+  type StorePaymentSettings,
 } from "@/services/storeAdminApi";
 
 import { buildItemOptions, getCartTotal, sanitizeSweetness } from "./cart";
@@ -61,6 +62,11 @@ export function useKioskOrder() {
   const [submitting, setSubmitting] = useState(false);
   const [successOrder, setSuccessOrder] = useState<ApiOrder | null>(null);
 
+  // --- Payment settings ------------------------------------------------------
+  const [paymentSettings, setPaymentSettings] = useState<StorePaymentSettings | null>(null);
+  const [paymentSettingsLoading, setPaymentSettingsLoading] = useState(true);
+  const [paymentSettingsError, setPaymentSettingsError] = useState<string | null>(null);
+
   // --- Item options dialog --------------------------------------------------
   const [dialogOpen, setDialogOpen] = useState(false);
   const [dialogProduct, setDialogProduct] = useState<CustomerMenuItem | null>(null);
@@ -85,6 +91,27 @@ export function useKioskOrder() {
   useEffect(() => {
     void loadMenu();
   }, [loadMenu]);
+
+  const loadPaymentSettings = useCallback(async () => {
+    setPaymentSettingsLoading(true);
+    setPaymentSettingsError(null);
+    try {
+      const response = await storeAdminApi.getPaymentSettings();
+      setPaymentSettings(response.settings);
+      return response.settings;
+    } catch (error: any) {
+      const message = error?.message || "ไม่สามารถโหลดการตั้งค่าชำระเงินได้";
+      setPaymentSettingsError(message);
+      setPaymentSettings(null);
+      return null;
+    } finally {
+      setPaymentSettingsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadPaymentSettings();
+  }, [loadPaymentSettings]);
 
   // If the cart empties out, never strand the user on the payment step.
   useEffect(() => {
@@ -121,6 +148,29 @@ export function useKioskOrder() {
   }, [menus, category, search]);
 
   const orderTotal = useMemo(() => getCartTotal(cart), [cart]);
+
+  const availablePaymentMethods = useMemo<Record<PaymentMethod, boolean>>(
+    () => ({
+      promptpay: Boolean(paymentSettings?.is_promptpay_enabled),
+      cash: Boolean(paymentSettings?.is_cash_enabled),
+    }),
+    [paymentSettings],
+  );
+
+  const promptpayEnabled = availablePaymentMethods.promptpay;
+  const cashEnabled = availablePaymentMethods.cash;
+  const noPaymentMethods = !promptpayEnabled && !cashEnabled;
+
+  useEffect(() => {
+    if (paymentSettingsLoading) return;
+    if (!promptpayEnabled && paymentMethod === "promptpay" && cashEnabled) {
+      setPaymentMethod("cash");
+      return;
+    }
+    if (!cashEnabled && paymentMethod === "cash" && promptpayEnabled) {
+      setPaymentMethod("promptpay");
+    }
+  }, [paymentSettingsLoading, promptpayEnabled, cashEnabled, paymentMethod]);
 
   // --- Dialog actions -------------------------------------------------------
   const openItemDialog = useCallback(
@@ -252,6 +302,28 @@ export function useKioskOrder() {
   // --- Submission -----------------------------------------------------------
   const handleSubmit = useCallback(async () => {
     if (cart.length === 0 || submitting) return;
+    if (paymentSettingsLoading) {
+      setSubmitError("กำลังโหลดการตั้งค่าชำระเงิน โปรดรอสักครู่");
+      return;
+    }
+    if (noPaymentMethods) {
+      const message = "ร้านยังไม่ได้เปิดช่องทางรับชำระเงิน";
+      setSubmitError(message);
+      toast({ title: "ไม่สามารถบันทึกได้", description: message, variant: "destructive" });
+      return;
+    }
+    if (!promptpayEnabled && paymentMethod === "promptpay") {
+      const message = "PromptPay ถูกปิดใช้งานสำหรับร้านนี้";
+      setSubmitError(message);
+      toast({ title: "ไม่สามารถบันทึกได้", description: message, variant: "destructive" });
+      return;
+    }
+    if (!cashEnabled && paymentMethod === "cash") {
+      const message = "เงินสดถูกปิดใช้งานสำหรับร้านนี้";
+      setSubmitError(message);
+      toast({ title: "ไม่สามารถบันทึกได้", description: message, variant: "destructive" });
+      return;
+    }
     setSubmitting(true);
     setSubmitError("");
     try {
@@ -295,7 +367,18 @@ export function useKioskOrder() {
     } finally {
       setSubmitting(false);
     }
-  }, [cart, submitting, paymentMethod, orderNote, customerName, customerPhone]);
+  }, [
+    cart,
+    submitting,
+    paymentMethod,
+    orderNote,
+    customerName,
+    customerPhone,
+    paymentSettingsLoading,
+    noPaymentMethods,
+    promptpayEnabled,
+    cashEnabled,
+  ]);
 
   return {
     // menu
@@ -349,6 +432,12 @@ export function useKioskOrder() {
     submitting,
     successOrder,
     handleSubmit,
+    paymentSettings,
+    paymentSettingsLoading,
+    paymentSettingsError,
+    reloadPaymentSettings: loadPaymentSettings,
+    availablePaymentMethods,
+    noPaymentMethods,
   };
 }
 

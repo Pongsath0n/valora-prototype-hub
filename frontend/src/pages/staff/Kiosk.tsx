@@ -69,6 +69,13 @@ export default function StaffKioskPage() {
             submitError={kiosk.submitError}
             onConfirm={kiosk.handleSubmit}
             onBack={kiosk.goToMenu}
+            paymentSettingsLoading={kiosk.paymentSettingsLoading}
+            paymentSettingsError={kiosk.paymentSettingsError}
+            onReloadPaymentSettings={kiosk.reloadPaymentSettings}
+            availableMethods={kiosk.availablePaymentMethods}
+            noPaymentMethods={kiosk.noPaymentMethods}
+            qrImageUrl={kiosk.paymentSettings?.promptpay_qr_url}
+            promptpayDisplayName={kiosk.paymentSettings?.promptpay_display_name}
           />
         ) : null}
 
