@@ -1,15 +1,32 @@
 import { Link } from "react-router-dom";
 import AdminLayout from "@/components/admin/AdminLayout";
 import { useProfileRole } from "@/contexts/RoleContext";
-import { ClipboardList, Settings, Soup, Store, Users } from "lucide-react";
+import { ClipboardList, MonitorSmartphone, Settings, Soup, Store, Users } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { featureFlags } from "@/config/featureFlags";
+import type { AppRole } from "@/lib/guards";
 
-const dailyOpsCards = [
+type DailyOpsCardConfig = {
+  title: string;
+  desc: string;
+  icon: LucideIcon;
+  pathSuffix: string;
+  roles?: AppRole[];
+};
+
+const DAILY_OPS_CARD_CONFIG: DailyOpsCardConfig[] = [
   {
     title: "ออเดอร์",
     desc: "คิวออเดอร์ ชำระเงิน เตรียม และพร้อมรับ",
     icon: ClipboardList,
-    to: "/store-admin/orders",
+    pathSuffix: "/orders",
+  },
+  {
+    title: "Kiosk",
+    desc: "รับออเดอร์หน้าร้าน ชำระเงิน และส่งเข้าคิวออเดอร์",
+    icon: MonitorSmartphone,
+    pathSuffix: "/kiosk",
+    roles: ["staff"],
   },
   // POS card removed — POS is a deferred prototype and not part of the
   // production daily-operations workflow yet.
@@ -17,7 +34,7 @@ const dailyOpsCards = [
     title: "ลูกค้า",
     desc: "ค้นหาและอัปเดตข้อมูลลูกค้า",
     icon: Users,
-    to: "/store-admin/customers",
+    pathSuffix: "/customers",
   },
 ];
 
@@ -46,6 +63,15 @@ export default function AdminDashboardPage() {
   const { role } = useProfileRole();
 
   const canManage = role ? ["owner", "admin", "manager"].includes(role) : false;
+  const dailyOpsBasePath = role === "staff" ? "/staff" : "/store-admin";
+  const dailyOpsCards = DAILY_OPS_CARD_CONFIG.filter((card) => {
+    if (!card.roles?.length) return true;
+    if (!role) return false;
+    return card.roles.includes(role);
+  }).map((card) => ({
+    ...card,
+    to: `${dailyOpsBasePath}${card.pathSuffix}`,
+  }));
 
   return (
     <AdminLayout>

@@ -25,11 +25,12 @@ function renderPage() {
 }
 
 describe("Store Admin dashboard cards", () => {
-  it("staff sees only daily-operation cards (orders, customers) — no POS or management cards", () => {
+  it("staff sees only daily-operation cards (orders, kiosk, customers) — no POS or management cards", () => {
     mockRoleState.role = "staff";
     renderPage();
 
     expect(screen.getAllByText("ออเดอร์").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Kiosk").length).toBeGreaterThan(0);
     expect(screen.getAllByText("ลูกค้า").length).toBeGreaterThan(0);
 
     expect(screen.queryByText("POS")).toBeNull();
