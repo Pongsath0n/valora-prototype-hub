@@ -1,7 +1,7 @@
 import unittest
 from types import SimpleNamespace
-from typing import Any, Dict, List
-from unittest.mock import MagicMock, patch
+from typing import Any, Dict, List, Optional
+from unittest.mock import patch
 
 from fastapi import HTTPException
 
@@ -97,9 +97,9 @@ class KioskOrderEndpointTests(unittest.TestCase):
 
         with patch("app.api.store_admin._get_ctx", return_value={"client": fake_client, "user_id": "user-1", "memberships": []}), \
             patch("app.api.store_admin._resolve_store_id", return_value=("store-1", "staff")), \
-            patch("app.api.store_admin._resolve_kiosk_channel", return_value="channel-1"), \
+            patch("app.api.store_admin._ensure_kiosk_channel", return_value="channel-1"), \
             patch("app.api.store_admin._ensure_product_in_store"), \
-            patch("app.api.store_admin.prepare_order_item_snapshot", return_value=snapshot), \
+            patch("app.api.store_admin.prepare_order_item_snapshot", return_value=snapshot) as mock_snapshot, \
             patch("app.api.store_admin.resolve_channel_fee", return_value=5.0), \
             patch("app.api.store_admin.generate_order_number", return_value="ORD-123"), \
             patch("app.api.store_admin.order_items_supports_store_scope", return_value=True), \
@@ -119,6 +119,7 @@ class KioskOrderEndpointTests(unittest.TestCase):
         self.assertEqual(order_row["total_amount"], 85.0)
         self.assertEqual(order_row["gross_profit"], 50.0)
         self.assertEqual(order_row["status"], "accepted")
+        self.assertEqual(order_row["channel_id"], "channel-1")
         self.assertEqual(order_row["payment_status"], "paid")
         self.assertEqual(order_row["order_source"], "kiosk")
         self.assertEqual(order_row["channel"], "kiosk")
@@ -135,6 +136,14 @@ class KioskOrderEndpointTests(unittest.TestCase):
         self.assertEqual(payment_args[4], "cash")
         mock_recalc.assert_called_once_with(fake_client, "store-1", order_row["id"])
         mock_status_log.assert_called_once()
+        mock_snapshot.assert_called_once_with(
+            fake_client,
+            "store-1",
+            product_id="prod-1",
+            quantity=2,
+            channel_id="channel-1",
+            raw_options=None,
+        )
 
         self.assertIsNone(response["total_cost"])
         self.assertIsNone(response["gross_profit"])
@@ -152,6 +161,127 @@ class KioskOrderEndpointTests(unittest.TestCase):
                 store_admin.create_kiosk_order(payload, authorization="Bearer token")
 
         self.assertEqual(ctx_err.exception.detail, "insufficient_role")
+
+    def test_create_kiosk_order_fails_when_kiosk_channel_missing(self) -> None:
+        payload = self._build_payload()
+        fake_client = self._FakeClient()
+
+        with patch("app.api.store_admin._get_ctx", return_value={"client": fake_client, "user_id": "user-1", "memberships": []}), \
+            patch("app.api.store_admin._resolve_store_id", return_value=("store-1", "staff")), \
+            patch(
+                "app.api.store_admin._ensure_kiosk_channel",
+                side_effect=HTTPException(status_code=500, detail="kiosk_channel_unavailable"),
+            ):
+            with self.assertRaises(HTTPException) as ctx_err:
+                store_admin.create_kiosk_order(payload, authorization="Bearer token")
+
+        self.assertEqual(ctx_err.exception.detail, "kiosk_channel_unavailable")
+        self.assertEqual(fake_client.order_rows, [])
+
+
+class _SalesChannelClientDouble:
+    def __init__(self, rows: Optional[List[Dict[str, Any]]] = None, insert_error: Optional[str] = None) -> None:
+        self.rows: List[Dict[str, Any]] = rows or []
+        self.insert_error = insert_error
+        self.insert_calls = 0
+        self.last_insert_payload: Optional[Dict[str, Any]] = None
+
+    class _Table:
+        def __init__(self, parent: "_SalesChannelClientDouble", name: str):
+            self.parent = parent
+            self.name = name
+            self.operation: Optional[str] = None
+            self.filters: Dict[str, Any] = {}
+            self.limit_value: Optional[int] = None
+            self.payload: Optional[Dict[str, Any]] = None
+
+        def select(self, _columns: str) -> "_SalesChannelClientDouble._Table":
+            self.operation = "select"
+            return self
+
+        def eq(self, column: str, value: Any) -> "_SalesChannelClientDouble._Table":
+            self.filters[column] = value
+            return self
+
+        def limit(self, value: int) -> "_SalesChannelClientDouble._Table":
+            self.limit_value = value
+            return self
+
+        def insert(self, payload: Dict[str, Any]) -> "_SalesChannelClientDouble._Table":
+            self.operation = "insert"
+            self.payload = payload
+            return self
+
+        def execute(self) -> SimpleNamespace:
+            if self.name != "sales_channels":
+                raise AssertionError(f"unexpected table {self.name}")
+            if self.operation == "select":
+                return self.parent._execute_select(self.filters, self.limit_value)
+            if self.operation == "insert":
+                if self.payload is None:
+                    raise AssertionError("insert payload missing")
+                return self.parent._execute_insert(self.payload)
+            raise AssertionError(f"unsupported operation {self.operation}")
+
+    def table(self, name: str) -> "_SalesChannelClientDouble._Table":
+        return _SalesChannelClientDouble._Table(self, name)
+
+    def _execute_select(self, filters: Dict[str, Any], limit_value: Optional[int]) -> SimpleNamespace:
+        rows: List[Dict[str, Any]] = []
+        for row in self.rows:
+            if all(row.get(key) == value for key, value in filters.items()):
+                rows.append(dict(row))
+        if limit_value is not None:
+            rows = rows[:limit_value]
+        return SimpleNamespace(error=None, data=rows)
+
+    def _execute_insert(self, payload: Dict[str, Any]) -> SimpleNamespace:
+        self.insert_calls += 1
+        if self.insert_error:
+            return SimpleNamespace(error=SimpleNamespace(message=self.insert_error), data=None)
+
+        duplicate = any(
+            row.get("store_id") == payload.get("store_id") and row.get("name") == payload.get("name")
+            for row in self.rows
+        )
+        if duplicate:
+            return SimpleNamespace(error=SimpleNamespace(message="duplicate key value violates unique constraint name"), data=None)
+
+        record = dict(payload)
+        record.setdefault("id", f"channel-{len(self.rows) + 1}")
+        self.last_insert_payload = dict(payload)
+        self.rows.append(record)
+        return SimpleNamespace(error=None, data=[record])
+
+
+class KioskChannelProvisioningTests(unittest.TestCase):
+    def test_ensure_kiosk_channel_reuses_existing_row(self) -> None:
+        client = _SalesChannelClientDouble(rows=[{"id": "channel-a", "store_id": "store-1", "name": "kiosk"}])
+
+        channel_id = store_admin._ensure_kiosk_channel(client, "store-1")
+
+        self.assertEqual(channel_id, "channel-a")
+        self.assertEqual(client.insert_calls, 0)
+
+    def test_ensure_kiosk_channel_creates_when_missing(self) -> None:
+        client = _SalesChannelClientDouble()
+
+        channel_id = store_admin._ensure_kiosk_channel(client, "store-1")
+
+        self.assertEqual(channel_id, "channel-1")
+        self.assertEqual(client.last_insert_payload["name"], store_admin.KIOSK_CHANNEL_DISPLAY_NAME)
+        self.assertEqual(client.last_insert_payload["type"], "manual")
+        self.assertEqual(client.last_insert_payload["fee_type"], "none")
+        self.assertEqual(client.last_insert_payload["fee_value"], 0)
+        self.assertTrue(client.last_insert_payload["is_active"])
+
+    def test_ensure_kiosk_channel_bubbles_failure(self) -> None:
+        client = _SalesChannelClientDouble(insert_error="forced failure")
+
+        with self.assertRaises(HTTPException) as ctx_err:
+            store_admin._ensure_kiosk_channel(client, "store-1")
+
+        self.assertEqual(ctx_err.exception.detail, "kiosk_channel_unavailable")
 
 
 if __name__ == "__main__":  # pragma: no cover

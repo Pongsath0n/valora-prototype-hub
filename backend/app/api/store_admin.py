@@ -117,6 +117,14 @@ SWEETNESS_LEVELS: Tuple[int, ...] = (0, 25, 50, 75, 100)
 DEFAULT_SWEETNESS = 100
 CUSTOMER_NAME_FALLBACK = "ลูกค้าไม่ระบุชื่อ"
 KIOSK_CUSTOMER_FALLBACK = "Walk-in Customer"
+KIOSK_CHANNEL_INTERNAL_NAME = "kiosk"
+KIOSK_CHANNEL_DISPLAY_NAME = "Kiosk / Walk-in"
+KIOSK_CHANNEL_NAME_MATCHES: Set[str] = {
+    "kiosk",
+    "kiosk walk in",
+    "walk in",
+    "walk in kiosk",
+}
 _MENU_IMAGE_ALLOWED_TYPES: Set[str] = {
     "image/jpeg",
     "image/jpg",
@@ -1415,22 +1423,114 @@ def _sanitize_kiosk_order_items(items: List[OrderItemPayload]) -> List[Dict[str,
     return sanitized
 
 
-def _resolve_kiosk_channel(client: Client, store_id: str) -> Optional[str]:
-    resp = (
-        client.table("sales_channels")
-        .select("id, name")
-        .eq("store_id", store_id)
-        .eq("name", "kiosk")
-        .limit(1)
-        .execute()
-    )
+def _normalize_channel_name(value: Any) -> str:
+    text = str(value or "").lower()
+    for ch in ("/", "-", "_"):
+        text = text.replace(ch, " ")
+    return " ".join(text.split())
+
+
+def _lookup_kiosk_channel(client: Client, store_id: str) -> Optional[str]:
+    for candidate in (KIOSK_CHANNEL_INTERNAL_NAME, KIOSK_CHANNEL_DISPLAY_NAME):
+        resp = (
+            client.table("sales_channels")
+            .select("id, name")
+            .eq("store_id", store_id)
+            .eq("name", candidate)
+            .limit(1)
+            .execute()
+        )
+        err = getattr(resp, "error", None)
+        if err:
+            logger.warning(
+                "kiosk_channel_lookup_error store=%s name=%s detail=%s",
+                store_id,
+                candidate,
+                _safe_error_detail(err),
+            )
+            continue
+        rows = getattr(resp, "data", None) or []
+        if rows and rows[0].get("id"):
+            return str(rows[0]["id"])
+
+    try:
+        resp = client.table("sales_channels").select("id, name").eq("store_id", store_id).execute()
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning(
+            "kiosk_channel_list_exception store=%s detail=%s",
+            store_id,
+            _safe_error_detail(exc),
+        )
+        return None
+
     err = getattr(resp, "error", None)
     if err:
+        logger.warning(
+            "kiosk_channel_list_error store=%s detail=%s",
+            store_id,
+            _safe_error_detail(err),
+        )
         return None
+
     rows = getattr(resp, "data", None) or []
-    if not rows:
-        return None
-    return str(rows[0].get("id")) if rows[0].get("id") else None
+    for row in rows:
+        normalized = _normalize_channel_name(row.get("name"))
+        if normalized in KIOSK_CHANNEL_NAME_MATCHES and row.get("id"):
+            return str(row["id"])
+    return None
+
+
+def _ensure_kiosk_channel(client: Client, store_id: str) -> str:
+    existing = _lookup_kiosk_channel(client, store_id)
+    if existing:
+        return existing
+
+    payload: Dict[str, Any] = {
+        "store_id": store_id,
+        "name": KIOSK_CHANNEL_DISPLAY_NAME,
+        "type": "manual",
+        "fee_type": "none",
+        "fee_value": 0,
+        "is_active": True,
+    }
+
+    trimmed_optional = False
+    while True:
+        try:
+            resp = client.table("sales_channels").insert(payload).execute()
+        except Exception as exc:  # pragma: no cover - defensive
+            resp = None
+            err = exc
+        else:
+            err = getattr(resp, "error", None)
+
+        if not err:
+            rows = getattr(resp, "data", None) or []
+            created = rows[0] if rows else {}
+            new_id = created.get("id")
+            if new_id:
+                return str(new_id)
+            fallback = _lookup_kiosk_channel(client, store_id)
+            if fallback:
+                return fallback
+            logger.error("kiosk_channel_created_without_id store=%s", store_id)
+            break
+
+        if not trimmed_optional and _is_missing_column(err, "is_active"):
+            payload = _omit_optional_fields(payload, ["is_active"])
+            trimmed_optional = True
+            continue
+
+        if _is_unique_violation(err, "name"):
+            fallback = _lookup_kiosk_channel(client, store_id)
+            if fallback:
+                return fallback
+
+        message = _safe_error_detail(err)
+        logger.error("kiosk_channel_create_failed store=%s detail=%s", store_id, message)
+        raise HTTPException(status_code=500, detail="kiosk_channel_unavailable")
+
+    raise HTTPException(status_code=500, detail="kiosk_channel_unavailable")
 
 
 def _ensure_customer_record_for_kiosk(client: Client, store_id: str, customer: Optional[KioskOrderCustomer]) -> Tuple[Optional[str], str, Optional[str]]:
@@ -6596,7 +6696,7 @@ def create_kiosk_order(payload: KioskOrderCreate, authorization: Optional[str] =
 
     client = ctx["client"]
     sanitized_items = _sanitize_kiosk_order_items(payload.items or [])
-    channel_id_value = _resolve_kiosk_channel(client, store_id_resolved)
+    channel_id_value = _ensure_kiosk_channel(client, store_id_resolved)
 
     item_snapshots: List[Dict[str, Any]] = []
     for item in sanitized_items:
