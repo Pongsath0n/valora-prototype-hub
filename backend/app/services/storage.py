@@ -158,6 +158,24 @@ def upload_public_asset(bucket: str, path: str, data: bytes, content_type: str) 
     return UploadedFile(path=path, file_name=path.split("/")[-1], public_url=public_url).as_dict()
 
 
+def delete_storage_object(bucket: str, path: str, *, error_prefix: str = "storage") -> None:
+    if not bucket or not path:
+        return
+
+    _, storage_client = _get_storage_client(bucket)
+    try:
+        storage_client.remove([path])
+        logger.info("storage_delete_success bucket=%s key=%s", bucket, _short_path(path))
+    except Exception as exc:  # pragma: no cover
+        logger.error(
+            "storage_delete_failed bucket=%s key=%s detail=%s",
+            bucket,
+            _short_path(path),
+            str(exc)[:300],
+        )
+        raise StorageUploadError(f"{error_prefix}_delete_failed") from exc
+
+
 def create_signed_slip_url(bucket: str, path: str, expires_in: int = 60, *, error_prefix: str = "payment_slip") -> Dict[str, Any]:
     """Create a short-lived signed URL for a private payment slip."""
     if not bucket:

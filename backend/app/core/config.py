@@ -44,6 +44,8 @@ class Settings(BaseSettings):
     menu_image_max_mb: float = Field(default=5.0, alias="MENU_IMAGE_MAX_MB")
     purchase_receipt_bucket: str = Field(default="purchase-receipts", alias="PURCHASE_RECEIPT_BUCKET")
     purchase_receipt_max_mb: float = Field(default=5.0, alias="PURCHASE_RECEIPT_MAX_MB")
+    store_payment_asset_bucket: str = Field(default="store-payment-assets", alias="STORE_PAYMENT_ASSET_BUCKET")
+    store_payment_qr_max_mb: float = Field(default=5.0, alias="STORE_PAYMENT_QR_MAX_MB")
 
 
 settings = Settings()

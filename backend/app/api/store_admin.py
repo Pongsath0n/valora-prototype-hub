@@ -48,7 +48,13 @@ from app.services.notification_sender import (
 )
 from app.services.line_service import sanitize_line_display_name
 from app.services.order_numbers import generate_order_number
-from app.services.storage import StorageUploadError, create_signed_slip_url, upload_payment_slip, upload_public_asset
+from app.services.storage import (
+    StorageUploadError,
+    create_signed_slip_url,
+    delete_storage_object,
+    upload_payment_slip,
+    upload_public_asset,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -122,6 +128,20 @@ _MENU_IMAGE_EXTENSION_MAP: Dict[str, str] = {
     "image/jpg": "jpg",
     "image/png": "png",
     "image/webp": "webp",
+}
+_STORE_PAYMENT_QR_ALLOWED_TYPES: Set[str] = {
+    "image/png",
+    "image/jpeg",
+    "image/jpg",
+    "image/webp",
+    "image/svg+xml",
+}
+_STORE_PAYMENT_QR_EXTENSION_MAP: Dict[str, str] = {
+    "image/png": "png",
+    "image/jpeg": "jpg",
+    "image/jpg": "jpg",
+    "image/webp": "webp",
+    "image/svg+xml": "svg",
 }
 
 _PURCHASE_COST_SOURCE = "purchase_derived"
@@ -626,6 +646,12 @@ class PaymentRejectPayload(BaseModel):
     note: Optional[str] = None
 
 
+class StorePaymentSettingsUpdate(BaseModel):
+    promptpay_display_name: Optional[str] = None
+    is_promptpay_enabled: Optional[bool] = None
+    is_cash_enabled: Optional[bool] = None
+
+
 class LineBindPayload(BaseModel):
     line_user_id: str
 
@@ -754,6 +780,149 @@ def _require_owner_store_role(role: str) -> None:
 def _ensure_staff_can_manage_payments(role: str) -> None:
     if _normalize_store_role(role) not in _PAYMENT_REVIEW_ROLES:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="insufficient_role")
+
+
+def _store_payment_bool(value: Any, default: bool = True) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes", "y"}:
+            return True
+        if normalized in {"false", "0", "no", "n"}:
+            return False
+    return bool(value)
+
+
+def _store_payment_bucket() -> str:
+    bucket = getattr(settings, "store_payment_asset_bucket", "")
+    return bucket or "store-payment-assets"
+
+
+def _store_payment_qr_limit_bytes() -> int:
+    max_mb = float(getattr(settings, "store_payment_qr_max_mb", 5.0) or 5.0)
+    return int(max(0.1, max_mb) * 1024 * 1024)
+
+
+def _store_payment_settings_db_defaults(store_id: str) -> Dict[str, Any]:
+    return {
+        "store_id": store_id,
+        "promptpay_display_name": None,
+        "is_promptpay_enabled": True,
+        "is_cash_enabled": True,
+        "promptpay_qr_storage_path": None,
+        "promptpay_qr_file_name": None,
+    }
+
+
+def _store_payment_settings_response(row: Optional[Dict[str, Any]], store_id: str) -> Dict[str, Any]:
+    defaults = _store_payment_settings_db_defaults(store_id)
+    response = {
+        "store_id": store_id,
+        "promptpay_display_name": defaults["promptpay_display_name"],
+        "is_promptpay_enabled": defaults["is_promptpay_enabled"],
+        "is_cash_enabled": defaults["is_cash_enabled"],
+        "promptpay_qr_storage_path": defaults["promptpay_qr_storage_path"],
+        "promptpay_qr_file_name": defaults["promptpay_qr_file_name"],
+        "promptpay_qr_url": None,
+    }
+    if row:
+        response["promptpay_display_name"] = row.get("promptpay_display_name")
+        response["is_promptpay_enabled"] = _store_payment_bool(row.get("is_promptpay_enabled"), True)
+        response["is_cash_enabled"] = _store_payment_bool(row.get("is_cash_enabled"), True)
+        response["promptpay_qr_storage_path"] = row.get("promptpay_qr_storage_path")
+        response["promptpay_qr_file_name"] = row.get("promptpay_qr_file_name")
+    response["is_promptpay_enabled"] = _store_payment_bool(response["is_promptpay_enabled"], True)
+    response["is_cash_enabled"] = _store_payment_bool(response["is_cash_enabled"], True)
+    response["promptpay_qr_url"] = _resolve_store_payment_qr_url(store_id, response.get("promptpay_qr_storage_path"))
+    return response
+
+
+def _resolve_store_payment_qr_url(store_id: str, storage_path: Optional[str]) -> Optional[str]:
+    if not storage_path:
+        return None
+    bucket = _store_payment_bucket()
+    try:
+        signed = create_signed_slip_url(bucket, storage_path, expires_in=120, error_prefix="store_payment_qr")
+    except StorageUploadError as exc:
+        logger.warning(
+            "store_payment_qr_signed_url_failed store=%s detail=%s",
+            _short_identifier(store_id),
+            _safe_error_detail(exc),
+        )
+        return None
+    return signed.get("signed_url") or signed.get("signedURL") or signed.get("signedUrl")
+
+
+def _get_store_payment_settings_row(client: Client, store_id: str) -> Dict[str, Any]:
+    columns = "store_id, promptpay_display_name, is_promptpay_enabled, is_cash_enabled, promptpay_qr_storage_path, promptpay_qr_file_name"
+    try:
+        resp = (
+            client.table("store_payment_settings")
+            .select(columns)
+            .eq("store_id", store_id)
+            .limit(1)
+            .execute()
+        )
+    except Exception:
+        raise HTTPException(status_code=500, detail="payment_settings_query_failed")
+    err = getattr(resp, "error", None)
+    if err:
+        raise HTTPException(status_code=500, detail="payment_settings_query_failed")
+    rows = getattr(resp, "data", None) or []
+    return rows[0] if rows else {}
+
+
+def _persist_store_payment_settings(client: Client, store_id: str, data: Dict[str, Any], existing_row: Optional[Dict[str, Any]]) -> None:
+    payload = dict(data)
+    try:
+        if existing_row:
+            resp = client.table("store_payment_settings").update(payload).eq("store_id", store_id).execute()
+        else:
+            insert_payload = _store_payment_settings_db_defaults(store_id)
+            insert_payload.update(payload)
+            resp = client.table("store_payment_settings").insert(insert_payload).execute()
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=500, detail="payment_settings_update_failed")
+    err = getattr(resp, "error", None)
+    if err:
+        raise HTTPException(status_code=500, detail="payment_settings_update_failed")
+
+
+def _safe_storage_segment(value: str) -> str:
+    segment = re.sub(r"[^A-Za-z0-9_-]+", "-", str(value or ""))
+    segment = re.sub(r"-+", "-", segment).strip("-_") or "store"
+    return segment[:60]
+
+
+def _resolve_store_payment_qr_extension(filename: Optional[str], content_type: str) -> str:
+    normalized = _normalize_mime_type(content_type)
+    if normalized in _STORE_PAYMENT_QR_EXTENSION_MAP:
+        return _STORE_PAYMENT_QR_EXTENSION_MAP[normalized]
+    if filename:
+        _, ext = os.path.splitext(filename)
+        ext = ext.replace(".", "").strip().lower()
+        if ext in {"jpg", "jpeg", "png", "webp", "svg"}:
+            return "jpg" if ext in {"jpg", "jpeg"} else ext
+    return "png"
+
+
+def _build_store_payment_qr_path(store_id: str, extension: str) -> str:
+    safe_store = _safe_storage_segment(store_id)
+    safe_ext = extension.lstrip(".").lower() or "png"
+    return f"{safe_store}/payment/qr/current.{safe_ext}"
+
+
+def _sanitize_qr_file_name(filename: Optional[str], extension: str) -> str:
+    base = os.path.splitext(os.path.basename(str(filename or "")))[0]
+    if not base:
+        base = "store-qr"
+    base = re.sub(r"[^A-Za-z0-9ก-๙_-]+", "-", base)
+    base = re.sub(r"-+", "-", base).strip("-_") or "store-qr"
+    safe_ext = extension.lstrip(".").lower() or "png"
+    return f"{base[:64]}.{safe_ext}"
 
 
 def _mask_financial_fields(row: Dict[str, Any]) -> Dict[str, Any]:
@@ -1445,6 +1614,175 @@ def get_current_user(authorization: Optional[str] = Header(None)) -> Dict[str, A
         "store_timezone": store_timezone,
         "store_currency": store_currency,
         "memberships": memberships,
+    }
+
+
+# ─── Store Payment Settings ───────────────────────────────────────────────────
+
+
+@router.get("/payment-settings")
+def get_store_payment_settings(authorization: Optional[str] = Header(None), store_id: Optional[str] = None) -> Dict[str, Any]:
+    ctx = _get_ctx(authorization)
+    store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
+    _require_staff_or_above(role)
+
+    row = _get_store_payment_settings_row(ctx["client"], store_id_resolved)
+    return {
+        "store_id": store_id_resolved,
+        "settings": _store_payment_settings_response(row if row else None, store_id_resolved),
+    }
+
+
+@router.put("/payment-settings")
+def update_store_payment_settings(payload: StorePaymentSettingsUpdate, authorization: Optional[str] = Header(None), store_id: Optional[str] = None) -> Dict[str, Any]:
+    ctx = _get_ctx(authorization)
+    store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
+    _require_manager(role)
+
+    payload_data = payload.model_dump(exclude_unset=True)
+    if not payload_data:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="no_fields_to_update")
+
+    existing_row = _get_store_payment_settings_row(ctx["client"], store_id_resolved)
+    promptpay_current = _store_payment_bool((existing_row or {}).get("is_promptpay_enabled"), True)
+    cash_current = _store_payment_bool((existing_row or {}).get("is_cash_enabled"), True)
+    display_current = (existing_row or {}).get("promptpay_display_name")
+
+    promptpay_new = promptpay_current
+    cash_new = cash_current
+    display_new = display_current
+
+    if "is_promptpay_enabled" in payload_data:
+        promptpay_new = _store_payment_bool(payload_data["is_promptpay_enabled"], promptpay_current)
+    if "is_cash_enabled" in payload_data:
+        cash_new = _store_payment_bool(payload_data["is_cash_enabled"], cash_current)
+    if "promptpay_display_name" in payload_data:
+        display_new = _strip_text(payload_data["promptpay_display_name"])
+
+    if not (promptpay_new or cash_new):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="one_payment_method_required")
+
+    update_payload = {
+        "promptpay_display_name": display_new,
+        "is_promptpay_enabled": promptpay_new,
+        "is_cash_enabled": cash_new,
+    }
+
+    _persist_store_payment_settings(
+        ctx["client"],
+        store_id_resolved,
+        update_payload,
+        existing_row if existing_row else None,
+    )
+
+    refreshed = _get_store_payment_settings_row(ctx["client"], store_id_resolved)
+    target_row = refreshed or ((existing_row or {}) | update_payload)
+
+    return {
+        "store_id": store_id_resolved,
+        "settings": _store_payment_settings_response(target_row, store_id_resolved),
+    }
+
+
+@router.post("/payment-settings/qr")
+async def upload_store_payment_qr(
+    authorization: Optional[str] = Header(None),
+    store_id: Optional[str] = None,
+    file: UploadFile = File(...),
+) -> Dict[str, Any]:
+    ctx = _get_ctx(authorization)
+    store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
+    _require_manager(role)
+
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="empty_file")
+
+    mime_type = _normalize_mime_type(file.content_type or "")
+    if mime_type not in _STORE_PAYMENT_QR_ALLOWED_TYPES:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="file_type_not_allowed")
+
+    if len(content) > _store_payment_qr_limit_bytes():
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="file_too_large")
+
+    extension = _resolve_store_payment_qr_extension(file.filename, mime_type)
+    storage_path = _build_store_payment_qr_path(store_id_resolved, extension)
+    display_file_name = _sanitize_qr_file_name(file.filename, extension)
+
+    bucket = _store_payment_bucket()
+    try:
+        upload_payment_slip(
+            bucket=bucket,
+            path=storage_path,
+            data=content,
+            content_type=mime_type or "application/octet-stream",
+            error_prefix="store_payment_qr",
+        )
+    except StorageUploadError as exc:
+        logger.error(
+            "store_payment_qr_upload_failed store=%s detail=%s",
+            _short_identifier(store_id_resolved),
+            _safe_error_detail(exc),
+        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="payment_qr_upload_failed")
+
+    existing_row = _get_store_payment_settings_row(ctx["client"], store_id_resolved)
+    update_payload = {
+        "promptpay_qr_storage_path": storage_path,
+        "promptpay_qr_file_name": display_file_name,
+    }
+
+    _persist_store_payment_settings(
+        ctx["client"],
+        store_id_resolved,
+        update_payload,
+        existing_row if existing_row else None,
+    )
+
+    refreshed = _get_store_payment_settings_row(ctx["client"], store_id_resolved)
+    target_row = refreshed or ((existing_row or {}) | update_payload)
+
+    return {
+        "store_id": store_id_resolved,
+        "settings": _store_payment_settings_response(target_row, store_id_resolved),
+    }
+
+
+@router.delete("/payment-settings/qr")
+def delete_store_payment_qr(authorization: Optional[str] = Header(None), store_id: Optional[str] = None) -> Dict[str, Any]:
+    ctx = _get_ctx(authorization)
+    store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
+    _require_manager(role)
+
+    existing_row = _get_store_payment_settings_row(ctx["client"], store_id_resolved)
+    storage_path = (existing_row or {}).get("promptpay_qr_storage_path")
+    bucket = _store_payment_bucket()
+
+    if storage_path:
+        try:
+            delete_storage_object(bucket, storage_path, error_prefix="store_payment_qr")
+        except StorageUploadError as exc:
+            logger.error(
+                "store_payment_qr_delete_failed store=%s detail=%s",
+                _short_identifier(store_id_resolved),
+                _safe_error_detail(exc),
+            )
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="payment_qr_delete_failed")
+
+    if existing_row:
+        _persist_store_payment_settings(
+            ctx["client"],
+            store_id_resolved,
+            {"promptpay_qr_storage_path": None, "promptpay_qr_file_name": None},
+            existing_row,
+        )
+
+    refreshed = _get_store_payment_settings_row(ctx["client"], store_id_resolved)
+    target_row = refreshed or ((existing_row or {}) | {"promptpay_qr_storage_path": None, "promptpay_qr_file_name": None})
+
+    return {
+        "store_id": store_id_resolved,
+        "settings": _store_payment_settings_response(target_row, store_id_resolved),
     }
 
 
