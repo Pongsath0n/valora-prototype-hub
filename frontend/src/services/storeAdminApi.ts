@@ -713,6 +713,27 @@ export type PaymentSlipPreviewResponse = {
   submitted_at?: string | null;
 };
 
+export type StorePaymentSettings = {
+  store_id: string;
+  promptpay_display_name: string | null;
+  is_promptpay_enabled: boolean;
+  is_cash_enabled: boolean;
+  promptpay_qr_storage_path: string | null;
+  promptpay_qr_file_name: string | null;
+  promptpay_qr_url: string | null;
+};
+
+export type StorePaymentSettingsResponse = {
+  store_id: string;
+  settings: StorePaymentSettings;
+};
+
+export type StorePaymentSettingsUpdatePayload = {
+  promptpay_display_name?: string | null;
+  is_promptpay_enabled?: boolean;
+  is_cash_enabled?: boolean;
+};
+
 export type PaymentPayload = {
   amount?: number;
   method?: "transfer" | "bank_transfer" | "promptpay" | "cash" | "other";
@@ -871,6 +892,43 @@ export const storeAdminApi = {
 
   async getPlanningBaseline(): Promise<PlanningBaselineResponse> {
     return request("/api/store-admin/planning/baseline");
+  },
+
+  // ─── Store Payment Settings ────────────────────────────────────────────────
+  async getPaymentSettings(): Promise<StorePaymentSettingsResponse> {
+    return request<StorePaymentSettingsResponse>("/api/store-admin/payment-settings");
+  },
+
+  async updatePaymentSettings(payload: StorePaymentSettingsUpdatePayload): Promise<StorePaymentSettingsResponse> {
+    return request<StorePaymentSettingsResponse>("/api/store-admin/payment-settings", {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async uploadPaymentSettingsQr(file: File): Promise<StorePaymentSettingsResponse> {
+    const token = await getAccessToken();
+    const formData = new FormData();
+    formData.append("file", file);
+    const res = await fetch(`${BACKEND_BASE}/api/store-admin/payment-settings/qr`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      body: formData,
+    });
+    const body = await res.json().catch(() => null);
+    if (!res.ok || !body) {
+      const reason = (body as any)?.detail || (body as any)?.error || res.statusText || "upload_failed";
+      throw new Error(typeof reason === "string" ? reason : "upload_failed");
+    }
+    return body as StorePaymentSettingsResponse;
+  },
+
+  async deletePaymentSettingsQr(): Promise<StorePaymentSettingsResponse> {
+    return request<StorePaymentSettingsResponse>("/api/store-admin/payment-settings/qr", {
+      method: "DELETE",
+    });
   },
 
   // ─── Planning: overhead expenses ──────────────────────────────────────────

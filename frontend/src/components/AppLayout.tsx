@@ -8,6 +8,7 @@ import {
   LayoutDashboard,
   LogOut,
   Menu,
+  CreditCard,
   Settings,
   ShieldCheck,
   Soup,
@@ -73,6 +74,10 @@ const OWNER_NAV_SECTIONS: OwnerNavSection[] = [
       { title: "ช่องทางขาย", path: "/store-admin/channels", icon: Store },
       { title: "ราคาตามช่องทาง", path: "/store-admin/channel-pricing", icon: Store },
     ],
+  },
+  {
+    title: "การจัดการร้าน",
+    items: [{ title: "ตั้งค่าการชำระเงิน", path: "/owner/payment-settings", icon: CreditCard }],
   },
   {
     title: "ต้นทุนและสูตร",

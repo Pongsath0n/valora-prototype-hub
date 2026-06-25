@@ -49,6 +49,7 @@ import StoreAdminRecipesPage from "./pages/store-admin/Recipes";
 import StoreAdminPOSPage from "./pages/store-admin/POS";
 import StoreAdminReportsPage from "./pages/store-admin/Reports";
 import StaffKioskPage from "./pages/staff/Kiosk";
+import OwnerPaymentSettingsPage from "./pages/OwnerPaymentSettings";
 
 import SystemOverviewPage from "./pages/system/SystemOverview";
 import SystemUsersPage from "./pages/system/SystemUsers";
@@ -189,6 +190,10 @@ export function AppRoutes() {
       <Route path="/owner/menus" element={<ManagerRoute><AdminProductsPage /></ManagerRoute>} />
       <Route path="/owner/recipes" element={<ManagerRoute><StoreAdminRecipesPage /></ManagerRoute>} />
       <Route path="/owner/cost-items" element={<ManagerRoute><StoreAdminIngredientsPage /></ManagerRoute>} />
+      <Route
+        path="/owner/payment-settings"
+        element={<ManagerRoute><OwnerPaymentSettingsPage /></ManagerRoute>}
+      />
 
       {/* ── Legacy /store-admin redirects → canonical ── */}
       <Route path="/store-admin" element={<Navigate to="/staff" replace />} />
