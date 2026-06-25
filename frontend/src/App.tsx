@@ -48,6 +48,7 @@ import StoreAdminIngredientsPage from "./pages/store-admin/Ingredients";
 import StoreAdminRecipesPage from "./pages/store-admin/Recipes";
 import StoreAdminPOSPage from "./pages/store-admin/POS";
 import StoreAdminReportsPage from "./pages/store-admin/Reports";
+import StaffKioskPage from "./pages/staff/Kiosk";
 
 import SystemOverviewPage from "./pages/system/SystemOverview";
 import SystemUsersPage from "./pages/system/SystemUsers";
@@ -162,7 +163,7 @@ function StaffOrderDetailRedirect() {
   return <Navigate to={`/staff/orders/${id}`} replace />;
 }
 
-function AppRoutes() {
+export function AppRoutes() {
   return (
     <Routes>
       <Route path="/" element={<Landing />} />
@@ -179,6 +180,7 @@ function AppRoutes() {
       <Route path="/staff/orders" element={<AdminRoute><AdminOrdersPage /></AdminRoute>} />
       <Route path="/staff/orders/:id" element={<AdminRoute><AdminOrderDetailPage /></AdminRoute>} />
       <Route path="/staff/customers" element={<AdminRoute><CustomersPage /></AdminRoute>} />
+      <Route path="/staff/kiosk" element={<AdminRoute><StaffKioskPage /></AdminRoute>} />
 
       {/* ── Canonical Owner routes ── */}
       <Route path="/owner/dashboard" element={<ProtectedRoute><BusinessRoute><Dashboard /></BusinessRoute></ProtectedRoute>} />

@@ -6,6 +6,7 @@ import {
   LayoutDashboard,
   LogOut,
   Menu,
+  MonitorSmartphone,
   Settings,
   Soup,
   Store,
@@ -35,6 +36,7 @@ const storeNavSections: { title: string; items: StoreNavItem[] }[] = [
       // POS is a deferred prototype — intentionally not in production navigation.
       { title: "แดชบอร์ด", path: "/staff", icon: LayoutDashboard, end: true },
       { title: "ออเดอร์", path: "/staff/orders", icon: ClipboardList },
+      { title: "Kiosk", path: "/staff/kiosk", icon: MonitorSmartphone },
       { title: "ลูกค้า", path: "/staff/customers", icon: Users },
     ],
   },

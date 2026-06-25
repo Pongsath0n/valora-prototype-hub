@@ -651,6 +651,35 @@ export type OrderItemPayload = {
   options?: Record<string, unknown>;
 };
 
+export type KioskOrderAddonSelection = {
+  addon_id: string;
+  quantity: number;
+};
+
+export type KioskOrderItemOptions = {
+  sweetness?: number;
+  addons?: KioskOrderAddonSelection[];
+  note?: string;
+};
+
+export type KioskOrderItemPayload = {
+  product_id: string;
+  quantity: number;
+  options?: KioskOrderItemOptions | null;
+};
+
+export type KioskOrderCustomerPayload = {
+  name?: string | null;
+  phone?: string | null;
+};
+
+export type KioskOrderPayload = {
+  items: KioskOrderItemPayload[];
+  payment_method: "promptpay" | "cash";
+  customer?: KioskOrderCustomerPayload | null;
+  note?: string | null;
+};
+
 export type ApiPayment = {
   id: string;
   store_id: string;
@@ -1142,6 +1171,13 @@ export const storeAdminApi = {
 
   async createOrder(payload: OrderPayload): Promise<{ id: string; status: string }> {
     return request<{ id: string; status: string }>("/api/store-admin/orders", { method: "POST", body: JSON.stringify(payload) });
+  },
+
+  async createKioskOrder(payload: KioskOrderPayload): Promise<ApiOrder> {
+    return request<ApiOrder>("/api/store-admin/kiosk/orders", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
   },
 
   async updateOrder(id: string, payload: Partial<OrderPayload>): Promise<{ id: string; status: string; mock_notification?: string }> {
