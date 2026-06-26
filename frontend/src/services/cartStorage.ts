@@ -127,6 +127,22 @@ export function addCartItem(newItem: CartItem): CartItem[] {
   return next;
 }
 
+export function reconcileCartWithProductIds(validProductIds: Set<string>): { items: CartItem[]; removedCount: number } {
+  const cart = safeParse();
+  if (!cart.length) {
+    return { items: cart, removedCount: 0 };
+  }
+  if (!validProductIds || validProductIds.size === 0) {
+    persist([]);
+    return { items: [], removedCount: cart.length };
+  }
+  const next = cart.filter((item) => validProductIds.has(item.productId));
+  if (next.length !== cart.length) {
+    persist(next);
+  }
+  return { items: next, removedCount: cart.length - next.length };
+}
+
 export function removeCartItem(index: number): CartItem[] {
   const cart = safeParse();
   if (index < 0 || index >= cart.length) return cart;

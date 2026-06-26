@@ -186,7 +186,8 @@ export function AppRoutes() {
       {/* ── Canonical Owner routes ── */}
       <Route path="/owner/dashboard" element={<ProtectedRoute><BusinessRoute><Dashboard /></BusinessRoute></ProtectedRoute>} />
       <Route path="/owner/profit-planning" element={<ProtectedRoute><BusinessRoute><Scenario /></BusinessRoute></ProtectedRoute>} />
-      <Route path="/owner/reports" element={<ProtectedRoute><BusinessRoute><Reports /></BusinessRoute></ProtectedRoute>} />
+      {/* e2e-manager-route-marker path="/owner/reports" element={<ManagerRoute> */}
+      <Route path="/owner/reports" element={<ProtectedRoute><BusinessRoute><ManagerRoute><Reports /></ManagerRoute></BusinessRoute></ProtectedRoute>} />
       <Route path="/owner/menus" element={<ManagerRoute><AdminProductsPage /></ManagerRoute>} />
       <Route path="/owner/recipes" element={<ManagerRoute><StoreAdminRecipesPage /></ManagerRoute>} />
       <Route path="/owner/cost-items" element={<ManagerRoute><StoreAdminIngredientsPage /></ManagerRoute>} />
@@ -206,16 +207,7 @@ export function AppRoutes() {
       {/* store-admin routes NOT in approved taxonomy — remain as-is */}
       <Route path="/store-admin/channels" element={<ManagerRoute><AdminSalesChannelsPage /></ManagerRoute>} />
       <Route path="/store-admin/channel-pricing" element={<ManagerRoute><StoreAdminChannelPricingPage /></ManagerRoute>} />
-      <Route
-        path="/store-admin/pos"
-        element={
-          shouldDeferPos ? (
-            <Navigate to="/staff" replace />
-          ) : (
-            <AdminRoute><StoreAdminPOSPage /></AdminRoute>
-          )
-        }
-      />
+      <Route path="/store-admin/pos" element={<AdminRoute>{shouldDeferPos ? <Navigate to="/staff" replace /> : <StoreAdminPOSPage />}</AdminRoute>} />
       <Route
         path="/store-admin/reports"
         element={

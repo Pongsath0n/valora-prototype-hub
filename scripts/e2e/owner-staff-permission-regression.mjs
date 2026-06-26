@@ -16,7 +16,6 @@ const {
   ownerToken: OWNER_TOKEN,
   staffToken: STAFF_TOKEN,
   storeId: STORE_ID,
-  productId: PRODUCT_ID,
 } = ENV;
 const REPORT_DATE = new Date().toISOString().slice(0, 10);
 
@@ -82,11 +81,11 @@ function withStoreId(path) {
 function validateEnv() {
   summary.env = maskedEnvSummary();
   try {
-    ensureEnvVars(["backendUrl", "frontendUrl", "ownerToken", "staffToken", "storeId", "productId"]);
+    ensureEnvVars(["backendUrl", "frontendUrl", "ownerToken", "staffToken", "storeId"]);
   } catch (error) {
     fail(
       "missing_env",
-      "Missing required env values. Populate .env.e2e.local with BACKEND_URL, FRONTEND_URL, OWNER_TOKEN, STAFF_TOKEN, TEST_STORE_ID, CUSTOMER_PRODUCT_ID.",
+      "Missing required env values. Populate .env.e2e.local with BACKEND_URL, FRONTEND_URL, OWNER_TOKEN, STAFF_TOKEN, TEST_STORE_ID.",
       { summary: summary.env, missing: error.missing }
     );
   }

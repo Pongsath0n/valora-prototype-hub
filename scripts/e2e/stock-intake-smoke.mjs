@@ -7,13 +7,13 @@ import {
   assertLocalFirstUnlessCloud,
   ensureEnvVars,
 } from "./env.mjs";
+import { resolveProductFixture } from "./product-fixture.mjs";
 
 const {
   backendUrl: BACKEND_URL,
   adminToken: ADMIN_TOKEN,
   staffToken: STAFF_TOKEN,
   storeId: STORE_ID,
-  productId: PRODUCT_ID,
 } = ENV;
 
 const summary = {
@@ -21,6 +21,7 @@ const summary = {
   env: maskedEnvSummary(),
   steps: [],
 };
+let PRODUCT_FIXTURE = null;
 
 function record(step, detail) {
   summary.steps.push({ step, ...detail });
@@ -101,10 +102,29 @@ function randomPhone() {
   return `098${Math.floor(1000000 + Math.random() * 9000000)}`;
 }
 
+async function ensureProductFixture() {
+  if (PRODUCT_FIXTURE) {
+    return PRODUCT_FIXTURE;
+  }
+  try {
+    const fixture = await resolveProductFixture({ backendUrl: BACKEND_URL, storeId: STORE_ID || undefined });
+    PRODUCT_FIXTURE = fixture;
+    summary.product = {
+      id: fixture.productId,
+      name: fixture.productName,
+      unit_price: fixture.unitPrice,
+      store_id: fixture.storeId || STORE_ID || null,
+    };
+    return PRODUCT_FIXTURE;
+  } catch (error) {
+    fail("product_fixture", error.message || "product_fixture_failed", error.detail || {});
+  }
+}
+
 async function main() {
   try {
     assertLocalFirstUnlessCloud("Stock Intake Smoke");
-    ensureEnvVars(["backendUrl", "adminToken", "staffToken", "storeId", "productId"]);
+    ensureEnvVars(["backendUrl", "adminToken", "staffToken", "storeId"]);
   } catch (error) {
     fail(
       error.code === "LOCAL_FIRST_VIOLATION" ? "local_first_violation" : "missing_env",
@@ -116,6 +136,8 @@ async function main() {
   if (!STAFF_TOKEN) {
     fail("staff_token_missing", "STAFF_TOKEN is required for permission checks", {});
   }
+
+  const productFixture = await ensureProductFixture();
 
   const ingredientResp = await adminRequest("GET", withStoreId("/api/store-admin/ingredients"));
   if (!ingredientResp.ok) {
@@ -212,12 +234,12 @@ async function main() {
     },
     items: [
       {
-        product_id: PRODUCT_ID,
+        product_id: productFixture.productId,
         quantity: 1,
       },
     ],
     pickup_time: new Date(Date.now() + 45 * 60 * 1000).toISOString(),
-    store_id: STORE_ID || undefined,
+    store_id: STORE_ID || productFixture.storeId || undefined,
     note: `Smoke order ${batchRef}`,
   };
   const orderResp = await fetchJson(`${BACKEND_URL}/api/customer/orders`, {

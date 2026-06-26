@@ -7,12 +7,12 @@ import {
   assertLocalFirstUnlessCloud,
   ensureEnvVars,
 } from "./env.mjs";
+import { resolveProductFixture } from "./product-fixture.mjs";
 
 const {
   backendUrl: BACKEND_URL,
   adminToken: ADMIN_TOKEN,
   storeId: STORE_ID,
-  productId: PRODUCT_ID,
 } = ENV;
 
 const summary = {
@@ -49,13 +49,15 @@ function assertCondition(condition, step, message, detail) {
 
 try {
   assertLocalFirstUnlessCloud("Order/payment lifecycle regression");
-  ensureEnvVars(["backendUrl", "adminToken", "productId"]);
+  ensureEnvVars(["backendUrl", "adminToken"]);
 } catch (error) {
   fail("env_check", error.code === "LOCAL_FIRST_VIOLATION" ? "local_first_violation" : "missing_env", error.summary || error.details || error.message);
 }
 
 const REPORT_DATE = new Date().toISOString().slice(0, 10);
 const EPSILON = 0.01;
+let PRODUCT_FIXTURE = null;
+let RESOLVED_STORE_ID = STORE_ID || "";
 
 async function fetchJson(url, init = {}) {
   try {
@@ -76,11 +78,36 @@ async function fetchJson(url, init = {}) {
 }
 
 function withStoreId(path) {
-  if (!STORE_ID) {
+  if (!RESOLVED_STORE_ID) {
     return path;
   }
   const separator = path.includes("?") ? "&" : "?";
-  return `${path}${separator}store_id=${encodeURIComponent(STORE_ID)}`;
+  return `${path}${separator}store_id=${encodeURIComponent(RESOLVED_STORE_ID)}`;
+}
+
+async function ensureProductFixture() {
+  if (PRODUCT_FIXTURE) {
+    return PRODUCT_FIXTURE;
+  }
+  try {
+    const fixture = await resolveProductFixture({
+      backendUrl: BACKEND_URL,
+      storeId: RESOLVED_STORE_ID || undefined,
+    });
+    PRODUCT_FIXTURE = fixture;
+    if (!RESOLVED_STORE_ID && fixture.storeId) {
+      RESOLVED_STORE_ID = fixture.storeId;
+    }
+    summary.product = {
+      id: fixture.productId,
+      name: fixture.productName,
+      unit_price: fixture.unitPrice,
+      store_id: RESOLVED_STORE_ID || fixture.storeId || null,
+    };
+    return PRODUCT_FIXTURE;
+  } catch (error) {
+    fail("product_fixture", error.message || "product_fixture_failed", error.detail || {});
+  }
 }
 
 async function adminRequest(method, path, body, options = {}) {
@@ -109,6 +136,7 @@ function randomPhone() {
 }
 
 async function createCustomerOrder(label) {
+  const fixture = await ensureProductFixture();
   const pickupTime = new Date(Date.now() + 45 * 60 * 1000).toISOString();
   const payload = {
     customer: {
@@ -117,13 +145,13 @@ async function createCustomerOrder(label) {
     },
     items: [
       {
-        product_id: PRODUCT_ID,
+        product_id: fixture.productId,
         quantity: 1,
       },
     ],
     pickup_time: pickupTime,
     note: `Automated order (${label})`,
-    store_id: STORE_ID || undefined,
+    store_id: RESOLVED_STORE_ID || fixture.storeId || undefined,
   };
 
   const resp = await customerRequest("POST", "/api/customer/orders", payload);
@@ -260,6 +288,7 @@ function assertApprox(actual, expected, step, context) {
 }
 
 async function main() {
+  await ensureProductFixture();
   const dashboardBaseline = await getDashboardSummary("baseline");
   const reportBaseline = await getSalesReport("baseline");
 

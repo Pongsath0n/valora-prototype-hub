@@ -418,7 +418,7 @@ export default function DashboardPage() {
         </div>
 
         <Link
-          to="/owner/profit-planning"
+          to="/app/planning"
           className="block rounded-2xl border border-primary/30 bg-primary/5 p-5 shadow-md transition hover:border-primary/60"
         >
           <p className="text-xs font-semibold uppercase tracking-[0.3em] text-primary/70">Profit Planning</p>

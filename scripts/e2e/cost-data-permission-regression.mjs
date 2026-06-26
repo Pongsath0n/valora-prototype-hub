@@ -15,7 +15,6 @@ const {
   ownerToken: OWNER_TOKEN,
   staffToken: STAFF_TOKEN,
   storeId: STORE_ID,
-  productId: PRODUCT_ID,
 } = ENV;
 
 const summary = {
@@ -127,7 +126,7 @@ function withStoreId(path) {
 function validateEnv() {
   summary.env = maskedEnvSummary();
   try {
-    ensureEnvVars(["backendUrl", "frontendUrl", "ownerToken", "staffToken", "storeId", "productId"]);
+    ensureEnvVars(["backendUrl", "frontendUrl", "ownerToken", "staffToken", "storeId"]);
   } catch (error) {
     failNow("missing_env", "Missing required env values. See summary.env for details.", {
       summary: summary.env,

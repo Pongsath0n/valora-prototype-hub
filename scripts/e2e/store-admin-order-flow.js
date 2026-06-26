@@ -140,7 +140,6 @@ function loadConfig() {
     "E2E_SUPABASE_ANON_KEY",
     "E2E_EMAIL",
     "E2E_PASSWORD",
-    "E2E_PRODUCT_ID",
   ];
   const missing = required.filter((k) => !process.env[k]);
   if (missing.length) {
@@ -167,7 +166,7 @@ function loadConfig() {
     anonKey: process.env.E2E_SUPABASE_ANON_KEY,
     email: process.env.E2E_EMAIL,
     password: process.env.E2E_PASSWORD,
-    productId: process.env.E2E_PRODUCT_ID,
+    productId: process.env.E2E_PRODUCT_ID || "",
     productName: process.env.E2E_PRODUCT_NAME || "E2E product",
     unitPrice: Number(process.env.E2E_UNIT_PRICE || 60),
     unitCost: Number(process.env.E2E_UNIT_COST || 27),
@@ -219,7 +218,12 @@ async function preflightProduct(cfg, token) {
   });
 
   const items = Array.isArray(resp.body?.items) ? resp.body.items : [];
-  const simplified = items.map((p) => ({ id: p.id, name: p.name, base_price: p.base_price ?? p.price ?? null }));
+  const simplified = items.map((p) => ({
+    id: p.id,
+    name: p.name,
+    base_price: p.base_price ?? p.price ?? null,
+    is_active: p.is_active ?? p.available ?? true,
+  }));
   summary.product_candidates = simplified;
 
   if (!resp.ok) {
@@ -230,16 +234,34 @@ async function preflightProduct(cfg, token) {
     );
   }
 
-  const found = simplified.find((p) => p.id === cfg.productId);
-  if (!found) {
+  let selected = null;
+  if (cfg.productId) {
+    selected = simplified.find((p) => p.id === cfg.productId);
+  }
+  if (!selected) {
+    selected = simplified.find((p) => p.is_active) || simplified[0];
+  }
+  if (!selected) {
     setPreflight("product", "fail");
     const candidates = simplified.map((p) => `${p.name} (${p.id})`).join(", ");
     outputAndExit(
       FAILURE.PRODUCT_NOT_FOUND,
-      `Product ${cfg.productId} not found via backend menus. Candidates: ${candidates || "<none>"}`
+      `No active products available via backend menus. Candidates: ${candidates || "<none>"}`
     );
   }
 
+  cfg.productId = selected.id;
+  summary.selected_product = selected;
+  if (cfg.defaultsUsed.unitPrice) {
+    const candidatePrice = Number(selected.base_price ?? cfg.unitPrice);
+    cfg.unitPrice = Number.isFinite(candidatePrice) && candidatePrice > 0 ? candidatePrice : cfg.unitPrice;
+  }
+  if (cfg.defaultsUsed.unitCost) {
+    const inferredCost = Number((cfg.unitPrice || 0) * 0.45);
+    if (Number.isFinite(inferredCost) && inferredCost > 0) {
+      cfg.unitCost = Number(inferredCost.toFixed(2));
+    }
+  }
   setPreflight("product", "pass");
 }
 

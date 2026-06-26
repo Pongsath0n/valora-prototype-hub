@@ -129,7 +129,6 @@ async function main() {
   const anonKey = requireEnv(summary, "E2E_SUPABASE_ANON_KEY");
   const email = requireEnv(summary, "E2E_EMAIL");
   const password = requireEnv(summary, "E2E_PASSWORD");
-  const productId = requireEnv(summary, "E2E_PRODUCT_ID");
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE;
 
   if (backendBase !== EXPECTED_BACKEND_URL) {
@@ -200,12 +199,21 @@ async function main() {
 
   const productResp = await authed("GET", "/api/store-admin/menus");
   const productItems = Array.isArray(productResp.body?.items) ? productResp.body.items : [];
-  const foundProduct = productItems.find((p) => p.id === productId);
-  if (!productResp.ok || !foundProduct) {
+  const envProductId = process.env.E2E_PRODUCT_ID || "";
+  let selectedProduct = null;
+  if (envProductId) {
+    selectedProduct = productItems.find((p) => p.id === envProductId);
+  }
+  if (!selectedProduct) {
+    selectedProduct = productItems.find((p) => (p.is_active ?? p.available ?? true)) || productItems[0];
+  }
+  if (!productResp.ok || !selectedProduct) {
     summary.preflight.product = "fail";
-    abortFlow(summary, "PRECHECK_PRODUCT_NOT_FOUND", `E2E_PRODUCT_ID ${productId} not found in /api/store-admin/menus`);
+    const candidates = productItems.map((p) => `${p.name} (${p.id})`).join(", ");
+    abortFlow(summary, "PRECHECK_PRODUCT_NOT_FOUND", `No active products available via /api/store-admin/menus. Candidates: ${candidates || "<none>"}`);
   }
   summary.preflight.product = "pass";
+  summary.ids.product_id = selectedProduct.id;
 
   const requireFrontend = createRequire(path.resolve(__dirname, "../../frontend/package.json"));
   const { createClient } = requireFrontend("@supabase/supabase-js");
@@ -226,8 +234,16 @@ async function main() {
     }
     cleanupNeeded = true;
 
-    const unitPrice = Number(process.env.E2E_UNIT_PRICE || 60);
-    const unitCost = Number(process.env.E2E_UNIT_COST || 27);
+    const envUnitPrice = process.env.E2E_UNIT_PRICE;
+    let unitPrice = Number(envUnitPrice);
+    if (!envUnitPrice || !Number.isFinite(unitPrice) || unitPrice <= 0) {
+      unitPrice = Number(selectedProduct.base_price ?? selectedProduct.price ?? 60) || 60;
+    }
+    const envUnitCost = process.env.E2E_UNIT_COST;
+    let unitCost = Number(envUnitCost);
+    if (!envUnitCost || !Number.isFinite(unitCost) || unitCost <= 0) {
+      unitCost = Number((unitPrice || 0) * 0.45) || 27;
+    }
 
     const createOrderResp = await authed("POST", "/api/store-admin/orders", {
       customer_id: unlinked.id,
@@ -240,7 +256,7 @@ async function main() {
       note: "phase53c bound line smoke",
       items: [
         {
-          product_id: productId,
+          product_id: selectedProduct.id,
           quantity: 1,
           unit_price: unitPrice,
           unit_cost: unitCost,

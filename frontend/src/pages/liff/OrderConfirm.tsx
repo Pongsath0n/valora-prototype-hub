@@ -17,6 +17,7 @@ import {
   getCartItemUnitPrice,
   getCartItemKey,
   readCart,
+  reconcileCartWithProductIds,
   setLastOrderMetadata,
 } from "@/services/cartStorage";
 
@@ -84,7 +85,8 @@ export default function OrderConfirmPage() {
   const [orderNote, setOrderNote] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
-  const [cartItems] = useState<CartItem[]>(() => readCart());
+  const [cartItems, setCartItems] = useState<CartItem[]>(() => readCart());
+  const [cartNotice, setCartNotice] = useState<string | null>(null);
   const [pdpaAccepted, setPdpaAccepted] = useState(false);
   const queryLineLinkToken = useMemo(() => {
     const token = searchParams.get("line_link_token");
@@ -96,6 +98,35 @@ export default function OrderConfirmPage() {
     getCustomerIdentity()
       .then(setIdentity)
       .catch(() => setIdentityError("ไม่สามารถโหลดข้อมูลโปรไฟล์ได้"));
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function validateCart() {
+      const current = readCart();
+      if (!current.length) {
+        setCartItems([]);
+        return;
+      }
+      try {
+        const menus = await customerApi.listMenu();
+        if (cancelled) return;
+        const validIds = new Set(menus.map((menu) => menu.id));
+        const { items: filtered, removedCount } = reconcileCartWithProductIds(validIds);
+        if (!cancelled) {
+          setCartItems(filtered);
+          if (removedCount > 0) {
+            setCartNotice("ระบบลบเมนูที่ไม่พร้อมขายออกจากคำสั่งซื้อแล้ว โปรดตรวจสอบรายการอีกครั้งก่อนยืนยัน");
+          }
+        }
+      } catch {
+        // Ignore menu fetch issues; errors will be surfaced during submission instead.
+      }
+    }
+    void validateCart();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const summary = useMemo(() => buildCartSummary(cartItems), [cartItems]);
@@ -211,6 +242,12 @@ export default function OrderConfirmPage() {
         <h1 className="text-2xl font-bold">ยืนยันคำสั่งซื้อ</h1>
         <p className="text-sm text-muted-foreground">โปรดตรวจสอบข้อมูลก่อนส่งให้ร้านค้า</p>
       </div>
+
+      {cartNotice ? (
+        <div className="rounded-2xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+          {cartNotice}
+        </div>
+      ) : null}
 
       {/* Review-step navigation (before submission): go back to the cart, or
           jump to the menu to change items/sweetness/add-ons. The cart draft is

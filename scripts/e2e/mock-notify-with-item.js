@@ -14,10 +14,6 @@ const cfg = {
   password: requireEnv("E2E_PASSWORD"),
 };
 
-const PRODUCT_ID = "856728a7-24b1-4cc1-90bc-961559245cdf"; // E2E Americano
-const UNIT_PRICE = 60;
-const UNIT_COST = 27;
-
 async function fetchJson(url, init = {}) {
   const res = await fetch(url, init);
   const text = await res.text();
@@ -49,19 +45,58 @@ async function main() {
   const token = auth.body.access_token;
   const headersBase = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
 
+  const menuResp = await fetchJson(`${cfg.backendBase}/api/store-admin/menus`, {
+    headers: headersBase,
+  });
+  steps.push({ step: "menus", status: menuResp.status, ok: menuResp.ok, count: menuResp.body?.items?.length || 0 });
+  const menuItems = Array.isArray(menuResp.body?.items) ? menuResp.body.items : [];
+  const envProductId = process.env.E2E_PRODUCT_ID || "";
+  let selectedProduct = null;
+  if (envProductId) {
+    selectedProduct = menuItems.find((item) => item.id === envProductId);
+  }
+  if (!selectedProduct) {
+    selectedProduct = menuItems.find((item) => item.is_active ?? item.available ?? true) || menuItems[0];
+  }
+  if (!menuResp.ok || !selectedProduct) {
+    console.log(
+      JSON.stringify(
+        {
+          final: "product_not_found",
+          steps,
+          candidates: menuItems.map((item) => ({ id: item.id, name: item.name })),
+        },
+        null,
+        2,
+      ),
+    );
+    process.exit(1);
+  }
+
+  const envUnitPrice = process.env.E2E_UNIT_PRICE;
+  let unitPrice = Number(envUnitPrice);
+  if (!envUnitPrice || !Number.isFinite(unitPrice) || unitPrice <= 0) {
+    unitPrice = Number(selectedProduct.base_price ?? selectedProduct.price ?? 60) || 60;
+  }
+  const envUnitCost = process.env.E2E_UNIT_COST;
+  let unitCost = Number(envUnitCost);
+  if (!envUnitCost || !Number.isFinite(unitCost) || unitCost <= 0) {
+    unitCost = Number((unitPrice || 0) * 0.45) || 27;
+  }
+
   const orderPayload = {
     status: "pending_payment",
     payment_status: "unpaid",
-    subtotal: UNIT_PRICE,
-    total_amount: UNIT_PRICE,
-    total_cost: UNIT_COST,
-    gross_profit: UNIT_PRICE - UNIT_COST,
+    subtotal: unitPrice,
+    total_amount: unitPrice,
+    total_cost: unitCost,
+    gross_profit: unitPrice - unitCost,
     items: [
       {
-        product_id: PRODUCT_ID,
+        product_id: selectedProduct.id,
         quantity: 1,
-        unit_price: UNIT_PRICE,
-        unit_cost: UNIT_COST,
+        unit_price: unitPrice,
+        unit_cost: unitCost,
       },
     ],
     note: "mock notify with item",
@@ -82,7 +117,7 @@ async function main() {
   const payment = await fetchJson(`${cfg.backendBase}/api/store-admin/orders/${orderId}/payments`, {
     method: "POST",
     headers: headersBase,
-    body: JSON.stringify({ amount: UNIT_PRICE, method: "promptpay", slip_url: "mock://slip-e2e" }),
+    body: JSON.stringify({ amount: unitPrice, method: "promptpay", slip_url: "mock://slip-e2e" }),
   });
   steps.push({ step: "create_payment", status: payment.status, ok: payment.ok, body: payment.body });
   if (!payment.ok || !payment.body?.id) {

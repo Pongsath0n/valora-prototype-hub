@@ -7,13 +7,13 @@ import {
   assertLocalFirstUnlessCloud,
   ensureEnvVars,
 } from "./env.mjs";
+import { resolveProductFixture } from "./product-fixture.mjs";
 
 const {
   backendUrl: BACKEND_URL,
   ownerToken: OWNER_TOKEN,
   staffToken: STAFF_TOKEN,
   storeId: STORE_ID,
-  productId: PRODUCT_ID,
 } = ENV;
 
 const summary = {
@@ -22,10 +22,14 @@ const summary = {
   store_id: STORE_ID,
   env: maskedEnvSummary(),
   order: {},
+  product: null,
   checks: {},
   failures: [],
   result: "pending",
 };
+
+let PRODUCT_FIXTURE = null;
+let RESOLVED_STORE_ID = STORE_ID || "";
 
 function record(name, status, detail = {}) {
   summary.checks[name] = { status, ...detail };
@@ -67,9 +71,37 @@ function auth(token) {
 }
 
 function withStoreId(path) {
-  if (!STORE_ID) return path;
+  const targetStoreId = RESOLVED_STORE_ID || STORE_ID;
+  if (!targetStoreId) return path;
   const separator = path.includes("?") ? "&" : "?";
-  return `${path}${separator}store_id=${encodeURIComponent(STORE_ID)}`;
+  return `${path}${separator}store_id=${encodeURIComponent(targetStoreId)}`;
+}
+
+async function ensureProductFixture() {
+  if (PRODUCT_FIXTURE) {
+    return PRODUCT_FIXTURE;
+  }
+  try {
+    const fixture = await resolveProductFixture({
+      backendUrl: BACKEND_URL,
+      storeId: RESOLVED_STORE_ID || undefined,
+    });
+    PRODUCT_FIXTURE = fixture;
+    if (!RESOLVED_STORE_ID && fixture.storeId) {
+      RESOLVED_STORE_ID = fixture.storeId;
+    }
+    summary.product = {
+      id: fixture.productId,
+      name: fixture.productName,
+      store_id: RESOLVED_STORE_ID || fixture.storeId || null,
+    };
+    if (!summary.store_id && (RESOLVED_STORE_ID || fixture.storeId)) {
+      summary.store_id = RESOLVED_STORE_ID || fixture.storeId;
+    }
+    return PRODUCT_FIXTURE;
+  } catch (error) {
+    fail("product_fixture", error.message || "product_fixture_failed", error.detail || {});
+  }
 }
 
 function findOrderLogs(data, orderId) {
@@ -143,15 +175,17 @@ async function verifyChannelRoleGate() {
 }
 
 async function createCustomerOrder() {
+  const fixture = await ensureProductFixture();
   const payload = {
     customer: {
       name: "Security Audit",
       phone: `099${Date.now().toString().slice(-7)}`,
       line_user_id: "U_security_audit",
     },
-    items: [{ product_id: PRODUCT_ID, quantity: 1 }],
+    items: [{ product_id: fixture.productId, quantity: 1 }],
     pickup_time: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
     note: "security-audit-smoke",
+    store_id: RESOLVED_STORE_ID || fixture.storeId || undefined,
   };
 
   const resp = await fetchJson(`${BACKEND_URL}/api/customer/orders`, {
@@ -313,10 +347,12 @@ async function main() {
   }
 
   try {
-    ensureEnvVars(["backendUrl", "ownerToken", "staffToken", "storeId", "productId"]);
+    ensureEnvVars(["backendUrl", "ownerToken", "staffToken", "storeId"]);
   } catch (error) {
     fail("missing_env", error.message, { missing: error.missing, summary: error.summary });
   }
+
+  await ensureProductFixture();
 
   const health = await fetchJson(`${BACKEND_URL}/health`);
   if (!health.ok) {

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { ArrowRight, Coffee, Minus, Plus, Trash2 } from "lucide-react";
 
@@ -10,7 +10,9 @@ import {
   readCart,
   removeCartItem,
   updateCartQuantity,
+  reconcileCartWithProductIds,
 } from "@/services/cartStorage";
+import { customerApi } from "@/services/customerApi";
 
 function formatCurrency(value: number): string {
   return new Intl.NumberFormat("th-TH", {
@@ -22,6 +24,31 @@ function formatCurrency(value: number): string {
 
 export default function CartPage() {
   const [items, setItems] = useState<CartItem[]>(() => readCart());
+  const [cartNotice, setCartNotice] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function validateCart() {
+      const currentCart = readCart();
+      if (!currentCart.length) return;
+      try {
+        const menus = await customerApi.listMenu();
+        if (cancelled) return;
+        const validIds = new Set(menus.map((menu) => menu.id));
+        const { items: filtered, removedCount } = reconcileCartWithProductIds(validIds);
+        if (!cancelled && removedCount > 0) {
+          setItems(filtered);
+          setCartNotice("รายการบางส่วนถูกลบออกเพราะร้านอัปเดตเมนูแล้ว โปรดเลือกเมนูอีกครั้ง");
+        }
+      } catch {
+        // Silently ignore menu fetch issues; submission guard will catch later.
+      }
+    }
+    void validateCart();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const estimatedTotal = useMemo(
     () => items.reduce((sum, item) => sum + getCartItemLineTotal(item), 0),
@@ -62,6 +89,12 @@ export default function CartPage() {
         <h1 className="text-2xl font-bold">ตะกร้าของคุณ</h1>
         <p className="text-sm text-muted-foreground">ตรวจสอบรายการก่อนยืนยันคำสั่งซื้อ</p>
       </div>
+
+      {cartNotice ? (
+        <div className="rounded-2xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+          {cartNotice}
+        </div>
+      ) : null}
 
       <div className="space-y-3">
         {items.map((item, index) => (
