@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { ChevronDown, Loader2, Plus, RefreshCw } from "lucide-react";
 import AdminLayout from "@/components/admin/AdminLayout";
 import DataTable from "@/components/shared/DataTable";
@@ -9,7 +9,22 @@ import StatusBadge from "@/components/shared/StatusBadge";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { FileUploadField } from "@/components/ui/file-upload";
-import { storeAdminApi, INGREDIENT_BASE_UNITS, type ApiIngredient, type CreateStockIntakePayload, type IngredientBaseUnit, type IngredientPayload } from "@/services/storeAdminApi";
+import { useProfileRole } from "@/contexts/RoleContext";
+import { STORE_MANAGER_ROLES } from "@/lib/guards";
+import {
+  storeAdminApi,
+  INGREDIENT_BASE_UNITS,
+  INGREDIENT_WASTE_REASONS,
+  type ApiIngredient,
+  type CreateStockIntakePayload,
+  type IngredientBaseUnit,
+  type IngredientPayload,
+  type IngredientWasteCreatePayload,
+  type IngredientWasteReason,
+  type IngredientWasteRecord,
+  type IngredientWasteSummaryResponse,
+  type StockIntake,
+} from "@/services/storeAdminApi";
 
 type FormState = {
   id?: string;
@@ -20,6 +35,15 @@ type FormState = {
   lowStockThreshold: string;
   supplierName: string;
   isActive: boolean;
+};
+
+type WasteFormState = {
+  ingredientId: string;
+  purchaseId: string;
+  quantity: string;
+  reason: IngredientWasteReason;
+  note: string;
+  wastedAt: string;
 };
 
 const BASE_UNIT_LABELS: Record<IngredientBaseUnit, string> = {
@@ -114,6 +138,22 @@ const formatDateOnly = (value?: string | Date) => {
 
 const isIngredientBaseUnit = (value: string): value is IngredientBaseUnit => INGREDIENT_BASE_UNITS.includes(value as IngredientBaseUnit);
 
+const WASTE_REASON_LABELS: Record<IngredientWasteReason, string> = {
+  expired_waste: "หมดอายุ",
+  damaged_waste: "เสียหาย",
+  spill_waste: "หก/สูญเสียระหว่างทำงาน",
+  quality_issue_waste: "คุณภาพไม่ผ่าน",
+  manual_waste: "ปรับปรุงยอดด้วยมือ",
+  other_waste: "อื่น ๆ",
+};
+
+const WASTE_REASON_OPTIONS = INGREDIENT_WASTE_REASONS.map((reason) => ({
+  value: reason,
+  label: WASTE_REASON_LABELS[reason],
+}));
+
+const currencyFormatter = new Intl.NumberFormat("th-TH", { style: "currency", currency: "THB", minimumFractionDigits: 2 });
+
 const emptyForm: FormState = {
   name: "",
   unit: "",
@@ -140,6 +180,10 @@ type IntakeFormState = {
   receiptFile?: File | null;
   receiptUploading?: boolean;
   receiptError?: string | null;
+  isPerishable: boolean;
+  lotCode: string;
+  expiresAt: string;
+  expiryNote: string;
 };
 
 const buildIntakeForm = (ingredient?: ApiIngredient): IntakeFormState => ({
@@ -158,6 +202,19 @@ const buildIntakeForm = (ingredient?: ApiIngredient): IntakeFormState => ({
   receiptFile: null,
   receiptUploading: false,
   receiptError: null,
+  isPerishable: false,
+  lotCode: "",
+  expiresAt: "",
+  expiryNote: "",
+});
+
+const buildWasteForm = (): WasteFormState => ({
+  ingredientId: "",
+  purchaseId: "",
+  quantity: "",
+  reason: "expired_waste",
+  note: "",
+  wastedAt: formatDateTimeLocal(new Date()),
 });
 
 const formatDateTime = (value?: string | null) => {
@@ -172,6 +229,9 @@ const formatDateTime = (value?: string | null) => {
 };
 
 export default function StoreAdminIngredientsPage() {
+  const { role, loading: roleLoading } = useProfileRole();
+  const isManagerRole = role ? STORE_MANAGER_ROLES.includes(role) : false;
+  const shouldShowWasteSection = !roleLoading && isManagerRole;
   const [rows, setRows] = useState<ApiIngredient[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -184,6 +244,16 @@ export default function StoreAdminIngredientsPage() {
   const [intakeForm, setIntakeForm] = useState<IntakeFormState>(buildIntakeForm());
   const [initialIntakeForm, setInitialIntakeForm] = useState<IntakeFormState | null>(null);
   const [additionalOpen, setAdditionalOpen] = useState(false);
+  const [wasteRecords, setWasteRecords] = useState<IngredientWasteRecord[]>([]);
+  const [wasteSummary, setWasteSummary] = useState<IngredientWasteSummaryResponse | null>(null);
+  const [wasteLoading, setWasteLoading] = useState(false);
+  const [wasteError, setWasteError] = useState("");
+  const [wasteInfo, setWasteInfo] = useState("");
+  const [wasteFormError, setWasteFormError] = useState("");
+  const [wasteForm, setWasteForm] = useState<WasteFormState>(buildWasteForm());
+  const [wasteSubmitting, setWasteSubmitting] = useState(false);
+  const [recentIntakes, setRecentIntakes] = useState<StockIntake[]>([]);
+  const [recentIntakesLoading, setRecentIntakesLoading] = useState(false);
 
   const valid = useMemo(
     () =>
@@ -222,6 +292,19 @@ export default function StoreAdminIngredientsPage() {
     return Number(intakeForm.totalCost || 0) / normalized;
   }, [normalizedPreview, intakeForm.totalCost]);
 
+  const selectedWasteIngredient = useMemo(() => rows.find((r) => r.id === wasteForm.ingredientId), [rows, wasteForm.ingredientId]);
+  const ingredientLookup = useMemo(() => {
+    const map: Record<string, ApiIngredient> = {};
+    rows.forEach((row) => {
+      map[row.id] = row;
+    });
+    return map;
+  }, [rows]);
+  const wasteFormValid = useMemo(() => {
+    const qty = Number(wasteForm.quantity);
+    return Boolean(wasteForm.ingredientId && qty > 0);
+  }, [wasteForm.ingredientId, wasteForm.quantity]);
+
   const refresh = async () => {
     setRefreshing(true);
     setError("");
@@ -239,6 +322,29 @@ export default function StoreAdminIngredientsPage() {
   useEffect(() => {
     void refresh();
   }, []);
+
+  const refreshWasteData = useCallback(async () => {
+    if (!isManagerRole) return;
+    setWasteLoading(true);
+    setWasteError("");
+    try {
+      const [records, summary] = await Promise.all([
+        storeAdminApi.listIngredientWasteRecords({ limit: 50 }),
+        storeAdminApi.getIngredientWasteSummary(),
+      ]);
+      setWasteRecords(records);
+      setWasteSummary(summary);
+    } catch (err: any) {
+      setWasteError(err?.message || "โหลดข้อมูลการทิ้งไม่สำเร็จ");
+    } finally {
+      setWasteLoading(false);
+    }
+  }, [isManagerRole]);
+
+  useEffect(() => {
+    if (roleLoading) return;
+    void refreshWasteData();
+  }, [roleLoading, refreshWasteData]);
 
   useEffect(() => {
     if (!intakeOpen) return;
@@ -258,6 +364,31 @@ export default function StoreAdminIngredientsPage() {
       return changed ? next : prev;
     });
   }, [intakeOpen, intakeForm.ingredientId, rows]);
+
+  useEffect(() => {
+    if (!isManagerRole || !wasteForm.ingredientId) {
+      setRecentIntakes([]);
+      return;
+    }
+    let cancelled = false;
+    setRecentIntakesLoading(true);
+    storeAdminApi
+      .listStockIntakes({ ingredient_id: wasteForm.ingredientId, limit: 10 })
+      .then((list) => {
+        if (!cancelled) {
+          setRecentIntakes(list);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setRecentIntakes([]);
+      })
+      .finally(() => {
+        if (!cancelled) setRecentIntakesLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isManagerRole, wasteForm.ingredientId]);
 
   const handleSubmit = async () => {
     if (!valid) {
@@ -310,6 +441,71 @@ export default function StoreAdminIngredientsPage() {
     void refresh();
   };
 
+  const handleWasteChange = <K extends keyof WasteFormState>(field: K, value: WasteFormState[K]) => {
+    setWasteForm((prev) => {
+      const next = { ...prev, [field]: value };
+      if (field === "ingredientId") {
+        next.purchaseId = "";
+      }
+      return next;
+    });
+    if (wasteFormError) setWasteFormError("");
+    if (wasteInfo) setWasteInfo("");
+  };
+
+  const resetWasteForm = () => {
+    setWasteForm(buildWasteForm());
+    setWasteFormError("");
+  };
+
+  const submitWaste = async () => {
+    if (!wasteFormValid) {
+      setWasteFormError("กรุณาเลือกวัตถุดิบและจำนวนที่ต้องการตัด");
+      return;
+    }
+    const qty = Number(wasteForm.quantity);
+    if (!Number.isFinite(qty) || qty <= 0) {
+      setWasteFormError("จำนวนที่ทิ้งต้องมากกว่า 0");
+      return;
+    }
+    const payload: IngredientWasteCreatePayload = {
+      ingredient_id: wasteForm.ingredientId,
+      quantity: qty,
+      reason: wasteForm.reason,
+    };
+    if (wasteForm.purchaseId) payload.purchase_id = wasteForm.purchaseId;
+    if (wasteForm.note.trim()) payload.note = wasteForm.note.trim();
+    if (wasteForm.wastedAt) {
+      const wastedAtDate = new Date(wasteForm.wastedAt);
+      if (!Number.isNaN(wastedAtDate.getTime())) {
+        payload.wasted_at = wastedAtDate.toISOString();
+      }
+    }
+    setWasteSubmitting(true);
+    setWasteFormError("");
+    setWasteInfo("");
+    try {
+      await storeAdminApi.createIngredientWaste(payload);
+      setWasteInfo("บันทึกการทิ้งสต็อกแล้ว");
+      resetWasteForm();
+      void refreshWasteData();
+      void refresh();
+    } catch (err: any) {
+      const reason = err?.message || "บันทึกการทิ้งไม่สำเร็จ";
+      if (reason === "insufficient_stock_for_waste") {
+        setWasteFormError("สต็อกไม่เพียงพอสำหรับจำนวนที่เลือก");
+      } else if (reason === "purchase_mismatch") {
+        setWasteFormError("รายการซื้อที่เลือกไม่ตรงกับวัตถุดิบนี้");
+      } else if (reason === "waste_reason_invalid") {
+        setWasteFormError("เหตุผลไม่ถูกต้อง");
+      } else {
+        setWasteFormError(reason);
+      }
+    } finally {
+      setWasteSubmitting(false);
+    }
+  };
+
   const openIntakeModal = (ingredient?: ApiIngredient) => {
     if (!rows.length && !ingredient) {
       setError("กรุณาเพิ่มวัตถุดิบก่อนบันทึกสต็อก");
@@ -347,7 +543,7 @@ export default function StoreAdminIngredientsPage() {
     closeIntakeModal();
   };
 
-  const handleIntakeChange = (field: keyof IntakeFormState, value: string) => {
+  const handleIntakeChange = (field: keyof IntakeFormState, value: IntakeFormState[keyof IntakeFormState]) => {
     setIntakeForm((prev) => ({ ...prev, [field]: value }));
   };
 
@@ -371,11 +567,20 @@ export default function StoreAdminIngredientsPage() {
       conversion_factor: Number(intakeForm.conversionFactor),
       total_cost: Number(intakeForm.totalCost),
       payment_status: intakeForm.paymentStatus,
+      is_perishable: intakeForm.isPerishable,
     };
     if (intakeForm.supplierName.trim()) payload.supplier_name = intakeForm.supplierName.trim();
     if (intakeForm.note.trim()) payload.note = intakeForm.note.trim();
     if (intakeForm.paidAt) payload.paid_at = new Date(intakeForm.paidAt).toISOString();
     if (intakeForm.dueDate) payload.due_date = intakeForm.dueDate;
+    if (intakeForm.lotCode.trim()) payload.lot_code = intakeForm.lotCode.trim();
+    if (intakeForm.expiryNote.trim()) payload.expiry_note = intakeForm.expiryNote.trim();
+    if (intakeForm.expiresAt) {
+      const expiresDate = new Date(`${intakeForm.expiresAt}T00:00:00`);
+      if (!Number.isNaN(expiresDate.getTime())) {
+        payload.expires_at = expiresDate.toISOString();
+      }
+    }
 
     setIntakeSubmitting(true);
     setIntakeError("");
@@ -553,6 +758,152 @@ export default function StoreAdminIngredientsPage() {
         />
       )}
 
+      {shouldShowWasteSection ? (
+        <section className="mt-10 space-y-4">
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="stat-card space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="section-title text-base">สรุปการทิ้งสต็อก</h3>
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-1 text-xs rounded border px-2 py-1"
+                  onClick={() => void refreshWasteData()}
+                  disabled={wasteLoading}
+                >
+                  <RefreshCw className={`h-3 w-3 ${wasteLoading ? "animate-spin" : ""}`} /> รีเฟรช
+                </button>
+              </div>
+              {wasteSummary ? (
+                <div className="grid gap-3 text-sm">
+                  <div>
+                    <p className="text-muted-foreground">จำนวนที่ทิ้งรวม</p>
+                    <p className="text-xl font-semibold">{wasteSummary.total_quantity.toLocaleString(undefined, { maximumFractionDigits: 2 })} หน่วย</p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">ต้นทุนที่ตัดทิ้ง</p>
+                    <p className="text-xl font-semibold">{currencyFormatter.format(wasteSummary.total_cost || 0)}</p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">จำนวนรายการ</p>
+                    <p className="text-xl font-semibold">{wasteSummary.record_count}</p>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">ยังไม่มีข้อมูลการทิ้งสต็อก</p>
+              )}
+              {wasteError ? <p className="text-sm text-destructive">{wasteError}</p> : null}
+            </div>
+            <div className="stat-card space-y-3">
+              <h3 className="section-title text-base">บันทึกการทิ้งสต็อก</h3>
+              <div className="grid gap-3">
+                <FormField label="วัตถุดิบที่จะตัดสต็อก">
+                  <select className="form-input" value={wasteForm.ingredientId} onChange={(e) => handleWasteChange("ingredientId", e.target.value)}>
+                    <option value="" disabled hidden>
+                      เลือกวัตถุดิบ
+                    </option>
+                    {rows.map((row) => (
+                      <option key={row.id} value={row.id}>
+                        {row.name}
+                      </option>
+                    ))}
+                  </select>
+                </FormField>
+                {selectedWasteIngredient ? (
+                  <p className="text-xs text-muted-foreground">
+                    สต็อกคงเหลือ: {Number(selectedWasteIngredient.current_stock).toLocaleString(undefined, { maximumFractionDigits: 2 })} {selectedWasteIngredient.unit}
+                  </p>
+                ) : null}
+                <FormField label="จำนวน" hint="ใช้หน่วยฐานเดียวกับวัตถุดิบ">
+                  <input className="form-input" type="number" min={0} step="0.1" value={wasteForm.quantity} onChange={(e) => handleWasteChange("quantity", e.target.value)} />
+                </FormField>
+                <FormField label="เหตุผล">
+                  <select
+                    className="form-input"
+                    value={wasteForm.reason}
+                    onChange={(e) => handleWasteChange("reason", e.target.value as IngredientWasteReason)}
+                  >
+                    {WASTE_REASON_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </FormField>
+                <FormField label="อ้างอิงรายการซื้อ (ถ้ามี)" hint="ช่วยคำนวณต้นทุนล็อตนั้น">
+                  <select className="form-input" value={wasteForm.purchaseId} onChange={(e) => handleWasteChange("purchaseId", e.target.value)}>
+                    <option value="">ไม่ระบุ</option>
+                    {recentIntakes.map((intake) => (
+                      <option key={intake.id} value={intake.id}>
+                        {formatDateTime(intake.created_at)} • {intake.lot_code ? `Lot ${intake.lot_code}` : `${Number(intake.quantity).toLocaleString()} ${intake.purchase_unit}`}
+                        {intake.expires_at ? ` • หมดอายุ ${formatDateOnly(intake.expires_at)}` : ""}
+                      </option>
+                    ))}
+                  </select>
+                  {recentIntakesLoading ? <p className="text-xs text-muted-foreground mt-1">กำลังโหลดประวัติการซื้อ...</p> : null}
+                </FormField>
+                <FormField label="วันที่ตัดสต็อก">
+                  <input type="datetime-local" className="form-input" value={wasteForm.wastedAt} onChange={(e) => handleWasteChange("wastedAt", e.target.value)} />
+                </FormField>
+                <FormField label="บันทึกเพิ่มเติม (ไม่บังคับ)">
+                  <textarea className="form-input" rows={2} value={wasteForm.note} onChange={(e) => handleWasteChange("note", e.target.value)} />
+                </FormField>
+              </div>
+              {wasteFormError ? <p className="text-sm text-destructive">{wasteFormError}</p> : null}
+              {wasteInfo ? <p className="text-sm text-emerald-600">{wasteInfo}</p> : null}
+              <button
+                type="button"
+                className="px-4 py-2 rounded bg-primary text-primary-foreground disabled:opacity-50"
+                disabled={!wasteFormValid || wasteSubmitting}
+                onClick={submitWaste}
+              >
+                {wasteSubmitting ? "กำลังบันทึก..." : "บันทึกการทิ้ง"}
+              </button>
+            </div>
+          </div>
+
+          <div className="stat-card space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="section-title text-base">รายการทิ้งล่าสุด</h3>
+              <span className="text-xs text-muted-foreground">ดูได้เฉพาะสิทธิ์ผู้จัดการขึ้นไป</span>
+            </div>
+            {wasteLoading && !wasteRecords.length ? (
+              <p className="text-sm text-muted-foreground">กำลังโหลดข้อมูล...</p>
+            ) : wasteRecords.length === 0 ? (
+              <p className="text-sm text-muted-foreground">ยังไม่มีรายการทิ้ง</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-muted-foreground">
+                      <th className="py-2 pr-4">วันเวลา</th>
+                      <th className="py-2 pr-4">วัตถุดิบ</th>
+                      <th className="py-2 pr-4">จำนวน</th>
+                      <th className="py-2 pr-4">เหตุผล</th>
+                      <th className="py-2 pr-4">ต้นทุน</th>
+                      <th className="py-2 pr-4">หมายเหตุ</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {wasteRecords.map((record) => (
+                      <tr key={record.id} className="border-t">
+                        <td className="py-2 pr-4 whitespace-nowrap">{formatDateTime(record.wasted_at)}</td>
+                        <td className="py-2 pr-4">{ingredientLookup[record.ingredient_id]?.name || record.ingredient_id}</td>
+                        <td className="py-2 pr-4">
+                          {Number(record.quantity).toLocaleString(undefined, { maximumFractionDigits: 2 })} {record.unit || ingredientLookup[record.ingredient_id]?.unit || "หน่วย"}
+                        </td>
+                        <td className="py-2 pr-4">{WASTE_REASON_LABELS[record.reason]}</td>
+                        <td className="py-2 pr-4">{currencyFormatter.format(record.total_cost || 0)}</td>
+                        <td className="py-2 pr-4 text-muted-foreground">{record.note || "-"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </section>
+      ) : null}
+
       <Dialog open={intakeOpen} onOpenChange={handleDialogOpenChange}>
         <DialogContent className="max-w-3xl">
           <DialogHeader>
@@ -656,6 +1007,41 @@ export default function StoreAdminIngredientsPage() {
               {intakeForm.receiptUploading ? (
                 <p className="text-xs text-muted-foreground flex items-center gap-1">
                   <Loader2 className="h-3 w-3 animate-spin" /> กำลังอัปโหลดใบเสร็จ...
+                </p>
+              ) : null}
+            </div>
+            <div className="rounded-lg border p-4 space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="font-medium text-sm">วันหมดอายุ / Lot (ถ้ามี)</p>
+                  <p className="text-xs text-muted-foreground">ช่วยให้วางแผนตัดสต็อก และติดตามล็อตที่มีปัญหา</p>
+                </div>
+                <label className="inline-flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    className="form-checkbox"
+                    checked={intakeForm.isPerishable}
+                    onChange={(e) => handleIntakeChange("isPerishable", e.target.checked)}
+                  />
+                  มีวันหมดอายุ
+                </label>
+              </div>
+              <div className="grid md:grid-cols-2 gap-3">
+                <FormField label="รหัส Lot (ไม่บังคับ)">
+                  <input className="form-input" value={intakeForm.lotCode} onChange={(e) => handleIntakeChange("lotCode", e.target.value)} placeholder="เช่น LOT-0425" />
+                </FormField>
+                <FormField label="วันหมดอายุ (ไม่บังคับ)">
+                  <input type="date" className="form-input" value={intakeForm.expiresAt} onChange={(e) => handleIntakeChange("expiresAt", e.target.value)} />
+                </FormField>
+                <div className="md:col-span-2">
+                  <FormField label="หมายเหตุเพิ่มเติม (เช่น วิธีเก็บ, กลิ่น, สี)">
+                    <textarea className="form-input" rows={2} value={intakeForm.expiryNote} onChange={(e) => handleIntakeChange("expiryNote", e.target.value)} />
+                  </FormField>
+                </div>
+              </div>
+              {intakeForm.isPerishable && !intakeForm.expiresAt ? (
+                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2">
+                  แนะนำให้ระบุวันหมดอายุ เพื่อเตือนให้ใช้ก่อนตัดสต็อก (ไม่บังคับ)
                 </p>
               ) : null}
             </div>

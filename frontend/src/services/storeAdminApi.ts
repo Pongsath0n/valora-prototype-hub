@@ -154,6 +154,10 @@ export type StockIntake = {
   created_by?: string | null;
   movement_id?: string | null;
   movement_type?: string | null;
+  is_perishable?: boolean;
+  lot_code?: string | null;
+  expires_at?: string | null;
+  expiry_note?: string | null;
 };
 
 export type CreateStockIntakePayload = {
@@ -169,11 +173,82 @@ export type CreateStockIntakePayload = {
   note?: string;
   receipt_url?: string;
   receipt_storage_path?: string;
+  is_perishable?: boolean;
+  lot_code?: string;
+  expires_at?: string;
+  expiry_note?: string;
 };
 
 export type StockIntakeResponse = {
   intake: StockIntake;
   ingredient: ApiIngredient;
+};
+
+export type IngredientWasteReason =
+  | "expired_waste"
+  | "damaged_waste"
+  | "spill_waste"
+  | "quality_issue_waste"
+  | "manual_waste"
+  | "other_waste";
+
+export const INGREDIENT_WASTE_REASONS: IngredientWasteReason[] = [
+  "expired_waste",
+  "damaged_waste",
+  "spill_waste",
+  "quality_issue_waste",
+  "manual_waste",
+  "other_waste",
+];
+
+export type IngredientWasteRecord = {
+  id: string;
+  store_id: string;
+  ingredient_id: string;
+  purchase_id?: string | null;
+  stock_movement_id?: string | null;
+  quantity: number;
+  unit?: string | null;
+  unit_cost_snapshot?: number | null;
+  total_cost?: number | null;
+  reason: IngredientWasteReason;
+  wasted_at?: string | null;
+  note?: string | null;
+  created_by?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+export type IngredientWasteListResponse = {
+  items: IngredientWasteRecord[];
+  store_id: string;
+};
+
+export type IngredientWasteSummaryResponse = {
+  store_id: string;
+  total_quantity: number;
+  total_cost: number;
+  record_count: number;
+  filters: Record<string, unknown>;
+};
+
+export type IngredientWasteSummaryFilters = {
+  ingredient_id?: string;
+  start_date?: string;
+  end_date?: string;
+};
+
+export type IngredientWasteCreatePayload = {
+  ingredient_id: string;
+  quantity: number;
+  reason: IngredientWasteReason;
+  purchase_id?: string;
+  note?: string;
+  wasted_at?: string;
+};
+
+type IngredientWasteResponse = {
+  record: IngredientWasteRecord;
 };
 
 export type ApiRecipe = {
@@ -1195,6 +1270,41 @@ export const storeAdminApi = {
       throw new Error(typeof reason === "string" ? reason : "receipt_upload_failed");
     }
     return body as StockIntake;
+  },
+
+  async listIngredientWasteRecords(params?: {
+    ingredient_id?: string;
+    reason?: IngredientWasteReason;
+    start_date?: string;
+    end_date?: string;
+    limit?: number;
+  }): Promise<IngredientWasteRecord[]> {
+    const search = new URLSearchParams();
+    if (params?.ingredient_id) search.set("ingredient_id", params.ingredient_id);
+    if (params?.reason) search.set("reason", params.reason);
+    if (params?.start_date) search.set("start_date", params.start_date);
+    if (params?.end_date) search.set("end_date", params.end_date);
+    if (params?.limit) search.set("limit", String(params.limit));
+    const path = `/api/store-admin/ingredients/waste-records${search.size ? `?${search}` : ""}`;
+    const data = await request<IngredientWasteListResponse>(path);
+    return data.items ?? [];
+  },
+
+  async createIngredientWaste(payload: IngredientWasteCreatePayload): Promise<IngredientWasteRecord> {
+    const data = await request<IngredientWasteResponse>(`/api/store-admin/ingredients/waste-records`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    return data.record;
+  },
+
+  async getIngredientWasteSummary(filters?: IngredientWasteSummaryFilters): Promise<IngredientWasteSummaryResponse> {
+    const search = new URLSearchParams();
+    if (filters?.ingredient_id) search.set("ingredient_id", filters.ingredient_id);
+    if (filters?.start_date) search.set("start_date", filters.start_date);
+    if (filters?.end_date) search.set("end_date", filters.end_date);
+    const path = `/api/store-admin/ingredients/waste-summary${search.size ? `?${search}` : ""}`;
+    return request<IngredientWasteSummaryResponse>(path);
   },
 
   // Recipes
