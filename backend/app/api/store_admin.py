@@ -156,6 +156,14 @@ _PURCHASE_COST_SOURCE = "purchase_derived"
 _STOCK_INTAKE_PAYMENT_STATUSES: Set[str] = {"paid", "unpaid"}
 _PURCHASE_RECEIPT_ALLOWED_TYPES: Set[str] = {"image/jpeg", "image/jpg", "image/png", "image/webp"}
 _INGREDIENT_BASE_UNITS: Set[str] = {"g", "ml", "pcs", "set", "bottle"}
+_WASTE_REASON_SET: Set[str] = {
+    "expired_waste",
+    "damaged_waste",
+    "spill_waste",
+    "quality_issue_waste",
+    "manual_waste",
+    "other_waste",
+}
 
 _PLANNING_MIX_LOOKBACK_DAYS = 30
 _PLANNING_MAX_MIX_ORDERS = 500
@@ -488,6 +496,10 @@ class StockIntakeCreate(BaseModel):
     note: Optional[str] = None
     receipt_url: Optional[str] = None
     receipt_storage_path: Optional[str] = None
+    is_perishable: Optional[bool] = False
+    lot_code: Optional[str] = None
+    expires_at: Optional[str] = None
+    expiry_note: Optional[str] = None
 
 
 class StockIntakeSummary(BaseModel):
@@ -513,6 +525,10 @@ class StockIntakeSummary(BaseModel):
     ingredient_unit: Optional[str] = None
     movement_id: Optional[str] = None
     movement_type: Optional[str] = None
+    is_perishable: bool = False
+    lot_code: Optional[str] = None
+    expires_at: Optional[str] = None
+    expiry_note: Optional[str] = None
 
 
 class StockIntakeResponse(BaseModel):
@@ -523,6 +539,66 @@ class StockIntakeResponse(BaseModel):
 class StockIntakeListResponse(BaseModel):
     items: List[StockIntakeSummary]
     store_id: str
+
+
+WasteReason = Literal[
+    "expired_waste",
+    "damaged_waste",
+    "spill_waste",
+    "quality_issue_waste",
+    "manual_waste",
+    "other_waste",
+]
+
+
+class IngredientWasteCreate(BaseModel):
+    ingredient_id: str
+    quantity: float
+    reason: WasteReason
+    purchase_id: Optional[str] = None
+    wasted_at: Optional[str] = None
+    note: Optional[str] = None
+
+
+class IngredientWasteRecordSummary(BaseModel):
+    id: str
+    store_id: str
+    ingredient_id: str
+    purchase_id: Optional[str] = None
+    stock_movement_id: Optional[str] = None
+    quantity: float
+    unit: Optional[str] = None
+    unit_cost_snapshot: Optional[float] = None
+    total_cost: Optional[float] = None
+    reason: WasteReason
+    wasted_at: Optional[str] = None
+    note: Optional[str] = None
+    created_by: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class IngredientWasteListResponse(BaseModel):
+    items: List[IngredientWasteRecordSummary]
+    store_id: str
+
+
+class IngredientWasteSummaryResponse(BaseModel):
+    store_id: str
+    total_quantity: float
+    total_cost: float
+    record_count: int
+    filters: Dict[str, Any]
+
+
+class IngredientWasteResponse(BaseModel):
+    record: IngredientWasteRecordSummary
+
+
+class IngredientWasteSummaryFilters(BaseModel):
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    ingredient_id: Optional[str] = None
 
 
 class RecipeCreate(BaseModel):
@@ -3501,6 +3577,20 @@ def _normalize_optional_date_string(value: Optional[Union[str, datetime]], *, fi
         return parsed_dt.date().isoformat()
 
 
+def _normalize_optional_datetime_or_date(value: Optional[Union[str, datetime]], *, field: str) -> Optional[str]:
+    dt_value = _normalize_optional_datetime_string(value, field=field)
+    if dt_value:
+        return dt_value
+    date_value = _normalize_optional_date_string(value, field=field)
+    if date_value:
+        try:
+            parsed = datetime.strptime(date_value, "%Y-%m-%d")
+            return parsed.replace(tzinfo=timezone.utc).isoformat()
+        except Exception:
+            return None
+    return None
+
+
 def _sanitize_stock_intake_payload(payload: StockIntakeCreate) -> Dict[str, Any]:
     data = payload.model_dump(exclude_unset=True)
     ingredient_id = (data.get("ingredient_id") or "").strip()
@@ -3529,6 +3619,10 @@ def _sanitize_stock_intake_payload(payload: StockIntakeCreate) -> Dict[str, Any]
     note = (data.get("note") or "").strip() or None
     receipt_url = (data.get("receipt_url") or "").strip() or None
     receipt_storage_path = (data.get("receipt_storage_path") or "").strip() or None
+    lot_code = (data.get("lot_code") or "").strip() or None
+    expiry_note = (data.get("expiry_note") or "").strip() or None
+    is_perishable = bool(data.get("is_perishable"))
+    expires_at = _normalize_optional_datetime_string(data.get("expires_at"), field="expires_at")
 
     return {
         "ingredient_id": ingredient_id,
@@ -3544,6 +3638,10 @@ def _sanitize_stock_intake_payload(payload: StockIntakeCreate) -> Dict[str, Any]
         "note": note,
         "receipt_url": receipt_url,
         "receipt_storage_path": receipt_storage_path,
+        "is_perishable": is_perishable,
+        "lot_code": lot_code,
+        "expires_at": expires_at,
+        "expiry_note": expiry_note,
     }
 
 
@@ -3584,6 +3682,10 @@ def _stock_intake_select_clause(include_relations: bool = True) -> str:
         "note",
         "receipt_url",
         "receipt_storage_path",
+        "is_perishable",
+        "lot_code",
+        "expires_at",
+        "expiry_note",
         "created_at",
         "created_by",
     ]
@@ -3653,6 +3755,167 @@ def _map_stock_intake(row: Dict[str, Any]) -> StockIntakeSummary:
         ingredient_unit=(ingredient_rel or {}).get("unit") if isinstance(ingredient_rel, dict) else None,
         movement_id=str(row.get("movement_id")) if row.get("movement_id") else None,
         movement_type=row.get("movement_type"),
+        is_perishable=bool(row.get("is_perishable")),
+        lot_code=row.get("lot_code"),
+        expires_at=row.get("expires_at"),
+        expiry_note=row.get("expiry_note"),
+    )
+
+
+def _sanitize_waste_payload(payload: IngredientWasteCreate) -> Dict[str, Any]:
+    data = payload.model_dump(exclude_unset=True)
+    ingredient_id = (data.get("ingredient_id") or "").strip()
+    if not ingredient_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="ingredient_required")
+    quantity = _safe_float(data.get("quantity"))
+    if quantity <= 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="waste_quantity_positive")
+    reason = str(data.get("reason") or "").strip().lower()
+    if reason not in _WASTE_REASON_SET:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="waste_reason_invalid")
+    purchase_id = (data.get("purchase_id") or "").strip() or None
+    note = _strip_text(data.get("note"))
+    wasted_at = _normalize_optional_datetime_string(data.get("wasted_at"), field="wasted_at")
+    if not wasted_at:
+        wasted_at = datetime.utcnow().replace(tzinfo=timezone.utc).isoformat()
+
+    return {
+        "ingredient_id": ingredient_id,
+        "quantity": quantity,
+        "reason": reason,
+        "purchase_id": purchase_id,
+        "note": note,
+        "wasted_at": wasted_at,
+    }
+
+
+def _get_purchase_snapshot(client: Client, purchase_id: str, store_id: str) -> Dict[str, Any]:
+    resp = (
+        client.table("ingredient_purchases")
+        .select("*")
+        .eq("id", purchase_id)
+        .eq("store_id", store_id)
+        .limit(1)
+        .execute()
+    )
+    err = getattr(resp, "error", None)
+    if err:
+        raise HTTPException(status_code=500, detail="purchase_lookup_failed")
+    rows = getattr(resp, "data", None) or []
+    if not rows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="purchase_not_found")
+    return rows[0]
+
+
+def _resolve_waste_unit_cost_snapshot(
+    ingredient_row: Dict[str, Any], purchase_row: Optional[Dict[str, Any]]
+) -> float:
+    if purchase_row:
+        cost = _safe_float(purchase_row.get("unit_cost_snapshot"))
+        if cost > 0:
+            return cost
+    return _safe_float(ingredient_row.get("cost_per_unit"))
+
+
+def _update_ingredient_stock_for_waste(
+    client: Client,
+    ingredient_id: str,
+    store_id: str,
+    *,
+    new_stock: float,
+) -> None:
+    payload: Dict[str, Any] = {
+        "stock_on_hand": new_stock,
+        "cost_updated_at": datetime.utcnow().replace(tzinfo=timezone.utc).isoformat(),
+    }
+
+    def _exec(update_payload: Dict[str, Any]):
+        return client.table("ingredients").update(update_payload).eq("id", ingredient_id).eq("store_id", store_id).execute()
+
+    attempt = dict(payload)
+    resp = _exec(attempt)
+    err = getattr(resp, "error", None)
+    if err and _is_missing_column(err, "stock_on_hand"):
+        stock_value = attempt.pop("stock_on_hand", None)
+        if stock_value is not None:
+            attempt["current_stock"] = stock_value
+        resp = _exec(attempt)
+        err = getattr(resp, "error", None)
+    if err and _is_missing_column(err, "cost_updated_at"):
+        attempt.pop("cost_updated_at", None)
+        resp = _exec(attempt)
+        err = getattr(resp, "error", None)
+    if err:
+        raise HTTPException(status_code=500, detail="ingredient_waste_update_failed")
+
+
+def _insert_waste_stock_movement(
+    client: Client,
+    store_id: str,
+    ingredient_id: str,
+    *,
+    quantity: float,
+    unit: Optional[str],
+    purchase_id: Optional[str],
+    reason: str,
+    unit_cost_snapshot: float,
+    created_by: Optional[str],
+) -> Dict[str, Any]:
+    payload: Dict[str, Any] = {
+        "store_id": store_id,
+        "ingredient_id": ingredient_id,
+        "movement_type": "adjust",
+        "quantity": -abs(quantity),
+        "unit": unit,
+        "movement_reason": reason,
+        "unit_cost_snapshot": unit_cost_snapshot,
+        "created_by": created_by,
+    }
+    if purchase_id:
+        payload["purchase_id"] = purchase_id
+
+    while True:
+        resp = client.table("stock_movements").insert(payload).execute()
+        err = getattr(resp, "error", None)
+        if not err:
+            rows = getattr(resp, "data", None) or []
+            return rows[0] if rows else payload
+        if "movement_reason" in payload and _is_missing_column(err, "movement_reason"):
+            reason_value = payload.pop("movement_reason", None) or reason
+            payload["reason"] = reason_value
+            continue
+        if "unit" in payload and _is_missing_column(err, "unit"):
+            payload.pop("unit", None)
+            continue
+        if "purchase_id" in payload and _is_missing_column(err, "purchase_id"):
+            payload.pop("purchase_id", None)
+            continue
+        if "unit_cost_snapshot" in payload and _is_missing_column(err, "unit_cost_snapshot"):
+            payload.pop("unit_cost_snapshot", None)
+            continue
+        if "created_by" in payload and _is_missing_column(err, "created_by"):
+            payload.pop("created_by", None)
+            continue
+        raise HTTPException(status_code=500, detail="stock_movement_create_failed")
+
+
+def _map_waste_record(row: Dict[str, Any]) -> IngredientWasteRecordSummary:
+    return IngredientWasteRecordSummary(
+        id=str(row.get("id")),
+        store_id=str(row.get("store_id")),
+        ingredient_id=str(row.get("ingredient_id")),
+        purchase_id=row.get("purchase_id"),
+        stock_movement_id=row.get("stock_movement_id"),
+        quantity=_safe_float(row.get("quantity")),
+        unit=row.get("unit"),
+        unit_cost_snapshot=_safe_float(row.get("unit_cost_snapshot")),
+        total_cost=_safe_float(row.get("total_cost")),
+        reason=str(row.get("reason") or ""),
+        wasted_at=row.get("wasted_at"),
+        note=row.get("note"),
+        created_by=row.get("created_by"),
+        created_at=row.get("created_at"),
+        updated_at=row.get("updated_at"),
     )
 
 
@@ -3823,6 +4086,172 @@ def get_stock_intake(intake_id: str, authorization: Optional[str] = Header(None)
     return StockIntakeResponse(intake=mapped, ingredient=_map_ingredient(ingredient_row))
 
 
+@router.get("/ingredients/waste-records")
+def list_ingredient_waste_records(
+    authorization: Optional[str] = Header(None),
+    store_id: Optional[str] = None,
+    ingredient_id: Optional[str] = None,
+    reason: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    limit: int = 100,
+) -> IngredientWasteListResponse:
+    ctx = _get_ctx(authorization)
+    store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
+    _require_manager(role)
+
+    limit_value = max(1, min(limit, 250))
+    query = (
+        ctx["client"].table("ingredient_waste_records")
+        .select("*")
+        .eq("store_id", store_id_resolved)
+        .order("wasted_at", desc=True)
+        .limit(limit_value)
+    )
+    if ingredient_id:
+        query = query.eq("ingredient_id", ingredient_id)
+    normalized_reason = (reason or "").strip().lower()
+    if normalized_reason:
+        query = query.eq("reason", normalized_reason)
+    start_iso = _normalize_optional_datetime_or_date(start_date, field="start_date")
+    end_iso = _normalize_optional_datetime_or_date(end_date, field="end_date")
+    if start_iso:
+        query = query.gte("wasted_at", start_iso)
+    if end_iso:
+        query = query.lte("wasted_at", end_iso)
+
+    resp = query.execute()
+    err = getattr(resp, "error", None)
+    if err:
+        raise HTTPException(status_code=500, detail="ingredient_waste_query_failed")
+    rows = getattr(resp, "data", None) or []
+    return IngredientWasteListResponse(items=[_map_waste_record(r) for r in rows], store_id=store_id_resolved)
+
+
+@router.post("/ingredients/waste-records", status_code=status.HTTP_201_CREATED)
+def create_ingredient_waste(
+    payload: IngredientWasteCreate,
+    authorization: Optional[str] = Header(None),
+    store_id: Optional[str] = None,
+) -> IngredientWasteResponse:
+    ctx = _get_ctx(authorization)
+    store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
+    _require_manager(role)
+
+    sanitized = _sanitize_waste_payload(payload)
+    ingredient_row = _get_ingredient_snapshot(ctx["client"], sanitized["ingredient_id"], store_id_resolved)
+    available_stock = _safe_float(ingredient_row.get("stock_on_hand") or ingredient_row.get("current_stock"))
+    if sanitized["quantity"] > available_stock:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="insufficient_stock_for_waste")
+
+    purchase_row: Optional[Dict[str, Any]] = None
+    if sanitized["purchase_id"]:
+        purchase_row = _get_purchase_snapshot(ctx["client"], sanitized["purchase_id"], store_id_resolved)
+        purchase_ing_id = str(purchase_row.get("ingredient_id")) if purchase_row.get("ingredient_id") else None
+        if purchase_ing_id and purchase_ing_id != sanitized["ingredient_id"]:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="purchase_mismatch")
+
+    unit = ingredient_row.get("unit")
+    unit_cost_snapshot = _resolve_waste_unit_cost_snapshot(ingredient_row, purchase_row)
+    total_cost = round(sanitized["quantity"] * unit_cost_snapshot, 4)
+
+    movement_row = _insert_waste_stock_movement(
+        ctx["client"],
+        store_id_resolved,
+        sanitized["ingredient_id"],
+        quantity=sanitized["quantity"],
+        unit=unit,
+        purchase_id=sanitized.get("purchase_id"),
+        reason=sanitized["reason"],
+        unit_cost_snapshot=unit_cost_snapshot,
+        created_by=ctx.get("user_id"),
+    )
+
+    new_stock = available_stock - sanitized["quantity"]
+    if new_stock < 0:
+        new_stock = 0.0
+    _update_ingredient_stock_for_waste(
+        ctx["client"],
+        sanitized["ingredient_id"],
+        store_id_resolved,
+        new_stock=new_stock,
+    )
+
+    record_payload: Dict[str, Any] = {
+        "store_id": store_id_resolved,
+        "ingredient_id": sanitized["ingredient_id"],
+        "purchase_id": sanitized.get("purchase_id"),
+        "stock_movement_id": movement_row.get("id"),
+        "quantity": sanitized["quantity"],
+        "unit": unit,
+        "unit_cost_snapshot": unit_cost_snapshot,
+        "total_cost": total_cost,
+        "reason": sanitized["reason"],
+        "wasted_at": sanitized["wasted_at"],
+        "note": sanitized.get("note"),
+        "created_by": ctx.get("user_id"),
+    }
+
+    resp = ctx["client"].table("ingredient_waste_records").insert(record_payload).execute()
+    err = getattr(resp, "error", None)
+    if err:
+        raise HTTPException(status_code=500, detail="ingredient_waste_create_failed")
+    rows = getattr(resp, "data", None) or []
+    record_row = rows[0] if rows else record_payload
+    return IngredientWasteResponse(record=_map_waste_record(record_row))
+
+
+@router.get("/ingredients/waste-summary")
+def get_ingredient_waste_summary(
+    filters: IngredientWasteSummaryFilters = Depends(),
+    authorization: Optional[str] = Header(None),
+    store_id: Optional[str] = None,
+) -> IngredientWasteSummaryResponse:
+    ctx = _get_ctx(authorization)
+    store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
+    _require_manager(role)
+
+    query = (
+        ctx["client"].table("ingredient_waste_records")
+        .select("quantity, total_cost, wasted_at, ingredient_id")
+        .eq("store_id", store_id_resolved)
+    )
+
+    normalized_ingredient = (filters.ingredient_id or "").strip() or None
+    if normalized_ingredient:
+        query = query.eq("ingredient_id", normalized_ingredient)
+
+    start_iso = _normalize_optional_datetime_or_date(filters.start_date, field="start_date")
+    end_iso = _normalize_optional_datetime_or_date(filters.end_date, field="end_date")
+    if start_iso:
+        query = query.gte("wasted_at", start_iso)
+    if end_iso:
+        query = query.lte("wasted_at", end_iso)
+
+    resp = query.execute()
+    err = getattr(resp, "error", None)
+    if err:
+        raise HTTPException(status_code=500, detail="ingredient_waste_summary_failed")
+    rows = getattr(resp, "data", None) or []
+
+    total_quantity = sum(_safe_float(row.get("quantity")) for row in rows)
+    total_cost = sum(_safe_float(row.get("total_cost")) for row in rows)
+
+    filter_payload = {
+        "ingredient_id": normalized_ingredient,
+        "start_date": start_iso,
+        "end_date": end_iso,
+    }
+
+    return IngredientWasteSummaryResponse(
+        store_id=store_id_resolved,
+        total_quantity=total_quantity,
+        total_cost=total_cost,
+        record_count=len(rows),
+        filters=filter_payload,
+    )
+
+
 @router.post("/stock-intakes")
 def create_stock_intake(payload: StockIntakeCreate, authorization: Optional[str] = Header(None), store_id: Optional[str] = None) -> StockIntakeResponse:
     ctx = _get_ctx(authorization)
@@ -3855,9 +4284,20 @@ def create_stock_intake(payload: StockIntakeCreate, authorization: Optional[str]
             "unit_cost_snapshot": purchase_unit_cost,
             "payment_status": sanitized["payment_status"],
             "created_by": ctx.get("user_id"),
+            "is_perishable": sanitized.get("is_perishable", False),
         }
 
-        for optional_field in ("supplier_name", "paid_at", "due_date", "note", "receipt_url", "receipt_storage_path"):
+        for optional_field in (
+            "supplier_name",
+            "paid_at",
+            "due_date",
+            "note",
+            "receipt_url",
+            "receipt_storage_path",
+            "lot_code",
+            "expiry_note",
+            "expires_at",
+        ):
             value = sanitized.get(optional_field)
             if value:
                 purchase_payload[optional_field] = value
