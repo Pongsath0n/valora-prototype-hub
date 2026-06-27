@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ChevronDown, Loader2, Plus, RefreshCw } from "lucide-react";
+import { CheckCircle2, ChevronDown, Loader2, Plus, RefreshCw } from "lucide-react";
 import AdminLayout from "@/components/admin/AdminLayout";
 import DataTable from "@/components/shared/DataTable";
 import FormField from "@/components/shared/FormField";
@@ -140,10 +140,10 @@ const isIngredientBaseUnit = (value: string): value is IngredientBaseUnit => ING
 
 const WASTE_REASON_LABELS: Record<IngredientWasteReason, string> = {
   expired_waste: "หมดอายุ",
-  damaged_waste: "เสียหาย",
-  spill_waste: "หก/สูญเสียระหว่างทำงาน",
+  damaged_waste: "เสียหาย/ชำรุด",
+  spill_waste: "หกหล่น/เสียระหว่างชง",
   quality_issue_waste: "คุณภาพไม่ผ่าน",
-  manual_waste: "ปรับปรุงยอดด้วยมือ",
+  manual_waste: "ปรับยอดสต็อกเอง (เช็คสต็อก)",
   other_waste: "อื่น ๆ",
 };
 
@@ -759,7 +759,13 @@ export default function StoreAdminIngredientsPage() {
       )}
 
       {shouldShowWasteSection ? (
-        <section className="mt-10 space-y-4">
+        <section className="mt-10 space-y-4 border-t pt-8">
+          <div className="space-y-1">
+            <h2 className="section-title text-lg">ของเสีย / ของหมดอายุ</h2>
+            <p className="text-sm text-muted-foreground">
+              บันทึกของที่ต้องทิ้ง เช่น ของหมดอายุ ของเสีย หรือหกหล่น เพื่อให้ยอดสต็อกตรงกับของจริง และดูได้ว่าต้นทุนสูญเสียไปเท่าไร (เห็นเฉพาะเจ้าของ/ผู้จัดการ)
+            </p>
+          </div>
           <div className="grid gap-4 md:grid-cols-2">
             <div className="stat-card space-y-3">
               <div className="flex items-center justify-between">
@@ -773,28 +779,34 @@ export default function StoreAdminIngredientsPage() {
                   <RefreshCw className={`h-3 w-3 ${wasteLoading ? "animate-spin" : ""}`} /> รีเฟรช
                 </button>
               </div>
-              {wasteSummary ? (
+              {wasteSummary && wasteSummary.record_count > 0 ? (
                 <div className="grid gap-3 text-sm">
                   <div>
                     <p className="text-muted-foreground">จำนวนที่ทิ้งรวม</p>
                     <p className="text-xl font-semibold">{wasteSummary.total_quantity.toLocaleString(undefined, { maximumFractionDigits: 2 })} หน่วย</p>
                   </div>
                   <div>
-                    <p className="text-muted-foreground">ต้นทุนที่ตัดทิ้ง</p>
+                    <p className="text-muted-foreground">ต้นทุนสูญเสีย (โดยประมาณ)</p>
                     <p className="text-xl font-semibold">{currencyFormatter.format(wasteSummary.total_cost || 0)}</p>
+                    <p className="text-xs text-muted-foreground">ประเมินจากต้นทุนซื้อเข้า ไว้ดูภาพรวมเท่านั้น ไม่ใช่ตัวเลขทางบัญชี</p>
                   </div>
                   <div>
                     <p className="text-muted-foreground">จำนวนรายการ</p>
                     <p className="text-xl font-semibold">{wasteSummary.record_count}</p>
                   </div>
                 </div>
+              ) : wasteSummary ? (
+                <p className="text-sm text-muted-foreground">ยังไม่มีการบันทึกของเสีย เมื่อบันทึกแล้ว ยอดที่ทิ้งและต้นทุนสูญเสียจะสรุปให้ที่นี่</p>
               ) : (
-                <p className="text-sm text-muted-foreground">ยังไม่มีข้อมูลการทิ้งสต็อก</p>
+                <p className="text-sm text-muted-foreground">ยังไม่มีข้อมูล กดรีเฟรชเพื่อโหลดอีกครั้ง</p>
               )}
               {wasteError ? <p className="text-sm text-destructive">{wasteError}</p> : null}
             </div>
             <div className="stat-card space-y-3">
-              <h3 className="section-title text-base">บันทึกการทิ้งสต็อก</h3>
+              <div className="space-y-1">
+                <h3 className="section-title text-base">บันทึกการทิ้งสต็อก</h3>
+                <p className="text-xs text-muted-foreground">เลือกวัตถุดิบและจำนวนที่ต้องทิ้ง ระบบจะตัดออกจากสต็อกให้อัตโนมัติ</p>
+              </div>
               <div className="grid gap-3">
                 <FormField label="วัตถุดิบที่จะตัดสต็อก">
                   <select className="form-input" value={wasteForm.ingredientId} onChange={(e) => handleWasteChange("ingredientId", e.target.value)}>
@@ -816,7 +828,7 @@ export default function StoreAdminIngredientsPage() {
                 <FormField label="จำนวน" hint="ใช้หน่วยฐานเดียวกับวัตถุดิบ">
                   <input className="form-input" type="number" min={0} step="0.1" value={wasteForm.quantity} onChange={(e) => handleWasteChange("quantity", e.target.value)} />
                 </FormField>
-                <FormField label="เหตุผล">
+                <FormField label="เหตุผล" hint="เลือกสาเหตุที่ต้องทิ้ง จะได้สรุปของเสียได้ตรงขึ้น">
                   <select
                     className="form-input"
                     value={wasteForm.reason}
@@ -849,7 +861,12 @@ export default function StoreAdminIngredientsPage() {
                 </FormField>
               </div>
               {wasteFormError ? <p className="text-sm text-destructive">{wasteFormError}</p> : null}
-              {wasteInfo ? <p className="text-sm text-emerald-600">{wasteInfo}</p> : null}
+              {wasteInfo ? (
+                <p className="text-sm text-emerald-600 flex items-center gap-1">
+                  <CheckCircle2 className="h-4 w-4 shrink-0" />
+                  <span>{wasteInfo}</span>
+                </p>
+              ) : null}
               <button
                 type="button"
                 className="px-4 py-2 rounded bg-primary text-primary-foreground disabled:opacity-50"
@@ -862,14 +879,14 @@ export default function StoreAdminIngredientsPage() {
           </div>
 
           <div className="stat-card space-y-3">
-            <div className="flex items-center justify-between">
-              <h3 className="section-title text-base">รายการทิ้งล่าสุด</h3>
-              <span className="text-xs text-muted-foreground">ดูได้เฉพาะสิทธิ์ผู้จัดการขึ้นไป</span>
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="section-title text-base">รายการของเสียล่าสุด</h3>
+              <span className="text-xs text-muted-foreground">เห็นเฉพาะเจ้าของ/ผู้จัดการ</span>
             </div>
             {wasteLoading && !wasteRecords.length ? (
-              <p className="text-sm text-muted-foreground">กำลังโหลดข้อมูล...</p>
+              <p className="text-sm text-muted-foreground">กำลังโหลดรายการของเสีย...</p>
             ) : wasteRecords.length === 0 ? (
-              <p className="text-sm text-muted-foreground">ยังไม่มีรายการทิ้ง</p>
+              <p className="text-sm text-muted-foreground">ยังไม่มีรายการของเสีย เมื่อบันทึกการทิ้งแล้วจะแสดงที่นี่</p>
             ) : (
               <div className="overflow-x-auto">
                 <table className="min-w-full text-sm">
@@ -879,7 +896,7 @@ export default function StoreAdminIngredientsPage() {
                       <th className="py-2 pr-4">วัตถุดิบ</th>
                       <th className="py-2 pr-4">จำนวน</th>
                       <th className="py-2 pr-4">เหตุผล</th>
-                      <th className="py-2 pr-4">ต้นทุน</th>
+                      <th className="py-2 pr-4">ต้นทุนสูญเสีย</th>
                       <th className="py-2 pr-4">หมายเหตุ</th>
                     </tr>
                   </thead>
@@ -1011,12 +1028,14 @@ export default function StoreAdminIngredientsPage() {
               ) : null}
             </div>
             <div className="rounded-lg border p-4 space-y-3">
-              <div className="flex items-center justify-between gap-3">
+              <div className="flex items-start justify-between gap-3">
                 <div>
-                  <p className="font-medium text-sm">วันหมดอายุ / Lot (ถ้ามี)</p>
-                  <p className="text-xs text-muted-foreground">ช่วยให้วางแผนตัดสต็อก และติดตามล็อตที่มีปัญหา</p>
+                  <p className="font-medium text-sm">ของสด / วันหมดอายุ (ถ้ามี)</p>
+                  <p className="text-xs text-muted-foreground">
+                    ติ๊กช่องนี้ถ้าวัตถุดิบล็อตนี้เป็นของสดหรือมีวันหมดอายุ จะได้คอยเตือนให้ใช้ก่อนหมดอายุ และตามล็อตที่มีปัญหาได้ง่ายขึ้น (ไม่บังคับ)
+                  </p>
                 </div>
-                <label className="inline-flex items-center gap-2 text-sm">
+                <label className="inline-flex items-center gap-2 text-sm whitespace-nowrap">
                   <input
                     type="checkbox"
                     className="form-checkbox"
@@ -1026,24 +1045,30 @@ export default function StoreAdminIngredientsPage() {
                   มีวันหมดอายุ
                 </label>
               </div>
-              <div className="grid md:grid-cols-2 gap-3">
-                <FormField label="รหัส Lot (ไม่บังคับ)">
-                  <input className="form-input" value={intakeForm.lotCode} onChange={(e) => handleIntakeChange("lotCode", e.target.value)} placeholder="เช่น LOT-0425" />
-                </FormField>
-                <FormField label="วันหมดอายุ (ไม่บังคับ)">
-                  <input type="date" className="form-input" value={intakeForm.expiresAt} onChange={(e) => handleIntakeChange("expiresAt", e.target.value)} />
-                </FormField>
-                <div className="md:col-span-2">
-                  <FormField label="หมายเหตุเพิ่มเติม (เช่น วิธีเก็บ, กลิ่น, สี)">
-                    <textarea className="form-input" rows={2} value={intakeForm.expiryNote} onChange={(e) => handleIntakeChange("expiryNote", e.target.value)} />
-                  </FormField>
-                </div>
-              </div>
-              {intakeForm.isPerishable && !intakeForm.expiresAt ? (
-                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2">
-                  แนะนำให้ระบุวันหมดอายุ เพื่อเตือนให้ใช้ก่อนตัดสต็อก (ไม่บังคับ)
-                </p>
-              ) : null}
+              {intakeForm.isPerishable ? (
+                <>
+                  <div className="grid md:grid-cols-2 gap-3">
+                    <FormField label="รหัส Lot (ไม่บังคับ)" hint="รหัสล็อต/รุ่นที่ติดมากับสินค้า ไว้ตามล็อตเวลามีปัญหา">
+                      <input className="form-input" value={intakeForm.lotCode} onChange={(e) => handleIntakeChange("lotCode", e.target.value)} placeholder="เช่น LOT-0425" />
+                    </FormField>
+                    <FormField label="วันหมดอายุ (ไม่บังคับ)">
+                      <input type="date" className="form-input" value={intakeForm.expiresAt} onChange={(e) => handleIntakeChange("expiresAt", e.target.value)} />
+                    </FormField>
+                    <div className="md:col-span-2">
+                      <FormField label="หมายเหตุเพิ่มเติม (เช่น วิธีเก็บ, กลิ่น, สี)">
+                        <textarea className="form-input" rows={2} value={intakeForm.expiryNote} onChange={(e) => handleIntakeChange("expiryNote", e.target.value)} />
+                      </FormField>
+                    </div>
+                  </div>
+                  {!intakeForm.expiresAt ? (
+                    <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2">
+                      แนะนำให้ใส่วันหมดอายุ ระบบจะได้ช่วยเตือนให้ใช้ของล็อตนี้ก่อน (ไม่บังคับ)
+                    </p>
+                  ) : null}
+                </>
+              ) : (
+                <p className="text-xs text-muted-foreground">ถ้าเป็นของแห้งหรือของที่ไม่มีวันหมดอายุ ข้ามส่วนนี้ได้เลย</p>
+              )}
             </div>
             <Collapsible open={additionalOpen} onOpenChange={setAdditionalOpen}>
               <div className="rounded-lg border p-3">
