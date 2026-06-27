@@ -25,12 +25,12 @@ vi.mock("@/contexts/RoleContext", () => ({
 vi.mock("@/services/storeAdminApi", () => ({
   INGREDIENT_BASE_UNITS: ["g", "ml", "pcs", "set", "bottle"],
   INGREDIENT_WASTE_REASONS: [
-    "expired_waste",
-    "damaged_waste",
-    "spill_waste",
-    "quality_issue_waste",
-    "manual_waste",
-    "other_waste",
+    "expired",
+    "damaged",
+    "spill",
+    "quality_issue",
+    "manual_adjustment",
+    "other",
   ],
   storeAdminApi: {
     listIngredients: (...args: unknown[]) => mockListIngredients(...args),
@@ -63,12 +63,34 @@ describe("StoreAdminIngredientsPage", () => {
         {
           id: "ing-1",
           store_id: "store-1",
-          name: "Espresso Beans",
-          unit: "g",
+          name: "Fresh Milk",
+          unit: "ml",
           cost_per_unit: 0.6,
           current_stock: 500,
           low_stock_threshold: 100,
-          supplier_name: "Best Beans",
+          supplier_name: "Best Milk",
+          is_active: true,
+        },
+        {
+          id: "ing-2",
+          store_id: "store-1",
+          name: "Ice Cubes",
+          unit: "pcs",
+          cost_per_unit: 0.1,
+          current_stock: 999,
+          low_stock_threshold: 0,
+          supplier_name: "Cold Co",
+          is_active: true,
+        },
+        {
+          id: "ing-3",
+          store_id: "store-1",
+          name: "Matcha Powder",
+          unit: "g",
+          cost_per_unit: 2,
+          current_stock: 50,
+          low_stock_threshold: 10,
+          supplier_name: "Tea Farm",
           is_active: true,
         },
       ],
@@ -88,23 +110,57 @@ describe("StoreAdminIngredientsPage", () => {
       store_id: "store-1",
       ingredient_id: "ing-1",
       quantity: 1,
-      reason: "manual_waste",
+      reason: "manual_adjustment",
     });
-    mockListStockIntakes.mockResolvedValue([
-      {
-        id: "purchase-1",
-        store_id: "store-1",
-        ingredient_id: "ing-1",
-        quantity: 5,
-        normalized_quantity: 5,
-        purchase_unit: "g",
-        conversion_factor: 1,
-        total_cost: 100,
-        movement_type: "in",
-        lot_code: "LOT-123",
-        expires_at: "2026-01-01T00:00:00.000Z",
-      },
-    ]);
+    mockListStockIntakes.mockImplementation((params?: { ingredient_id?: string }) => {
+      if (params?.ingredient_id) {
+        return Promise.resolve([
+          {
+            id: `recent-${params.ingredient_id}`,
+            store_id: "store-1",
+            ingredient_id: params.ingredient_id,
+            quantity: 5,
+            normalized_quantity: 5,
+            purchase_unit: "g",
+            conversion_factor: 1,
+            total_cost: 100,
+            movement_type: "in",
+            lot_code: "LOT-LOCAL",
+            expires_at: "2026-01-01T00:00:00.000Z",
+          },
+        ]);
+      }
+      return Promise.resolve([
+        {
+          id: "purchase-1",
+          store_id: "store-1",
+          ingredient_id: "ing-1",
+          quantity: 5,
+          normalized_quantity: 5,
+          purchase_unit: "ml",
+          conversion_factor: 1,
+          total_cost: 100,
+          movement_type: "in",
+          lot_code: "LOT-123",
+          expires_at: "2026-01-01T00:00:00.000Z",
+          is_perishable: true,
+        },
+        {
+          id: "purchase-2",
+          store_id: "store-1",
+          ingredient_id: "ing-3",
+          quantity: 2,
+          normalized_quantity: 2,
+          purchase_unit: "g",
+          conversion_factor: 1,
+          total_cost: 40,
+          movement_type: "in",
+          lot_code: "LOT-MATCHA",
+          expires_at: null,
+          is_perishable: true,
+        },
+      ]);
+    });
   });
 
   function renderPage() {
@@ -188,6 +244,47 @@ describe("StoreAdminIngredientsPage", () => {
     expect(mockListIngredientWasteRecords).not.toHaveBeenCalled();
   });
 
+  it("filters waste ingredient dropdown to perishable options by default", async () => {
+    renderPage();
+    await waitFor(() => expect(mockListStockIntakes).toHaveBeenCalled());
+    const ingredientSelect = getFormFieldControl<HTMLSelectElement>("วัตถุดิบที่จะตัดสต็อก", "select");
+    const optionLabels = Array.from(ingredientSelect.options).map((opt) => opt.textContent);
+    expect(optionLabels).toContain("Fresh Milk");
+    expect(optionLabels).toContain("Matcha Powder");
+    expect(optionLabels).not.toContain("Ice Cubes");
+  });
+
+  it("selecting a recommended lot sets ingredient and purchase references", async () => {
+    renderPage();
+    await screen.findByText("ล็อตที่แนะนำให้ตัด");
+    const lotSelect = getFormFieldControl<HTMLSelectElement>("ล็อตที่แนะนำให้ตัด", "select");
+    fireEvent.change(lotSelect, { target: { value: "purchase-1" } });
+    const quantityInput = getFormFieldControl<HTMLInputElement>("จำนวน");
+    fireEvent.change(quantityInput, { target: { value: "3" } });
+    fireEvent.click(screen.getByRole("button", { name: "บันทึกการทิ้ง" }));
+
+    await waitFor(() => expect(mockCreateIngredientWaste).toHaveBeenCalled());
+    const payload = mockCreateIngredientWaste.mock.calls.at(-1)?.[0];
+    expect(payload).toMatchObject({ ingredient_id: "ing-1", purchase_id: "purchase-1" });
+  });
+
+  it("submits exact waste quantity entered for any ingredient", async () => {
+    renderPage();
+    await waitFor(() => expect(mockListIngredientWasteRecords).toHaveBeenCalled());
+    const showAllButton = screen.getByRole("button", { name: "แสดงวัตถุดิบทั้งหมด" });
+    fireEvent.click(showAllButton);
+    const ingredientSelect = getFormFieldControl<HTMLSelectElement>("วัตถุดิบที่จะตัดสต็อก", "select");
+    fireEvent.change(ingredientSelect, { target: { value: "ing-2" } });
+    fireEvent.change(getFormFieldControl<HTMLInputElement>("จำนวน"), { target: { value: "500" } });
+    const reasonSelect = getFormFieldControl<HTMLSelectElement>("เหตุผล", "select");
+    fireEvent.change(reasonSelect, { target: { value: "quality_issue" } });
+    fireEvent.click(screen.getByRole("button", { name: "บันทึกการทิ้ง" }));
+
+    await waitFor(() => expect(mockCreateIngredientWaste).toHaveBeenCalled());
+    const payload = mockCreateIngredientWaste.mock.calls.at(-1)?.[0];
+    expect(payload).toMatchObject({ ingredient_id: "ing-2", quantity: 500, reason: "quality_issue" });
+  });
+
   it("maps waste reason labels to backend values", async () => {
     renderPage();
     await waitFor(() => expect(mockListIngredientWasteRecords).toHaveBeenCalled());
@@ -195,12 +292,12 @@ describe("StoreAdminIngredientsPage", () => {
     fireEvent.change(ingredientSelect, { target: { value: "ing-1" } });
     fireEvent.change(getFormFieldControl<HTMLInputElement>("จำนวน"), { target: { value: "3" } });
     const reasonSelect = getFormFieldControl<HTMLSelectElement>("เหตุผล", "select");
-    fireEvent.change(reasonSelect, { target: { value: "spill_waste" satisfies IngredientWasteReason } });
+    fireEvent.change(reasonSelect, { target: { value: "spill" satisfies IngredientWasteReason } });
     fireEvent.click(screen.getByRole("button", { name: "บันทึกการทิ้ง" }));
 
     await waitFor(() => expect(mockCreateIngredientWaste).toHaveBeenCalled());
     const payload = mockCreateIngredientWaste.mock.calls.at(-1)?.[0];
-    expect(payload.reason).toBe("spill_waste");
+    expect(payload.reason).toBe("spill");
     await screen.findByText("บันทึกการทิ้งสต็อกแล้ว");
   });
 
@@ -215,5 +312,34 @@ describe("StoreAdminIngredientsPage", () => {
 
     await waitFor(() => expect(mockCreateIngredientWaste).toHaveBeenCalled());
     expect(await screen.findByText("สต็อกไม่เพียงพอสำหรับจำนวนที่เลือก")).toBeInTheDocument();
+  });
+
+  it("shows friendly error when lot remaining is insufficient", async () => {
+    mockCreateIngredientWaste.mockRejectedValueOnce(new Error("insufficient_lot_stock_for_waste"));
+    renderPage();
+    await waitFor(() => expect(mockListIngredientWasteRecords).toHaveBeenCalled());
+    const ingredientSelect = getFormFieldControl<HTMLSelectElement>("วัตถุดิบที่จะตัดสต็อก", "select");
+    fireEvent.change(ingredientSelect, { target: { value: "ing-1" } });
+    fireEvent.change(getFormFieldControl<HTMLInputElement>("จำนวน"), { target: { value: "500" } });
+    fireEvent.change(getFormFieldControl<HTMLSelectElement>("อ้างอิงรายการซื้อ (ถ้ามี)", "select"), { target: { value: "purchase-1" } });
+    fireEvent.click(screen.getByRole("button", { name: "บันทึกการทิ้ง" }));
+
+    await waitFor(() => expect(mockCreateIngredientWaste).toHaveBeenCalled());
+    expect(await screen.findByText("ล็อตที่เลือกเหลือไม่พอสำหรับจำนวนนี้")).toBeInTheDocument();
+    const payload = mockCreateIngredientWaste.mock.calls.at(-1)?.[0];
+    expect(payload).toMatchObject({ ingredient_id: "ing-1", quantity: 500 });
+  });
+
+  it("shows friendly message when network fails during waste submission", async () => {
+    mockCreateIngredientWaste.mockRejectedValueOnce(new Error("Failed to fetch"));
+    renderPage();
+    await waitFor(() => expect(mockListIngredientWasteRecords).toHaveBeenCalled());
+    const ingredientSelect = getFormFieldControl<HTMLSelectElement>("วัตถุดิบที่จะตัดสต็อก", "select");
+    fireEvent.change(ingredientSelect, { target: { value: "ing-1" } });
+    fireEvent.change(getFormFieldControl<HTMLInputElement>("จำนวน"), { target: { value: "2" } });
+    fireEvent.click(screen.getByRole("button", { name: "บันทึกการทิ้ง" }));
+
+    await waitFor(() => expect(mockCreateIngredientWaste).toHaveBeenCalled());
+    expect(await screen.findByText("ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์ได้ กรุณาลองใหม่"))?.toBeInTheDocument();
   });
 });

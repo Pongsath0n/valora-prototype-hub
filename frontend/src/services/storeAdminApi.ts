@@ -185,20 +185,20 @@ export type StockIntakeResponse = {
 };
 
 export type IngredientWasteReason =
-  | "expired_waste"
-  | "damaged_waste"
-  | "spill_waste"
-  | "quality_issue_waste"
-  | "manual_waste"
-  | "other_waste";
+  | "expired"
+  | "damaged"
+  | "spill"
+  | "quality_issue"
+  | "manual_adjustment"
+  | "other";
 
 export const INGREDIENT_WASTE_REASONS: IngredientWasteReason[] = [
-  "expired_waste",
-  "damaged_waste",
-  "spill_waste",
-  "quality_issue_waste",
-  "manual_waste",
-  "other_waste",
+  "expired",
+  "damaged",
+  "spill",
+  "quality_issue",
+  "manual_adjustment",
+  "other",
 ];
 
 export type IngredientWasteRecord = {

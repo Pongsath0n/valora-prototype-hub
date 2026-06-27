@@ -139,12 +139,12 @@ const formatDateOnly = (value?: string | Date) => {
 const isIngredientBaseUnit = (value: string): value is IngredientBaseUnit => INGREDIENT_BASE_UNITS.includes(value as IngredientBaseUnit);
 
 const WASTE_REASON_LABELS: Record<IngredientWasteReason, string> = {
-  expired_waste: "หมดอายุ",
-  damaged_waste: "เสียหาย/ชำรุด",
-  spill_waste: "หกหล่น/เสียระหว่างชง",
-  quality_issue_waste: "คุณภาพไม่ผ่าน",
-  manual_waste: "ปรับยอดสต็อกเอง (เช็คสต็อก)",
-  other_waste: "อื่น ๆ",
+  expired: "หมดอายุ",
+  damaged: "เสียหาย/ชำรุด",
+  spill: "หกหล่น/เสียระหว่างชง",
+  quality_issue: "คุณภาพไม่ผ่าน",
+  manual_adjustment: "ปรับยอดสต็อกเอง (เช็คสต็อก)",
+  other: "อื่น ๆ",
 };
 
 const WASTE_REASON_OPTIONS = INGREDIENT_WASTE_REASONS.map((reason) => ({
@@ -212,7 +212,7 @@ const buildWasteForm = (): WasteFormState => ({
   ingredientId: "",
   purchaseId: "",
   quantity: "",
-  reason: "expired_waste",
+  reason: "expired",
   note: "",
   wastedAt: formatDateTimeLocal(new Date()),
 });
@@ -254,6 +254,10 @@ export default function StoreAdminIngredientsPage() {
   const [wasteSubmitting, setWasteSubmitting] = useState(false);
   const [recentIntakes, setRecentIntakes] = useState<StockIntake[]>([]);
   const [recentIntakesLoading, setRecentIntakesLoading] = useState(false);
+  const [wasteEligibleLots, setWasteEligibleLots] = useState<StockIntake[]>([]);
+  const [wasteEligibleLoading, setWasteEligibleLoading] = useState(false);
+  const [wasteEligibleError, setWasteEligibleError] = useState("");
+  const [wasteShowAllIngredients, setWasteShowAllIngredients] = useState(false);
 
   const valid = useMemo(
     () =>
@@ -300,10 +304,48 @@ export default function StoreAdminIngredientsPage() {
     });
     return map;
   }, [rows]);
+  const wasteEligiblePurchases = useMemo(() => wasteEligibleLots.filter((lot) => lot.is_perishable || lot.expires_at), [wasteEligibleLots]);
+  const wasteEligibleIngredientIds = useMemo(() => {
+    const ids = new Set<string>();
+    wasteEligiblePurchases.forEach((lot) => {
+      if (lot.ingredient_id) ids.add(lot.ingredient_id);
+    });
+    return ids;
+  }, [wasteEligiblePurchases]);
+  const recommendedLotOptions = useMemo(
+    () =>
+      wasteEligiblePurchases.map((lot) => {
+        const ingredient = ingredientLookup[lot.ingredient_id ?? ""];
+        const remainingStock = ingredient ? Number(ingredient.current_stock).toLocaleString(undefined, { maximumFractionDigits: 2 }) : undefined;
+        const parts = [
+          ingredient?.name ?? "วัตถุดิบ",
+          lot.lot_code ? `Lot ${lot.lot_code}` : "ล็อตล่าสุด",
+          remainingStock && ingredient?.unit ? `เหลือ ~${remainingStock} ${ingredient.unit}` : undefined,
+          lot.expires_at ? `หมดอายุ ${formatDateOnly(lot.expires_at)}` : "ยังไม่ระบุวันหมดอายุ",
+        ].filter(Boolean);
+        return {
+          value: lot.id,
+          ingredientId: lot.ingredient_id,
+          label: parts.join(" • "),
+        };
+      }),
+    [ingredientLookup, wasteEligiblePurchases],
+  );
+  const recommendedLotSelection = useMemo(() => {
+    if (!wasteForm.purchaseId) return "";
+    return recommendedLotOptions.some((option) => option.value === wasteForm.purchaseId) ? wasteForm.purchaseId : "";
+  }, [recommendedLotOptions, wasteForm.purchaseId]);
   const wasteFormValid = useMemo(() => {
     const qty = Number(wasteForm.quantity);
     return Boolean(wasteForm.ingredientId && qty > 0);
   }, [wasteForm.ingredientId, wasteForm.quantity]);
+  const filteredWasteIngredients = useMemo(() => {
+    const baseList = !wasteShowAllIngredients && wasteEligibleIngredientIds.size > 0 ? rows.filter((row) => wasteEligibleIngredientIds.has(row.id)) : rows;
+    if (selectedWasteIngredient && !baseList.some((row) => row.id === selectedWasteIngredient.id)) {
+      return [...baseList, selectedWasteIngredient];
+    }
+    return baseList;
+  }, [rows, selectedWasteIngredient, wasteEligibleIngredientIds, wasteShowAllIngredients]);
 
   const refresh = async () => {
     setRefreshing(true);
@@ -323,6 +365,21 @@ export default function StoreAdminIngredientsPage() {
     void refresh();
   }, []);
 
+  const refreshWasteEligibleLots = useCallback(async () => {
+    if (!isManagerRole) return;
+    setWasteEligibleLoading(true);
+    setWasteEligibleError("");
+    try {
+      const list = await storeAdminApi.listStockIntakes({ limit: 100 });
+      setWasteEligibleLots(list);
+    } catch (err: any) {
+      setWasteEligibleError(err?.message || "โหลดล็อตวัตถุดิบไม่สำเร็จ");
+      setWasteEligibleLots([]);
+    } finally {
+      setWasteEligibleLoading(false);
+    }
+  }, [isManagerRole]);
+
   const refreshWasteData = useCallback(async () => {
     if (!isManagerRole) return;
     setWasteLoading(true);
@@ -334,17 +391,19 @@ export default function StoreAdminIngredientsPage() {
       ]);
       setWasteRecords(records);
       setWasteSummary(summary);
+      void refreshWasteEligibleLots();
     } catch (err: any) {
       setWasteError(err?.message || "โหลดข้อมูลการทิ้งไม่สำเร็จ");
     } finally {
       setWasteLoading(false);
     }
-  }, [isManagerRole]);
+  }, [isManagerRole, refreshWasteEligibleLots]);
 
   useEffect(() => {
     if (roleLoading) return;
     void refreshWasteData();
-  }, [roleLoading, refreshWasteData]);
+    void refreshWasteEligibleLots();
+  }, [roleLoading, refreshWasteData, refreshWasteEligibleLots]);
 
   useEffect(() => {
     if (!intakeOpen) return;
@@ -441,6 +500,11 @@ export default function StoreAdminIngredientsPage() {
     void refresh();
   };
 
+  const clearWasteFeedback = useCallback(() => {
+    if (wasteFormError) setWasteFormError("");
+    if (wasteInfo) setWasteInfo("");
+  }, [wasteFormError, wasteInfo]);
+
   const handleWasteChange = <K extends keyof WasteFormState>(field: K, value: WasteFormState[K]) => {
     setWasteForm((prev) => {
       const next = { ...prev, [field]: value };
@@ -449,9 +513,27 @@ export default function StoreAdminIngredientsPage() {
       }
       return next;
     });
-    if (wasteFormError) setWasteFormError("");
-    if (wasteInfo) setWasteInfo("");
+    clearWasteFeedback();
   };
+
+  const handleRecommendedLotChange = useCallback(
+    (lotId: string) => {
+      setWasteForm((prev) => {
+        if (!lotId) {
+          return { ...prev, purchaseId: "" };
+        }
+        const match = recommendedLotOptions.find((option) => option.value === lotId);
+        if (!match) return prev;
+        return {
+          ...prev,
+          ingredientId: match.ingredientId || prev.ingredientId,
+          purchaseId: lotId,
+        };
+      });
+      clearWasteFeedback();
+    },
+    [clearWasteFeedback, recommendedLotOptions],
+  );
 
   const resetWasteForm = () => {
     setWasteForm(buildWasteForm());
@@ -494,12 +576,18 @@ export default function StoreAdminIngredientsPage() {
       const reason = err?.message || "บันทึกการทิ้งไม่สำเร็จ";
       if (reason === "insufficient_stock_for_waste") {
         setWasteFormError("สต็อกไม่เพียงพอสำหรับจำนวนที่เลือก");
+      } else if (reason === "insufficient_lot_stock_for_waste") {
+        setWasteFormError("ล็อตที่เลือกเหลือไม่พอสำหรับจำนวนนี้");
       } else if (reason === "purchase_mismatch") {
         setWasteFormError("รายการซื้อที่เลือกไม่ตรงกับวัตถุดิบนี้");
       } else if (reason === "waste_reason_invalid") {
         setWasteFormError("เหตุผลไม่ถูกต้อง");
+      } else if (reason === "ingredient_waste_create_failed" || reason === "ingredient_waste_update_failed") {
+        setWasteFormError("ระบบตัดสต็อกไม่สำเร็จ กรุณาลองใหม่");
+      } else if (reason === "request_failed" || reason?.toLowerCase?.() === "failed to fetch") {
+        setWasteFormError("ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์ได้ กรุณาลองใหม่");
       } else {
-        setWasteFormError(reason);
+        setWasteFormError("บันทึกการทิ้งไม่สำเร็จ กรุณาลองใหม่");
       }
     } finally {
       setWasteSubmitting(false);
@@ -808,17 +896,48 @@ export default function StoreAdminIngredientsPage() {
                 <p className="text-xs text-muted-foreground">เลือกวัตถุดิบและจำนวนที่ต้องทิ้ง ระบบจะตัดออกจากสต็อกให้อัตโนมัติ</p>
               </div>
               <div className="grid gap-3">
-                <FormField label="วัตถุดิบที่จะตัดสต็อก">
+                <FormField label="ล็อตที่แนะนำให้ตัด" hint="แนะนำเฉพาะล็อตที่เป็นของสดหรือมีวันหมดอายุ">
+                  <select className="form-input" value={recommendedLotSelection} onChange={(e) => handleRecommendedLotChange(e.target.value)} disabled={!recommendedLotOptions.length && !recommendedLotSelection}>
+                    <option value="">เลือกล็อตที่ต้องทิ้ง</option>
+                    {recommendedLotOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                  {wasteEligibleLoading ? <p className="text-xs text-muted-foreground mt-1">กำลังโหลดล็อตที่มีวันหมดอายุ...</p> : null}
+                  {wasteEligibleError ? <p className="text-xs text-destructive mt-1">{wasteEligibleError}</p> : null}
+                  {!wasteEligibleLoading && !recommendedLotOptions.length ? (
+                    <p className="text-xs text-muted-foreground mt-1">ยังไม่มีล็อตที่มีวันหมดอายุ ระบบจะแสดงรายชื่อวัตถุดิบทั้งหมดให้เลือกเอง</p>
+                  ) : null}
+                </FormField>
+                <FormField
+                  label="วัตถุดิบที่จะตัดสต็อก"
+                  hint={
+                    wasteEligibleIngredientIds.size > 0 && !wasteShowAllIngredients
+                      ? "แสดงเฉพาะวัตถุดิบที่เคยบันทึกวันหมดอายุ สามารถแสดงทั้งหมดได้ที่ปุ่มด้านล่าง"
+                      : "กำลังแสดงวัตถุดิบทั้งหมด"
+                  }
+                >
                   <select className="form-input" value={wasteForm.ingredientId} onChange={(e) => handleWasteChange("ingredientId", e.target.value)}>
                     <option value="" disabled hidden>
                       เลือกวัตถุดิบ
                     </option>
-                    {rows.map((row) => (
+                    {filteredWasteIngredients.map((row) => (
                       <option key={row.id} value={row.id}>
                         {row.name}
                       </option>
                     ))}
                   </select>
+                  {wasteEligibleIngredientIds.size > 0 ? (
+                    <button
+                      type="button"
+                      className="text-xs underline mt-1"
+                      onClick={() => setWasteShowAllIngredients((prev) => !prev)}
+                    >
+                      {wasteShowAllIngredients ? "ซ่อนวัตถุดิบที่ไม่เกี่ยวกับของเสีย" : "แสดงวัตถุดิบทั้งหมด"}
+                    </button>
+                  ) : null}
                 </FormField>
                 {selectedWasteIngredient ? (
                   <p className="text-xs text-muted-foreground">

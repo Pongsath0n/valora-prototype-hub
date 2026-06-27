@@ -156,14 +156,23 @@ _PURCHASE_COST_SOURCE = "purchase_derived"
 _STOCK_INTAKE_PAYMENT_STATUSES: Set[str] = {"paid", "unpaid"}
 _PURCHASE_RECEIPT_ALLOWED_TYPES: Set[str] = {"image/jpeg", "image/jpg", "image/png", "image/webp"}
 _INGREDIENT_BASE_UNITS: Set[str] = {"g", "ml", "pcs", "set", "bottle"}
-_WASTE_REASON_SET: Set[str] = {
-    "expired_waste",
-    "damaged_waste",
-    "spill_waste",
-    "quality_issue_waste",
-    "manual_waste",
-    "other_waste",
+_WASTE_BASE_REASON_SET: Set[str] = {
+    "expired",
+    "damaged",
+    "spill",
+    "quality_issue",
+    "manual_adjustment",
+    "other",
 }
+_WASTE_MOVEMENT_REASON_MAP: Dict[str, str] = {
+    "expired": "expired_waste",
+    "damaged": "damaged_waste",
+    "spill": "spill_waste",
+    "quality_issue": "quality_issue_waste",
+    "manual_adjustment": "manual_waste",
+    "other": "other_waste",
+}
+_WASTE_ALIAS_TO_BASE_MAP: Dict[str, str] = {alias: base for base, alias in _WASTE_MOVEMENT_REASON_MAP.items()}
 
 _PLANNING_MIX_LOOKBACK_DAYS = 30
 _PLANNING_MAX_MIX_ORDERS = 500
@@ -542,6 +551,14 @@ class StockIntakeListResponse(BaseModel):
 
 
 WasteReason = Literal[
+    "expired",
+    "damaged",
+    "spill",
+    "quality_issue",
+    "manual_adjustment",
+    "other",
+]
+WasteAliasReason = Literal[
     "expired_waste",
     "damaged_waste",
     "spill_waste",
@@ -549,12 +566,13 @@ WasteReason = Literal[
     "manual_waste",
     "other_waste",
 ]
+WastePayloadReason = Union[WasteReason, WasteAliasReason]
 
 
 class IngredientWasteCreate(BaseModel):
     ingredient_id: str
     quantity: float
-    reason: WasteReason
+    reason: WastePayloadReason
     purchase_id: Optional[str] = None
     wasted_at: Optional[str] = None
     note: Optional[str] = None
@@ -3762,6 +3780,22 @@ def _map_stock_intake(row: Dict[str, Any]) -> StockIntakeSummary:
     )
 
 
+def _normalize_waste_reason(value: Any, *, strict: bool = True) -> str:
+    reason = str(value or "").strip().lower()
+    if not reason:
+        if strict:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="waste_reason_invalid")
+        return "other"
+    if reason in _WASTE_BASE_REASON_SET:
+        return reason
+    alias_base = _WASTE_ALIAS_TO_BASE_MAP.get(reason)
+    if alias_base:
+        return alias_base
+    if strict:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="waste_reason_invalid")
+    return "other"
+
+
 def _sanitize_waste_payload(payload: IngredientWasteCreate) -> Dict[str, Any]:
     data = payload.model_dump(exclude_unset=True)
     ingredient_id = (data.get("ingredient_id") or "").strip()
@@ -3770,9 +3804,7 @@ def _sanitize_waste_payload(payload: IngredientWasteCreate) -> Dict[str, Any]:
     quantity = _safe_float(data.get("quantity"))
     if quantity <= 0:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="waste_quantity_positive")
-    reason = str(data.get("reason") or "").strip().lower()
-    if reason not in _WASTE_REASON_SET:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="waste_reason_invalid")
+    reason = _normalize_waste_reason(data.get("reason"))
     purchase_id = (data.get("purchase_id") or "").strip() or None
     note = _strip_text(data.get("note"))
     wasted_at = _normalize_optional_datetime_string(data.get("wasted_at"), field="wasted_at")
@@ -3807,6 +3839,26 @@ def _get_purchase_snapshot(client: Client, purchase_id: str, store_id: str) -> D
     return rows[0]
 
 
+def _get_purchase_remaining_quantity(client: Client, store_id: str, purchase_id: Optional[str]) -> Optional[float]:
+    if not purchase_id:
+        return None
+    resp = (
+        client.table("stock_movements")
+        .select("quantity")
+        .eq("store_id", store_id)
+        .eq("purchase_id", purchase_id)
+        .execute()
+    )
+    err = getattr(resp, "error", None)
+    if err:
+        raise HTTPException(status_code=500, detail="purchase_remaining_lookup_failed")
+    rows = getattr(resp, "data", None) or []
+    if not rows:
+        return None
+    remaining = sum(_safe_float(row.get("quantity")) for row in rows)
+    return remaining
+
+
 def _resolve_waste_unit_cost_snapshot(
     ingredient_row: Dict[str, Any], purchase_row: Optional[Dict[str, Any]]
 ) -> float:
@@ -3817,36 +3869,56 @@ def _resolve_waste_unit_cost_snapshot(
     return _safe_float(ingredient_row.get("cost_per_unit"))
 
 
+def _resolve_ingredient_stock_column(ingredient_row: Optional[Dict[str, Any]]) -> str:
+    if ingredient_row:
+        if "stock_on_hand" in ingredient_row:
+            return "stock_on_hand"
+        if "current_stock" in ingredient_row:
+            return "current_stock"
+    return "stock_on_hand"
+
+
 def _update_ingredient_stock_for_waste(
     client: Client,
     ingredient_id: str,
     store_id: str,
     *,
     new_stock: float,
+    ingredient_row: Optional[Dict[str, Any]] = None,
 ) -> None:
-    payload: Dict[str, Any] = {
-        "stock_on_hand": new_stock,
-        "cost_updated_at": datetime.utcnow().replace(tzinfo=timezone.utc).isoformat(),
-    }
+    timestamp_iso = datetime.utcnow().replace(tzinfo=timezone.utc).isoformat()
+    preferred_column = _resolve_ingredient_stock_column(ingredient_row)
+    fallback_column = "current_stock" if preferred_column == "stock_on_hand" else "stock_on_hand"
+    columns_to_try = [preferred_column]
+    if fallback_column not in columns_to_try:
+        columns_to_try.append(fallback_column)
 
-    def _exec(update_payload: Dict[str, Any]):
-        return client.table("ingredients").update(update_payload).eq("id", ingredient_id).eq("store_id", store_id).execute()
+    def _exec(update_payload: Dict[str, Any]) -> tuple[Optional[Any], Optional[Any]]:
+        try:
+            resp_local = (
+                client.table("ingredients")
+                .update(update_payload)
+                .eq("id", ingredient_id)
+                .eq("store_id", store_id)
+                .execute()
+            )
+            return resp_local, getattr(resp_local, "error", None)
+        except Exception as exc:  # pragma: no cover - defensive against transport errors
+            return None, exc
 
-    attempt = dict(payload)
-    resp = _exec(attempt)
-    err = getattr(resp, "error", None)
-    if err and _is_missing_column(err, "stock_on_hand"):
-        stock_value = attempt.pop("stock_on_hand", None)
-        if stock_value is not None:
-            attempt["current_stock"] = stock_value
-        resp = _exec(attempt)
-        err = getattr(resp, "error", None)
-    if err and _is_missing_column(err, "cost_updated_at"):
-        attempt.pop("cost_updated_at", None)
-        resp = _exec(attempt)
-        err = getattr(resp, "error", None)
-    if err:
+    for column in columns_to_try:
+        payload: Dict[str, Any] = {column: new_stock, "cost_updated_at": timestamp_iso}
+        resp, err = _exec(dict(payload))
+        if err and _is_missing_column(err, "cost_updated_at"):
+            trimmed = dict(payload)
+            trimmed.pop("cost_updated_at", None)
+            resp, err = _exec(trimmed)
+        if not err:
+            return
+        if _is_missing_column(err, column):
+            continue
         raise HTTPException(status_code=500, detail="ingredient_waste_update_failed")
+    raise HTTPException(status_code=500, detail="ingredient_waste_update_failed")
 
 
 def _insert_waste_stock_movement(
@@ -3899,6 +3971,54 @@ def _insert_waste_stock_movement(
         raise HTTPException(status_code=500, detail="stock_movement_create_failed")
 
 
+def _cleanup_failed_waste_creation(
+    client: Client,
+    *,
+    store_id: str,
+    ingredient_id: str,
+    ingredient_row: Dict[str, Any],
+    original_stock: float,
+    movement_id: Optional[str],
+    stock_was_updated: bool,
+) -> None:
+    if stock_was_updated:
+        try:
+            _update_ingredient_stock_for_waste(
+                client,
+                ingredient_id,
+                store_id,
+                new_stock=original_stock,
+                ingredient_row=ingredient_row,
+            )
+        except HTTPException as exc:  # pragma: no cover - best effort logging
+            logger.warning(
+                "ingredient_waste_cleanup_stock_failed ingredient_id=%s detail=%s",
+                ingredient_id,
+                getattr(exc, "detail", str(exc)),
+            )
+        except Exception as exc:  # pragma: no cover - best effort logging
+            logger.warning(
+                "ingredient_waste_cleanup_stock_failed ingredient_id=%s detail=%s",
+                ingredient_id,
+                str(exc),
+            )
+    if movement_id:
+        try:
+            (
+                client.table("stock_movements")
+                .delete()
+                .eq("id", movement_id)
+                .eq("store_id", store_id)
+                .execute()
+            )
+        except Exception as exc:  # pragma: no cover - best effort logging
+            logger.warning(
+                "ingredient_waste_cleanup_movement_failed movement_id=%s detail=%s",
+                movement_id,
+                str(exc),
+            )
+
+
 def _map_waste_record(row: Dict[str, Any]) -> IngredientWasteRecordSummary:
     return IngredientWasteRecordSummary(
         id=str(row.get("id")),
@@ -3910,7 +4030,7 @@ def _map_waste_record(row: Dict[str, Any]) -> IngredientWasteRecordSummary:
         unit=row.get("unit"),
         unit_cost_snapshot=_safe_float(row.get("unit_cost_snapshot")),
         total_cost=_safe_float(row.get("total_cost")),
-        reason=str(row.get("reason") or ""),
+        reason=_normalize_waste_reason(row.get("reason"), strict=False),
         wasted_at=row.get("wasted_at"),
         note=row.get("note"),
         created_by=row.get("created_by"),
@@ -4112,7 +4232,15 @@ def list_ingredient_waste_records(
         query = query.eq("ingredient_id", ingredient_id)
     normalized_reason = (reason or "").strip().lower()
     if normalized_reason:
-        query = query.eq("reason", normalized_reason)
+        resolved_reason = _normalize_waste_reason(normalized_reason)
+        filter_values = [resolved_reason]
+        alias_value = _WASTE_MOVEMENT_REASON_MAP.get(resolved_reason)
+        if alias_value and alias_value != resolved_reason:
+            filter_values.append(alias_value)
+        if len(filter_values) == 1:
+            query = query.eq("reason", filter_values[0])
+        else:
+            query = query.in_("reason", filter_values)
     start_iso = _normalize_optional_datetime_or_date(start_date, field="start_date")
     end_iso = _normalize_optional_datetime_or_date(end_date, field="end_date")
     if start_iso:
@@ -4150,54 +4278,86 @@ def create_ingredient_waste(
         purchase_ing_id = str(purchase_row.get("ingredient_id")) if purchase_row.get("ingredient_id") else None
         if purchase_ing_id and purchase_ing_id != sanitized["ingredient_id"]:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="purchase_mismatch")
+        remaining_quantity = _get_purchase_remaining_quantity(ctx["client"], store_id_resolved, sanitized["purchase_id"])
+        if remaining_quantity is not None and sanitized["quantity"] > remaining_quantity + 1e-6:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="insufficient_lot_stock_for_waste")
 
     unit = ingredient_row.get("unit")
     unit_cost_snapshot = _resolve_waste_unit_cost_snapshot(ingredient_row, purchase_row)
     total_cost = round(sanitized["quantity"] * unit_cost_snapshot, 4)
 
-    movement_row = _insert_waste_stock_movement(
-        ctx["client"],
-        store_id_resolved,
-        sanitized["ingredient_id"],
-        quantity=sanitized["quantity"],
-        unit=unit,
-        purchase_id=sanitized.get("purchase_id"),
-        reason=sanitized["reason"],
-        unit_cost_snapshot=unit_cost_snapshot,
-        created_by=ctx.get("user_id"),
-    )
+    movement_row: Optional[Dict[str, Any]] = None
+    stock_updated = False
+    record_row: Dict[str, Any]
+    movement_reason = _WASTE_MOVEMENT_REASON_MAP.get(sanitized["reason"], sanitized["reason"])
 
-    new_stock = available_stock - sanitized["quantity"]
-    if new_stock < 0:
-        new_stock = 0.0
-    _update_ingredient_stock_for_waste(
-        ctx["client"],
-        sanitized["ingredient_id"],
-        store_id_resolved,
-        new_stock=new_stock,
-    )
+    def _revert_side_effects() -> None:
+        if not (movement_row or stock_updated):
+            return
+        movement_id = str(movement_row.get("id")) if movement_row and movement_row.get("id") else None
+        _cleanup_failed_waste_creation(
+            ctx["client"],
+            store_id=store_id_resolved,
+            ingredient_id=sanitized["ingredient_id"],
+            ingredient_row=ingredient_row,
+            original_stock=available_stock,
+            movement_id=movement_id,
+            stock_was_updated=stock_updated,
+        )
 
-    record_payload: Dict[str, Any] = {
-        "store_id": store_id_resolved,
-        "ingredient_id": sanitized["ingredient_id"],
-        "purchase_id": sanitized.get("purchase_id"),
-        "stock_movement_id": movement_row.get("id"),
-        "quantity": sanitized["quantity"],
-        "unit": unit,
-        "unit_cost_snapshot": unit_cost_snapshot,
-        "total_cost": total_cost,
-        "reason": sanitized["reason"],
-        "wasted_at": sanitized["wasted_at"],
-        "note": sanitized.get("note"),
-        "created_by": ctx.get("user_id"),
-    }
+    try:
+        movement_row = _insert_waste_stock_movement(
+            ctx["client"],
+            store_id_resolved,
+            sanitized["ingredient_id"],
+            quantity=sanitized["quantity"],
+            unit=unit,
+            purchase_id=sanitized.get("purchase_id"),
+            reason=movement_reason,
+            unit_cost_snapshot=unit_cost_snapshot,
+            created_by=ctx.get("user_id"),
+        )
 
-    resp = ctx["client"].table("ingredient_waste_records").insert(record_payload).execute()
-    err = getattr(resp, "error", None)
-    if err:
-        raise HTTPException(status_code=500, detail="ingredient_waste_create_failed")
-    rows = getattr(resp, "data", None) or []
-    record_row = rows[0] if rows else record_payload
+        new_stock = available_stock - sanitized["quantity"]
+        if new_stock < 0:
+            new_stock = 0.0
+        _update_ingredient_stock_for_waste(
+            ctx["client"],
+            sanitized["ingredient_id"],
+            store_id_resolved,
+            new_stock=new_stock,
+            ingredient_row=ingredient_row,
+        )
+        stock_updated = True
+
+        record_payload: Dict[str, Any] = {
+            "store_id": store_id_resolved,
+            "ingredient_id": sanitized["ingredient_id"],
+            "purchase_id": sanitized.get("purchase_id"),
+            "stock_movement_id": movement_row.get("id"),
+            "quantity": sanitized["quantity"],
+            "unit": unit,
+            "unit_cost_snapshot": unit_cost_snapshot,
+            "total_cost": total_cost,
+            "reason": sanitized["reason"],
+            "wasted_at": sanitized["wasted_at"],
+            "note": sanitized.get("note"),
+            "created_by": ctx.get("user_id"),
+        }
+
+        resp = ctx["client"].table("ingredient_waste_records").insert(record_payload).execute()
+        err = getattr(resp, "error", None)
+        if err:
+            raise HTTPException(status_code=500, detail="ingredient_waste_create_failed")
+        rows = getattr(resp, "data", None) or []
+        record_row = rows[0] if rows else record_payload
+    except HTTPException:
+        _revert_side_effects()
+        raise
+    except Exception as exc:
+        _revert_side_effects()
+        raise HTTPException(status_code=500, detail="ingredient_waste_create_failed") from exc
+
     return IngredientWasteResponse(record=_map_waste_record(record_row))
 
 
