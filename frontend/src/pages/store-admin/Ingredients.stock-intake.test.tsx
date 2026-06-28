@@ -201,6 +201,8 @@ describe("StoreAdminIngredientsPage", () => {
 
   it("renders canonical base unit selector with guidance", async () => {
     renderPage();
+    // Master ingredient fields now live in a dedicated modal opened from the toolbar.
+    fireEvent.click(await screen.findByRole("button", { name: "เพิ่มวัตถุดิบ" }));
     await screen.findByText("ชื่อวัตถุดิบ");
     expect(
       screen.getByText("เลือกหน่วยฐานที่ใช้ในสูตร เช่น กาแฟใช้ g, นมหรือน้ำใช้ ml, แก้ว+ฝาใช้ set, หลอดหรือสติ๊กเกอร์ใช้ pcs"),
@@ -217,7 +219,7 @@ describe("StoreAdminIngredientsPage", () => {
   it("includes expiry payload when perishable fields are provided", async () => {
     await openModal();
     fireEvent.change(getFormFieldControl<HTMLInputElement>("ต้นทุนรวม (฿)"), { target: { value: "150" } });
-    fireEvent.click(screen.getByLabelText("มีวันหมดอายุ"));
+    fireEvent.click(screen.getByLabelText("วัตถุดิบนี้มีวันหมดอายุ"));
     fireEvent.change(getFormFieldControl<HTMLInputElement>("รหัส Lot (ไม่บังคับ)"), { target: { value: "LOT-42" } });
     fireEvent.change(getFormFieldControl<HTMLInputElement>("วันหมดอายุ (ไม่บังคับ)"), { target: { value: "2026-05-01" } });
     const noteField = getFormFieldControl<HTMLTextAreaElement>("หมายเหตุเพิ่มเติม (เช่น วิธีเก็บ, กลิ่น, สี)", "textarea");
@@ -338,7 +340,6 @@ describe("StoreAdminIngredientsPage", () => {
     const payload = mockCreateIngredientWaste.mock.calls.at(-1)?.[0];
     expect(payload).toMatchObject({ ingredient_id: "ing-1", quantity: 500 });
   });
-
   it("shows friendly message when network fails during waste submission", async () => {
     mockCreateIngredientWaste.mockRejectedValueOnce(new Error("Failed to fetch"));
     renderPage();

@@ -1,5 +1,20 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CheckCircle2, ChevronDown, Loader2, Plus, RefreshCw } from "lucide-react";
+import {
+  AlertTriangle,
+  Boxes,
+  CalendarClock,
+  CheckCircle2,
+  ChevronDown,
+  Clock,
+  Info,
+  Loader2,
+  PackageOpen,
+  Pencil,
+  Plus,
+  PlusCircle,
+  RefreshCw,
+  Trash2,
+} from "lucide-react";
 import AdminLayout from "@/components/admin/AdminLayout";
 import DataTable from "@/components/shared/DataTable";
 import FormField from "@/components/shared/FormField";
@@ -239,6 +254,7 @@ export default function StoreAdminIngredientsPage() {
   const [info, setInfo] = useState("");
   const [refreshing, setRefreshing] = useState(false);
   const [form, setForm] = useState<FormState>(emptyForm);
+  const [ingredientModalOpen, setIngredientModalOpen] = useState(false);
   const [intakeOpen, setIntakeOpen] = useState(false);
   const [intakeError, setIntakeError] = useState("");
   const [intakeSubmitting, setIntakeSubmitting] = useState(false);
@@ -317,6 +333,18 @@ export default function StoreAdminIngredientsPage() {
     }
     return map;
   }, [inventoryAlerts]);
+
+  const summaryStats = useMemo(() => {
+    const lowStockCount = rows.filter(
+      (r) => (r.is_active ?? true) && r.low_stock_threshold > 0 && r.current_stock <= r.low_stock_threshold,
+    ).length;
+    return {
+      total: rows.length,
+      lowStock: lowStockCount,
+      nearExpiry: inventoryAlerts?.summary.near_expiry_count ?? 0,
+      expired: inventoryAlerts?.summary.expired_count ?? 0,
+    };
+  }, [rows, inventoryAlerts]);
 
   const selectedWasteIngredient = useMemo(() => rows.find((r) => r.id === wasteForm.ingredientId), [rows, wasteForm.ingredientId]);
   const ingredientLookup = useMemo(() => {
@@ -516,6 +544,7 @@ export default function StoreAdminIngredientsPage() {
         setInfo("เพิ่มวัตถุดิบแล้ว");
       }
       setForm(emptyForm);
+      setIngredientModalOpen(false);
       void refresh();
     } catch (err: any) {
       const reason = err?.message || "บันทึกไม่สำเร็จ";
@@ -630,6 +659,32 @@ export default function StoreAdminIngredientsPage() {
     } finally {
       setWasteSubmitting(false);
     }
+  };
+
+  const openIngredientModal = (ingredient?: ApiIngredient) => {
+    setError("");
+    setInfo("");
+    if (ingredient) {
+      setForm({
+        id: ingredient.id,
+        name: ingredient.name,
+        unit: isIngredientBaseUnit(ingredient.unit) ? ingredient.unit : "",
+        costPerUnit: String(ingredient.cost_per_unit),
+        currentStock: String(ingredient.current_stock),
+        lowStockThreshold: String(ingredient.low_stock_threshold),
+        supplierName: ingredient.supplier_name || "",
+        isActive: ingredient.is_active ?? true,
+      });
+    } else {
+      setForm(emptyForm);
+    }
+    setIngredientModalOpen(true);
+  };
+
+  const closeIngredientModal = () => {
+    setIngredientModalOpen(false);
+    setForm(emptyForm);
+    setError("");
   };
 
   const openIntakeModal = (ingredient?: ApiIngredient) => {
@@ -753,76 +808,97 @@ export default function StoreAdminIngredientsPage() {
 
   return (
     <AdminLayout title="วัตถุดิบ" subtitle="จัดการข้อมูลวัตถุดิบ ต้นทุนต่อหน่วย และสถานะสต็อก">
-      <div className="stat-card space-y-3 mb-6">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <h2 className="section-title text-base">{form.id ? "แก้ไขวัตถุดิบ" : "เพิ่มวัตถุดิบ"}</h2>
-            {refreshing ? <div className="flex items-center gap-1 text-xs text-muted-foreground"><RefreshCw className="w-3 h-3 animate-spin" /> กำลังโหลด</div> : null}
-          </div>
-          <button type="button" className="inline-flex items-center gap-2 rounded border px-3 py-2 text-sm" onClick={() => openIntakeModal()}>
-            <Plus className="w-4 h-4" /> บันทึกซื้อเข้าสต็อก
-          </button>
-        </div>
-        <div className="grid md:grid-cols-3 gap-3">
-          <FormField label="ชื่อวัตถุดิบ">
-            <input className="form-input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-          </FormField>
-          <FormField label="หน่วยฐานที่ใช้ในสูตร" hint={UNIT_HELPER_TEXT}>
-            <select
-              className="form-input"
-              value={form.unit}
-              onChange={(e) => {
-                const nextValue = e.target.value;
-                setForm((prev) => ({ ...prev, unit: isIngredientBaseUnit(nextValue) ? nextValue : "" }));
-              }}
-            >
-              <option value="" disabled>
-                เลือกหน่วยฐาน
-              </option>
-              {BASE_UNIT_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </FormField>
-          <FormField label="ต้นทุนตั้งต้นต่อหน่วย (ถ้ายังไม่มีรายการซื้อเข้า)" hint={COST_HELPER_TEXT}>
-            <input type="number" className="form-input" min={0} value={form.costPerUnit} onChange={(e) => setForm({ ...form, costPerUnit: e.target.value })} />
-          </FormField>
-          <FormField label="สต็อกตั้งต้น" hint={STOCK_HELPER_TEXT}>
-            <input type="number" className="form-input" min={0} value={form.currentStock} onChange={(e) => setForm({ ...form, currentStock: e.target.value })} />
-          </FormField>
-          <FormField label="แจ้งเตือนต่ำกว่า">
-            <input type="number" className="form-input" min={0} value={form.lowStockThreshold} onChange={(e) => setForm({ ...form, lowStockThreshold: e.target.value })} />
-          </FormField>
-          <FormField label="ผู้จัดจำหน่าย (ถ้ามี)">
-            <input className="form-input" value={form.supplierName} onChange={(e) => setForm({ ...form, supplierName: e.target.value })} />
-          </FormField>
-          <FormField label="สถานะ">
-            <select className="form-input" value={form.isActive ? "active" : "inactive"} onChange={(e) => setForm({ ...form, isActive: e.target.value === "active" })}>
-              <option value="active">เปิดใช้งาน</option>
-              <option value="inactive">ปิดใช้งาน</option>
-            </select>
-          </FormField>
-        </div>
-        {error ? <p className="text-sm text-destructive">{error}</p> : null}
-        {info ? <p className="text-sm text-muted-foreground">{info}</p> : null}
-        <div className="flex gap-2">
-          <button type="button" className="bg-primary text-primary-foreground px-4 py-2 rounded" onClick={handleSubmit}>
-            {form.id ? "บันทึกการแก้ไข" : "เพิ่มวัตถุดิบ"}
-          </button>
-          {form.id ? (
-            <button type="button" className="px-4 py-2 rounded border" onClick={() => setForm(emptyForm)}>
-              ยกเลิก
-            </button>
+      {error || info ? (
+        <div className="space-y-2">
+          {error ? (
+            <div className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>{error}</span>
+            </div>
+          ) : null}
+          {info ? (
+            <div className="flex items-start gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+              <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>{info}</span>
+            </div>
           ) : null}
         </div>
-      </div>
+      ) : null}
+
+      {isManagerRole ? (
+        <section className="grid grid-cols-2 lg:grid-cols-4 gap-3" aria-label="สรุปสถานะวัตถุดิบ">
+          <div className="kpi-card">
+            <div className="flex items-center justify-between">
+              <span className="metric-label">วัตถุดิบทั้งหมด</span>
+              <Boxes className="h-4 w-4 text-muted-foreground" />
+            </div>
+            <span className="metric-value">{summaryStats.total}</span>
+            <span className="text-xs text-muted-foreground">รายการในทะเบียน</span>
+          </div>
+          <div className="kpi-card">
+            <div className="flex items-center justify-between">
+              <span className="metric-label">สต็อกเหลือน้อย</span>
+              <PackageOpen className={`h-4 w-4 ${summaryStats.lowStock > 0 ? "text-amber-600" : "text-muted-foreground"}`} />
+            </div>
+            <span className={`metric-value ${summaryStats.lowStock > 0 ? "text-amber-600" : ""}`}>{summaryStats.lowStock}</span>
+            <span className="text-xs text-muted-foreground">ต่ำกว่าจุดแจ้งเตือน</span>
+          </div>
+          <div className="kpi-card">
+            <div className="flex items-center justify-between">
+              <span className="metric-label">ล็อตใกล้หมดอายุ</span>
+              <Clock className={`h-4 w-4 ${summaryStats.nearExpiry > 0 ? "text-amber-600" : "text-muted-foreground"}`} />
+            </div>
+            <span className={`metric-value ${summaryStats.nearExpiry > 0 ? "text-amber-600" : ""}`}>{summaryStats.nearExpiry}</span>
+            <span className="text-xs text-muted-foreground">ควรใช้ก่อนหมดอายุ</span>
+          </div>
+          <div className="kpi-card">
+            <div className="flex items-center justify-between">
+              <span className="metric-label">ล็อตหมดอายุแล้ว</span>
+              <AlertTriangle className={`h-4 w-4 ${summaryStats.expired > 0 ? "text-destructive" : "text-muted-foreground"}`} />
+            </div>
+            <span className={`metric-value ${summaryStats.expired > 0 ? "text-destructive" : ""}`}>{summaryStats.expired}</span>
+            <span className="text-xs text-muted-foreground">ควรตรวจสอบ/ตัดทิ้ง</span>
+          </div>
+        </section>
+      ) : null}
+
+      <section className="stat-card space-y-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <h2 className="section-title text-base">รายการวัตถุดิบ</h2>
+              {refreshing ? (
+                <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                  <RefreshCw className="h-3 w-3 animate-spin" /> กำลังโหลด
+                </span>
+              ) : null}
+            </div>
+            <p className="text-sm text-muted-foreground">
+              ทะเบียนข้อมูลหลักของวัตถุดิบ — แก้ไขชื่อ หน่วย ต้นทุนตั้งต้น และจุดแจ้งเตือนได้ที่นี่ ส่วนการเพิ่มจำนวนสต็อกให้ใช้ปุ่ม “บันทึกซื้อเข้าสต็อก”
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              className="inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium hover:bg-muted/50 transition-colors"
+              onClick={() => openIntakeModal()}
+            >
+              <PackageOpen className="h-4 w-4" /> บันทึกซื้อเข้าสต็อก
+            </button>
+            <button
+              type="button"
+              className="inline-flex items-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+              onClick={() => openIngredientModal()}
+            >
+              <Plus className="h-4 w-4" /> เพิ่มวัตถุดิบ
+            </button>
+          </div>
+        </div>
 
       {loading ? (
         <LoadingState />
       ) : rows.length === 0 ? (
-        <EmptyState title="ยังไม่มีวัตถุดิบ" description="เพิ่มวัตถุดิบเพื่อเริ่มต้น" />
+        <EmptyState title="ยังไม่มีวัตถุดิบ" description="กดปุ่ม “เพิ่มวัตถุดิบ” เพื่อเริ่มสร้างทะเบียนวัตถุดิบ" />
       ) : (
         <DataTable
           columns={[
@@ -873,30 +949,27 @@ export default function StoreAdminIngredientsPage() {
               key: "actions",
               header: "จัดการ",
               render: (r) => (
-                <div className="flex flex-wrap gap-3 text-sm">
-                  <button type="button" className="underline" onClick={() => openIntakeModal(r)}>
-                    บันทึกสต็อก
+                <div className="flex flex-wrap items-center gap-1.5 text-sm">
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs font-medium hover:bg-muted/50 transition-colors"
+                    onClick={() => openIntakeModal(r)}
+                  >
+                    <PackageOpen className="h-3.5 w-3.5" /> บันทึกสต็อก
                   </button>
                   <button
                     type="button"
-                    className="underline"
-                    onClick={() =>
-                      setForm({
-                        id: r.id,
-                        name: r.name,
-                        unit: isIngredientBaseUnit(r.unit) ? r.unit : "",
-                        costPerUnit: String(r.cost_per_unit),
-                        currentStock: String(r.current_stock),
-                        lowStockThreshold: String(r.low_stock_threshold),
-                        supplierName: r.supplier_name || "",
-                        isActive: r.is_active ?? true,
-                      })
-                    }
+                    className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs font-medium hover:bg-muted/50 transition-colors"
+                    onClick={() => openIngredientModal(r)}
                   >
-                    แก้ไข
+                    <Pencil className="h-3.5 w-3.5" /> แก้ไข
                   </button>
-                  <button type="button" className="underline" onClick={() => handleDelete(r.id)}>
-                    ลบ/ปิดใช้งาน
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1 rounded-md border border-destructive/30 px-2 py-1 text-xs font-medium text-destructive hover:bg-destructive/5 transition-colors"
+                    onClick={() => handleDelete(r.id)}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" /> ลบ/ปิดใช้งาน
                   </button>
                 </div>
               ),
@@ -905,6 +978,7 @@ export default function StoreAdminIngredientsPage() {
           rows={rows}
         />
       )}
+      </section>
 
       {shouldShowWasteSection ? (
         <section className="mt-10 space-y-4 border-t pt-8">
@@ -1100,14 +1174,104 @@ export default function StoreAdminIngredientsPage() {
         </section>
       ) : null}
 
-      <Dialog open={intakeOpen} onOpenChange={handleDialogOpenChange}>
-        <DialogContent className="max-w-3xl">
+      <Dialog open={ingredientModalOpen} onOpenChange={(open) => (open ? setIngredientModalOpen(true) : closeIngredientModal())}>
+        <DialogContent className="max-w-2xl">
           <DialogHeader>
+            <DialogTitle>{form.id ? "แก้ไขวัตถุดิบ" : "เพิ่มวัตถุดิบใหม่"}</DialogTitle>
+            <DialogDescription>
+              ข้อมูลหลัก (ทะเบียน) ของวัตถุดิบ ใช้คิดต้นทุนและตั้งจุดแจ้งเตือนสต็อก — การเพิ่มจำนวนสต็อกจริงให้ใช้ปุ่ม “บันทึกซื้อเข้าสต็อก”
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-5">
+            {error ? (
+              <div className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>{error}</span>
+              </div>
+            ) : null}
+
+            <div className="space-y-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">ข้อมูลทั่วไป</p>
+              <div className="grid md:grid-cols-2 gap-3">
+                <FormField label="ชื่อวัตถุดิบ">
+                  <input className="form-input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+                </FormField>
+                <FormField label="หน่วยฐานที่ใช้ในสูตร" hint={UNIT_HELPER_TEXT}>
+                  <select
+                    className="form-input"
+                    value={form.unit}
+                    onChange={(e) => {
+                      const nextValue = e.target.value;
+                      setForm((prev) => ({ ...prev, unit: isIngredientBaseUnit(nextValue) ? nextValue : "" }));
+                    }}
+                  >
+                    <option value="" disabled>
+                      เลือกหน่วยฐาน
+                    </option>
+                    {BASE_UNIT_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </FormField>
+                <FormField label="ผู้จัดจำหน่าย (ถ้ามี)">
+                  <input className="form-input" value={form.supplierName} onChange={(e) => setForm({ ...form, supplierName: e.target.value })} />
+                </FormField>
+                <FormField label="สถานะ">
+                  <select className="form-input" value={form.isActive ? "active" : "inactive"} onChange={(e) => setForm({ ...form, isActive: e.target.value === "active" })}>
+                    <option value="active">เปิดใช้งาน</option>
+                    <option value="inactive">ปิดใช้งาน</option>
+                  </select>
+                </FormField>
+              </div>
+            </div>
+
+            <div className="space-y-3 border-t pt-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">ต้นทุนและการแจ้งเตือนสต็อก</p>
+              <div className="grid md:grid-cols-3 gap-3">
+                <FormField label="ต้นทุนตั้งต้นต่อหน่วย (ถ้ายังไม่มีรายการซื้อเข้า)" hint={COST_HELPER_TEXT}>
+                  <input type="number" className="form-input" min={0} value={form.costPerUnit} onChange={(e) => setForm({ ...form, costPerUnit: e.target.value })} />
+                </FormField>
+                <FormField label="สต็อกตั้งต้น" hint={STOCK_HELPER_TEXT}>
+                  <input type="number" className="form-input" min={0} value={form.currentStock} onChange={(e) => setForm({ ...form, currentStock: e.target.value })} />
+                </FormField>
+                <FormField label="แจ้งเตือนต่ำกว่า">
+                  <input type="number" className="form-input" min={0} value={form.lowStockThreshold} onChange={(e) => setForm({ ...form, lowStockThreshold: e.target.value })} />
+                </FormField>
+              </div>
+            </div>
+          </div>
+          <DialogFooter className="flex flex-wrap justify-end gap-2">
+            <button type="button" className="px-4 py-2 rounded-lg border" onClick={closeIngredientModal}>
+              ยกเลิก
+            </button>
+            <button
+              type="button"
+              className="px-4 py-2 rounded-lg bg-primary text-primary-foreground disabled:opacity-50"
+              disabled={!valid}
+              onClick={handleSubmit}
+            >
+              {form.id ? "บันทึกการแก้ไข" : "บันทึกวัตถุดิบ"}
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={intakeOpen} onOpenChange={handleDialogOpenChange}>
+        <DialogContent className="max-w-3xl max-h-[85vh] flex flex-col gap-0 p-0 overflow-hidden">
+          <DialogHeader className="shrink-0 space-y-1 border-b px-6 py-4 pr-12 text-left">
             <DialogTitle>บันทึกซื้อเข้าสต็อก</DialogTitle>
             <DialogDescription>บันทึกปริมาณและต้นทุนเพื่อปรับปรุงสต็อกและค่าเฉลี่ยอัตโนมัติ</DialogDescription>
           </DialogHeader>
-          <div className="space-y-4">
-            {intakeError ? <p className="text-sm text-destructive">{intakeError}</p> : null}
+          <div className="flex-1 min-h-0 overflow-y-auto px-6 py-4 space-y-4">
+            {intakeError ? (
+              <div className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>{intakeError}</span>
+              </div>
+            ) : null}
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">ข้อมูลการซื้อ</p>
             <div className="grid md:grid-cols-2 gap-3">
               <FormField label="วัตถุดิบ">
                 <select className="form-input" value={intakeForm.ingredientId} onChange={(e) => handleIntakeChange("ingredientId", e.target.value)}>
@@ -1190,42 +1354,29 @@ export default function StoreAdminIngredientsPage() {
                   : "ต้นทุนต่อหน่วยโดยประมาณ: -"}
               </span>
             </div>
-            <div className="rounded-lg border border-dashed p-4 space-y-2">
-              <FileUploadField
-                label="แนบรูปใบเสร็จ / สลิปซื้อของ (ไม่บังคับ)"
-                description="รองรับไฟล์ JPG, PNG, WEBP ไม่เกิน 5MB"
-                accept={RECEIPT_ALLOWED_TYPES.join(",")}
-                disabled={intakeSubmitting || intakeForm.receiptUploading}
-                file={intakeForm.receiptFile ?? null}
-                onFileSelect={(file) => setIntakeForm((prev) => ({ ...prev, receiptFile: file, receiptError: null }))}
-                error={intakeForm.receiptError ?? undefined}
-              />
-              {intakeForm.receiptUploading ? (
-                <p className="text-xs text-muted-foreground flex items-center gap-1">
-                  <Loader2 className="h-3 w-3 animate-spin" /> กำลังอัปโหลดใบเสร็จ...
-                </p>
-              ) : null}
-            </div>
-            <div className="rounded-lg border p-4 space-y-3">
+            <div className="rounded-lg border border-primary/30 bg-primary/5 p-3 space-y-2">
               <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="font-medium text-sm">ของสด / วันหมดอายุ (ถ้ามี)</p>
-                  <p className="text-xs text-muted-foreground">
-                    ติ๊กช่องนี้ถ้าวัตถุดิบล็อตนี้เป็นของสดหรือมีวันหมดอายุ จะได้คอยเตือนให้ใช้ก่อนหมดอายุ และตามล็อตที่มีปัญหาได้ง่ายขึ้น (ไม่บังคับ)
-                  </p>
+                <div className="flex items-start gap-2 min-w-0">
+                  <CalendarClock className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                  <div className="min-w-0">
+                    <p className="font-semibold text-sm">ของสด / วันหมดอายุ</p>
+                    <p className="text-xs text-muted-foreground">
+                      ติ๊กถ้าวัตถุดิบล็อตนี้เป็นของสดหรือมีวันหมดอายุ ระบบจะช่วยเตือนให้ใช้ก่อนหมดอายุ และตามล็อตที่มีปัญหาได้ง่ายขึ้น (ไม่บังคับ)
+                    </p>
+                  </div>
                 </div>
-                <label className="inline-flex items-center gap-2 text-sm whitespace-nowrap">
+                <label className="inline-flex items-center gap-2 text-sm font-medium whitespace-nowrap cursor-pointer shrink-0">
                   <input
                     type="checkbox"
-                    className="form-checkbox"
+                    className="form-checkbox h-4 w-4"
                     checked={intakeForm.isPerishable}
                     onChange={(e) => handleIntakeChange("isPerishable", e.target.checked)}
                   />
-                  มีวันหมดอายุ
+                  วัตถุดิบนี้มีวันหมดอายุ
                 </label>
               </div>
               {intakeForm.isPerishable ? (
-                <>
+                <div className="space-y-2 border-t border-primary/20 pt-2">
                   <div className="grid md:grid-cols-2 gap-3">
                     <FormField label="รหัส Lot (ไม่บังคับ)" hint="รหัสล็อต/รุ่นที่ติดมากับสินค้า ไว้ตามล็อตเวลามีปัญหา">
                       <input className="form-input" value={intakeForm.lotCode} onChange={(e) => handleIntakeChange("lotCode", e.target.value)} placeholder="เช่น LOT-0425" />
@@ -1240,58 +1391,73 @@ export default function StoreAdminIngredientsPage() {
                     </div>
                   </div>
                   {!intakeForm.expiresAt ? (
-                    <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2">
-                      แนะนำให้ใส่วันหมดอายุ ระบบจะได้ช่วยเตือนให้ใช้ของล็อตนี้ก่อน (ไม่บังคับ)
+                    <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2 flex items-start gap-1.5">
+                      <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                      <span>แนะนำให้ใส่วันหมดอายุ ระบบจะได้ช่วยเตือนให้ใช้ของล็อตนี้ก่อน (ไม่บังคับ)</span>
                     </p>
                   ) : null}
-                </>
-              ) : (
-                <p className="text-xs text-muted-foreground">ถ้าเป็นของแห้งหรือของที่ไม่มีวันหมดอายุ ข้ามส่วนนี้ได้เลย</p>
-              )}
+                </div>
+              ) : null}
             </div>
             <Collapsible open={additionalOpen} onOpenChange={setAdditionalOpen}>
               <div className="rounded-lg border p-3">
                 <CollapsibleTrigger className="flex w-full items-center justify-between text-sm font-medium">
-                  <span>รายละเอียดเพิ่มเติม</span>
+                  <span>แนบใบเสร็จ / รายละเอียดเพิ่มเติม (ไม่บังคับ)</span>
                   <ChevronDown className="h-4 w-4 transition-transform data-[state=open]:rotate-180" />
                 </CollapsibleTrigger>
                 <CollapsibleContent>
-                  <div className="mt-3 grid md:grid-cols-2 gap-3">
-                    <FormField label="ผู้จัดจำหน่าย">
-                      <input className="form-input" value={intakeForm.supplierName} onChange={(e) => handleIntakeChange("supplierName", e.target.value)} />
-                    </FormField>
-                    <FormField label="สถานะการชำระ">
-                      <select className="form-input" value={intakeForm.paymentStatus} onChange={(e) => handlePaymentStatusChange(e.target.value as "paid" | "unpaid")}>
-                        <option value="paid">ชำระแล้ว</option>
-                        <option value="unpaid">ยังไม่ชำระ</option>
-                      </select>
-                    </FormField>
-                    <FormField label="วันที่ชำระ">
-                      <input type="datetime-local" className="form-input" value={intakeForm.paidAt} onChange={(e) => handleIntakeChange("paidAt", e.target.value)} />
-                    </FormField>
-                    {intakeForm.paymentStatus === "unpaid" ? (
-                      <FormField label="กำหนดชำระ">
-                        <input type="date" className="form-input" value={intakeForm.dueDate} onChange={(e) => handleIntakeChange("dueDate", e.target.value)} />
-                      </FormField>
+                  <div className="mt-3 space-y-3">
+                    <FileUploadField
+                      label="แนบรูปใบเสร็จ / สลิปซื้อของ (ไม่บังคับ)"
+                      description="รองรับไฟล์ JPG, PNG, WEBP ไม่เกิน 5MB"
+                      accept={RECEIPT_ALLOWED_TYPES.join(",")}
+                      disabled={intakeSubmitting || intakeForm.receiptUploading}
+                      file={intakeForm.receiptFile ?? null}
+                      onFileSelect={(file) => setIntakeForm((prev) => ({ ...prev, receiptFile: file, receiptError: null }))}
+                      error={intakeForm.receiptError ?? undefined}
+                    />
+                    {intakeForm.receiptUploading ? (
+                      <p className="text-xs text-muted-foreground flex items-center gap-1">
+                        <Loader2 className="h-3 w-3 animate-spin" /> กำลังอัปโหลดใบเสร็จ...
+                      </p>
                     ) : null}
-                    <div className="md:col-span-2">
-                      <FormField label="บันทึกเพิ่มเติม">
-                        <textarea className="form-input" rows={3} value={intakeForm.note} onChange={(e) => handleIntakeChange("note", e.target.value)} />
+                    <div className="grid md:grid-cols-2 gap-3 border-t pt-3">
+                      <FormField label="ผู้จัดจำหน่าย">
+                        <input className="form-input" value={intakeForm.supplierName} onChange={(e) => handleIntakeChange("supplierName", e.target.value)} />
                       </FormField>
+                      <FormField label="สถานะการชำระ">
+                        <select className="form-input" value={intakeForm.paymentStatus} onChange={(e) => handlePaymentStatusChange(e.target.value as "paid" | "unpaid")}>
+                          <option value="paid">ชำระแล้ว</option>
+                          <option value="unpaid">ยังไม่ชำระ</option>
+                        </select>
+                      </FormField>
+                      <FormField label="วันที่ชำระ">
+                        <input type="datetime-local" className="form-input" value={intakeForm.paidAt} onChange={(e) => handleIntakeChange("paidAt", e.target.value)} />
+                      </FormField>
+                      {intakeForm.paymentStatus === "unpaid" ? (
+                        <FormField label="กำหนดชำระ">
+                          <input type="date" className="form-input" value={intakeForm.dueDate} onChange={(e) => handleIntakeChange("dueDate", e.target.value)} />
+                        </FormField>
+                      ) : null}
+                      <div className="md:col-span-2">
+                        <FormField label="บันทึกเพิ่มเติม">
+                          <textarea className="form-input" rows={3} value={intakeForm.note} onChange={(e) => handleIntakeChange("note", e.target.value)} />
+                        </FormField>
+                      </div>
                     </div>
                   </div>
                 </CollapsibleContent>
               </div>
             </Collapsible>
-            <DialogFooter className="flex flex-wrap justify-end gap-2">
-              <button type="button" className="px-4 py-2 rounded border" onClick={() => handleDialogOpenChange(false)} disabled={intakeSubmitting}>
-                ยกเลิก
-              </button>
-              <button type="button" className="px-4 py-2 rounded bg-primary text-primary-foreground disabled:opacity-50" disabled={!intakeValid || intakeSubmitting} onClick={submitIntake}>
-                {intakeSubmitting ? "กำลังบันทึก..." : "บันทึกสต็อก"}
-              </button>
-            </DialogFooter>
           </div>
+          <DialogFooter className="shrink-0 flex flex-wrap justify-end gap-2 border-t bg-background px-6 py-4">
+            <button type="button" className="px-4 py-2 rounded border" onClick={() => handleDialogOpenChange(false)} disabled={intakeSubmitting}>
+              ยกเลิก
+            </button>
+            <button type="button" className="px-4 py-2 rounded bg-primary text-primary-foreground disabled:opacity-50" disabled={!intakeValid || intakeSubmitting} onClick={submitIntake}>
+              {intakeSubmitting ? "กำลังบันทึก..." : "บันทึกสต็อก"}
+            </button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </AdminLayout>
