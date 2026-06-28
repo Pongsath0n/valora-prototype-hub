@@ -170,6 +170,10 @@ async function main() {
     payment_status: "unpaid",
     due_date: dueDate,
     note,
+    is_perishable: true,
+    lot_code: `LOT-${batchRef}`,
+    expires_at: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
+    expiry_note: "Smoke test expiry note",
   };
 
   const createResp = await adminRequest("POST", withStoreId("/api/store-admin/stock-intakes"), intakePayload);
@@ -188,6 +192,11 @@ async function main() {
   assertCondition(approxEqual(intake.normalized_quantity, normalizedQuantity), "normalized_quantity_check", "normalized_quantity_mismatch", { expected: normalizedQuantity, actual: intake.normalized_quantity });
   assertCondition(intake.payment_status === "unpaid", "payment_status_check", "payment_status_should_be_unpaid", intake);
   assertCondition(intake.movement_type === "in" && intake.movement_id, "movement_record_check", "movement_metadata_missing", intake);
+
+  assertCondition(intake.is_perishable === true, "expiry_field_check", "is_perishable_not_persisted", { actual: intake.is_perishable });
+  assertCondition(intake.lot_code === `LOT-${batchRef}`, "expiry_field_check", "lot_code_not_persisted", { expected: `LOT-${batchRef}`, actual: intake.lot_code });
+  assertCondition(Boolean(intake.expires_at), "expiry_field_check", "expires_at_not_persisted", { actual: intake.expires_at });
+  assertCondition(intake.expiry_note === "Smoke test expiry note", "expiry_field_check", "expiry_note_not_persisted", { actual: intake.expiry_note });
 
   assertCondition(
     approxEqual(safeNumber(ingredientAfter.current_stock), expectedStock, 0.0001),
