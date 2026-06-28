@@ -12,6 +12,7 @@ const mockListIngredientWasteRecords = vi.fn();
 const mockGetIngredientWasteSummary = vi.fn();
 const mockCreateIngredientWaste = vi.fn();
 const mockListStockIntakes = vi.fn();
+const mockGetInventoryAlerts = vi.fn();
 const mockUseProfileRole = vi.fn();
 
 vi.mock("@/components/admin/AdminLayout", () => ({
@@ -43,6 +44,7 @@ vi.mock("@/services/storeAdminApi", () => ({
     getIngredientWasteSummary: (...args: unknown[]) => mockGetIngredientWasteSummary(...args),
     createIngredientWaste: (...args: unknown[]) => mockCreateIngredientWaste(...args),
     listStockIntakes: (...args: unknown[]) => mockListStockIntakes(...args),
+    getInventoryAlerts: (...args: unknown[]) => mockGetInventoryAlerts(...args),
   },
 }));
 
@@ -55,6 +57,7 @@ describe("StoreAdminIngredientsPage", () => {
     mockGetIngredientWasteSummary.mockReset();
     mockCreateIngredientWaste.mockReset();
     mockListStockIntakes.mockReset();
+    mockGetInventoryAlerts.mockReset();
     mockUseProfileRole.mockReset();
 
     mockUseProfileRole.mockReturnValue({ role: "owner", loading: false, refreshRole: vi.fn() });
@@ -111,6 +114,12 @@ describe("StoreAdminIngredientsPage", () => {
       ingredient_id: "ing-1",
       quantity: 1,
       reason: "manual_adjustment",
+    });
+    mockGetInventoryAlerts.mockResolvedValue({
+      low_stock: [],
+      near_expiry: [],
+      expired: [],
+      summary: { low_stock_count: 0, near_expiry_count: 0, expired_count: 0 },
     });
     mockListStockIntakes.mockImplementation((params?: { ingredient_id?: string }) => {
       if (params?.ingredient_id) {

@@ -8608,3 +8608,159 @@ def reject_payment(payment_id: str, payload: PaymentRejectPayload, authorization
         "status": "rejected",
         "message": "ไม่ผ่านการตรวจสอบการชำระเงิน กรุณาตรวจสอบข้อมูลและส่งหลักฐานใหม่",
     }
+
+
+# ─── Inventory Alerts (read-only) ─────────────────────────────────────────────
+
+_NEAR_EXPIRY_DAYS = 3
+
+
+def _classify_low_stock(ingredient_rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    alerts: List[Dict[str, Any]] = []
+    for row in ingredient_rows:
+        is_active = row.get("is_active")
+        if is_active is False:
+            continue
+        threshold = _safe_float(row.get("low_stock_threshold"))
+        if threshold <= 0:
+            continue
+        current_stock = _safe_float(row.get("stock_on_hand") or row.get("current_stock"))
+        if current_stock <= threshold:
+            alerts.append({
+                "ingredient_id": str(row.get("id")) if row.get("id") else None,
+                "ingredient_name": row.get("name"),
+                "current_stock": current_stock,
+                "low_stock_threshold": threshold,
+                "unit": row.get("unit"),
+                "severity": "low_stock",
+            })
+    return alerts
+
+
+def _classify_expiry(purchase_rows: List[Dict[str, Any]], now: datetime) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    near_expiry: List[Dict[str, Any]] = []
+    expired: List[Dict[str, Any]] = []
+    for row in purchase_rows:
+        if not row.get("is_perishable"):
+            continue
+        expires_at_raw = row.get("expires_at")
+        if not expires_at_raw:
+            continue
+        expires_dt = _parse_iso_datetime(expires_at_raw)
+        if not expires_dt:
+            continue
+        ingredient_rel = row.get("ingredients") if isinstance(row, dict) else None
+        ingredient_name = None
+        if isinstance(ingredient_rel, dict):
+            ingredient_name = ingredient_rel.get("name")
+        ingredient_id = str(row.get("ingredient_id")) if row.get("ingredient_id") else None
+        common = {
+            "purchase_id": str(row.get("id")) if row.get("id") else None,
+            "ingredient_id": ingredient_id,
+            "ingredient_name": ingredient_name,
+            "lot_code": row.get("lot_code"),
+            "expires_at": expires_at_raw,
+            "severity": "",
+        }
+        if expires_dt < now:
+            days_overdue = (now - expires_dt).days
+            entry = dict(common)
+            entry["days_overdue"] = days_overdue
+            entry["severity"] = "expired"
+            expired.append(entry)
+        elif expires_dt <= now + timedelta(days=_NEAR_EXPIRY_DAYS):
+            days_until = (expires_dt - now).days
+            entry = dict(common)
+            entry["days_until_expiry"] = days_until
+            entry["severity"] = "near_expiry"
+            near_expiry.append(entry)
+    return near_expiry, expired
+
+
+def _fetch_inventory_alert_ingredients(client: Client, store_id: str) -> List[Dict[str, Any]]:
+    stock_field = "stock_on_hand"
+    include_is_active = True
+    attempts = 0
+    while attempts < 4:
+        attempts += 1
+        columns = ["id", "name", "unit", stock_field, "low_stock_threshold"]
+        if include_is_active:
+            columns.append("is_active")
+        try:
+            resp = (
+                client.table("ingredients")
+                .select(", ".join(columns))
+                .eq("store_id", store_id)
+                .execute()
+            )
+        except Exception as exc:
+            resp = None
+            exc_err = exc
+        else:
+            exc_err = getattr(resp, "error", None)
+        if not exc_err:
+            return getattr(resp, "data", None) or []
+        if stock_field == "stock_on_hand" and _is_missing_column(exc_err, "stock_on_hand"):
+            stock_field = "current_stock"
+            continue
+        if include_is_active and _is_missing_column(exc_err, "is_active"):
+            include_is_active = False
+            continue
+        break
+    return []
+
+
+def _fetch_inventory_alert_purchases(client: Client, store_id: str) -> List[Dict[str, Any]]:
+    select_cols = "id, ingredient_id, is_perishable, lot_code, expires_at, ingredients(id, name)"
+    try:
+        resp = (
+            client.table("ingredient_purchases")
+            .select(select_cols)
+            .eq("store_id", store_id)
+            .execute()
+        )
+    except Exception:
+        return []
+    err = getattr(resp, "error", None)
+    if err:
+        if _is_missing_column(err, "is_perishable"):
+            try:
+                resp = (
+                    client.table("ingredient_purchases")
+                    .select("id, ingredient_id, lot_code, expires_at, ingredients(id, name)")
+                    .eq("store_id", store_id)
+                    .execute()
+                )
+            except Exception:
+                return []
+            err = getattr(resp, "error", None)
+            if err:
+                return []
+        else:
+            return []
+    return getattr(resp, "data", None) or []
+
+
+@router.get("/inventory-alerts")
+def get_inventory_alerts(authorization: Optional[str] = Header(None), store_id: Optional[str] = None) -> Dict[str, Any]:
+    ctx = _get_ctx(authorization)
+    store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
+    _require_manager(role)
+
+    ingredient_rows = _fetch_inventory_alert_ingredients(ctx["client"], store_id_resolved)
+    purchase_rows = _fetch_inventory_alert_purchases(ctx["client"], store_id_resolved)
+    now = datetime.now(timezone.utc)
+
+    low_stock = _classify_low_stock(ingredient_rows)
+    near_expiry, expired = _classify_expiry(purchase_rows, now)
+
+    return {
+        "low_stock": low_stock,
+        "near_expiry": near_expiry,
+        "expired": expired,
+        "summary": {
+            "low_stock_count": len(low_stock),
+            "near_expiry_count": len(near_expiry),
+            "expired_count": len(expired),
+        },
+    }

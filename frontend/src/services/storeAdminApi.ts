@@ -463,6 +463,47 @@ export type DashboardSummaryResponse = {
   dashboard_revenue_kpi?: DashboardRevenueKpi;
 };
 
+// ─── Inventory Alerts (read-only) ──────────────────────────────────────────
+export type InventoryLowStockItem = {
+  ingredient_id: string | null;
+  ingredient_name: string | null;
+  current_stock: number;
+  low_stock_threshold: number;
+  unit: string | null;
+  severity: "low_stock";
+};
+
+export type InventoryNearExpiryItem = {
+  purchase_id: string | null;
+  ingredient_id: string | null;
+  ingredient_name: string | null;
+  lot_code: string | null;
+  expires_at: string;
+  days_until_expiry: number;
+  severity: "near_expiry";
+};
+
+export type InventoryExpiredItem = {
+  purchase_id: string | null;
+  ingredient_id: string | null;
+  ingredient_name: string | null;
+  lot_code: string | null;
+  expires_at: string;
+  days_overdue: number;
+  severity: "expired";
+};
+
+export type InventoryAlertsResponse = {
+  low_stock: InventoryLowStockItem[];
+  near_expiry: InventoryNearExpiryItem[];
+  expired: InventoryExpiredItem[];
+  summary: {
+    low_stock_count: number;
+    near_expiry_count: number;
+    expired_count: number;
+  };
+};
+
 // ─── Planning: Overhead expenses & assumptions ─────────────────────────────
 export const OVERHEAD_CATEGORIES = [
   "rent",
@@ -963,6 +1004,10 @@ export const storeAdminApi = {
     const search = buildDashboardSummaryQuery(filters);
     const path = `/api/store-admin/dashboard-summary${search ? `?${search}` : ""}`;
     return request(path);
+  },
+
+  async getInventoryAlerts(): Promise<InventoryAlertsResponse> {
+    return request<InventoryAlertsResponse>("/api/store-admin/inventory-alerts");
   },
 
   async getPlanningBaseline(): Promise<PlanningBaselineResponse> {

@@ -23,6 +23,7 @@ import {
   type IngredientWasteReason,
   type IngredientWasteRecord,
   type IngredientWasteSummaryResponse,
+  type InventoryAlertsResponse,
   type StockIntake,
 } from "@/services/storeAdminApi";
 
@@ -258,6 +259,7 @@ export default function StoreAdminIngredientsPage() {
   const [wasteEligibleLoading, setWasteEligibleLoading] = useState(false);
   const [wasteEligibleError, setWasteEligibleError] = useState("");
   const [wasteShowAllIngredients, setWasteShowAllIngredients] = useState(false);
+  const [inventoryAlerts, setInventoryAlerts] = useState<InventoryAlertsResponse | null>(null);
 
   const valid = useMemo(
     () =>
@@ -295,6 +297,26 @@ export default function StoreAdminIngredientsPage() {
     if (!normalized) return 0;
     return Number(intakeForm.totalCost || 0) / normalized;
   }, [normalizedPreview, intakeForm.totalCost]);
+
+  const expiryAlertMap = useMemo(() => {
+    const map: Record<string, Set<string>> = {};
+    if (!inventoryAlerts) return map;
+    for (const item of inventoryAlerts.near_expiry) {
+      const id = item.ingredient_id;
+      if (id) {
+        if (!map[id]) map[id] = new Set();
+        map[id].add("near_expiry");
+      }
+    }
+    for (const item of inventoryAlerts.expired) {
+      const id = item.ingredient_id;
+      if (id) {
+        if (!map[id]) map[id] = new Set();
+        map[id].add("expired");
+      }
+    }
+    return map;
+  }, [inventoryAlerts]);
 
   const selectedWasteIngredient = useMemo(() => rows.find((r) => r.id === wasteForm.ingredientId), [rows, wasteForm.ingredientId]);
   const ingredientLookup = useMemo(() => {
@@ -364,6 +386,22 @@ export default function StoreAdminIngredientsPage() {
   useEffect(() => {
     void refresh();
   }, []);
+
+  useEffect(() => {
+    if (!isManagerRole) return;
+    let cancelled = false;
+    storeAdminApi
+      .getInventoryAlerts()
+      .then((res) => {
+        if (!cancelled) setInventoryAlerts(res);
+      })
+      .catch(() => {
+        if (!cancelled) setInventoryAlerts(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isManagerRole]);
 
   const refreshWasteEligibleLots = useCallback(async () => {
     if (!isManagerRole) return;
@@ -797,6 +835,28 @@ export default function StoreAdminIngredientsPage() {
             { key: "cost_per_unit", header: "ต้นทุน/หน่วย", render: (r) => `฿${Number(r.cost_per_unit).toFixed(4)}` },
             { key: "current_stock", header: "สต็อก", render: (r) => Number(r.current_stock).toLocaleString(undefined, { maximumFractionDigits: 2 }) },
             { key: "low_stock_threshold", header: "แจ้งเตือนต่ำกว่า" },
+            {
+              key: "stock_status",
+              header: "สถานะสต็อก",
+              render: (r) => {
+    const badges: { label: string; tone: "warning" | "danger" }[] = [];
+    const isLowStock = (r.is_active ?? true) && r.low_stock_threshold > 0 && r.current_stock <= r.low_stock_threshold;
+    if (isLowStock) badges.push({ label: "ต่ำกว่ากำหนด", tone: "warning" });
+    const expiryAlerts = expiryAlertMap[r.id];
+    if (expiryAlerts) {
+      if (expiryAlerts.has("expired")) badges.push({ label: "หมดอายุแล้ว", tone: "danger" });
+      if (expiryAlerts.has("near_expiry")) badges.push({ label: "ใกล้หมดอายุ", tone: "warning" });
+    }
+    if (!badges.length) return <span className="text-xs text-muted-foreground">-</span>;
+    return (
+      <div className="flex flex-wrap gap-1">
+        {badges.map((badge) => (
+          <StatusBadge key={badge.label} label={badge.label} tone={badge.tone} />
+        ))}
+      </div>
+    );
+              },
+            },
             { key: "last_purchase_at", header: "ซื้อครั้งล่าสุด", render: (r) => formatDateTime(r.last_purchase_at) },
             {
               key: "cost_source",

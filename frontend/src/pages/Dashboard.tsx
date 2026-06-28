@@ -15,6 +15,7 @@ import {
   type DashboardRevenueFilterPayload,
   type DashboardRevenueRange,
   type DashboardRevenueKpi,
+  type InventoryAlertsResponse,
 } from "@/services/storeAdminApi";
 
 const DASHBOARD_ALLOWED_ROLES: AppRole[] = ["owner", "admin", "manager"];
@@ -90,6 +91,12 @@ type DashboardState = {
   lastUpdated: string | null;
 };
 
+type InventoryAlertsState = {
+  data: InventoryAlertsResponse | null;
+  loading: boolean;
+  error: string | null;
+};
+
 export default function DashboardPage() {
   const { checking, accessDenied } = useRoleGuard(DASHBOARD_ALLOWED_ROLES);
   const [state, setState] = useState<DashboardState>({
@@ -103,6 +110,11 @@ export default function DashboardPage() {
   const [appliedRevenueFilter, setAppliedRevenueFilter] = useState<RevenueFilterState>({ range: "all" });
   const [customDraft, setCustomDraft] = useState<CustomRangeDraft>({ startDate: "", endDate: "" });
   const [customRangeError, setCustomRangeError] = useState<string | null>(null);
+  const [inventoryAlerts, setInventoryAlerts] = useState<InventoryAlertsState>({
+    data: null,
+    loading: true,
+    error: null,
+  });
   const isMountedRef = useRef(true);
 
   useEffect(() => {
@@ -189,7 +201,20 @@ export default function DashboardPage() {
     }
 
     void fetchDashboard({ range: "all" });
+    void loadInventoryAlerts();
   }, [checking, accessDenied, fetchDashboard]);
+
+  const loadInventoryAlerts = useCallback(async () => {
+    setInventoryAlerts((prev) => ({ ...prev, loading: true, error: null }));
+    try {
+      const res = await storeAdminApi.getInventoryAlerts();
+      if (!isMountedRef.current) return;
+      setInventoryAlerts({ data: res, loading: false, error: null });
+    } catch (err: any) {
+      if (!isMountedRef.current) return;
+      setInventoryAlerts({ data: null, loading: false, error: err?.message || "โหลดการแจ้งเตือนสต็อกไม่สำเร็จ" });
+    }
+  }, []);
 
   const handlePresetSelect = useCallback(
     (range: DashboardRevenueRange) => {
@@ -586,11 +611,84 @@ export default function DashboardPage() {
           )}
         </Section>
 
+        <InventoryAlertsCard alerts={inventoryAlerts} />
+
         <Section title="ออเดอร์ล่าสุด">
           <DataTable columns={recentColumns} rows={summary.recent_orders} />
         </Section>
       </div>
     </AppLayout>
+  );
+}
+
+function InventoryAlertsCard({ alerts }: { alerts: InventoryAlertsState }) {
+  const summary = alerts.data?.summary;
+  const lowStockItems = alerts.data?.low_stock ?? [];
+  const nearExpiryItems = alerts.data?.near_expiry ?? [];
+  const expiredItems = alerts.data?.expired ?? [];
+  const hasAlerts = (summary?.low_stock_count ?? 0) > 0 || (summary?.near_expiry_count ?? 0) > 0 || (summary?.expired_count ?? 0) > 0;
+
+  const topItems = [
+    ...expiredItems.slice(0, 3).map((item) => ({
+      name: item.ingredient_name || "วัตถุดิบ",
+      detail: `หมดอายุ ${item.days_overdue} วัน${item.lot_code ? ` • Lot ${item.lot_code}` : ""}`,
+      tone: "danger" as const,
+    })),
+    ...nearExpiryItems.slice(0, 3).map((item) => ({
+      name: item.ingredient_name || "วัตถุดิบ",
+      detail: `ใกล้หมดอายุ ${item.days_until_expiry} วัน${item.lot_code ? ` • Lot ${item.lot_code}` : ""}`,
+      tone: "warning" as const,
+    })),
+    ...lowStockItems.slice(0, 3).map((item) => ({
+      name: item.ingredient_name || "วัตถุดิบ",
+      detail: `เหลือ ${item.current_stock} ${item.unit || ""} (ต่ำกว่า ${item.low_stock_threshold})`,
+      tone: "warning" as const,
+    })),
+  ].slice(0, 5);
+
+  return (
+    <div className="rounded-2xl border bg-card/70 p-5 shadow-sm">
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-semibold text-foreground">การแจ้งเตือนสต็อก</h2>
+        <Link to="/owner/cost-items" className="text-sm font-semibold text-primary hover:underline">
+          จัดการวัตถุดิบ
+        </Link>
+      </div>
+      {alerts.loading ? (
+        <p className="mt-4 text-sm text-muted-foreground">กำลังโหลด...</p>
+      ) : alerts.error ? (
+        <p className="mt-4 text-sm text-destructive">{alerts.error}</p>
+      ) : !hasAlerts ? (
+        <p className="mt-4 text-sm text-muted-foreground">ไม่มีการแจ้งเตือน สต็อกและวันหมดอายุปกติ</p>
+      ) : (
+        <div className="mt-4 space-y-4">
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
+              <p className="text-xs font-medium text-amber-700">ต่ำกว่ากำหนด</p>
+              <p className="mt-1 text-2xl font-bold text-amber-700">{summary?.low_stock_count ?? 0}</p>
+            </div>
+            <div className="rounded-xl border border-orange-200 bg-orange-50 p-3">
+              <p className="text-xs font-medium text-orange-700">ใกล้หมดอายุ</p>
+              <p className="mt-1 text-2xl font-bold text-orange-700">{summary?.near_expiry_count ?? 0}</p>
+            </div>
+            <div className="rounded-xl border border-red-200 bg-red-50 p-3">
+              <p className="text-xs font-medium text-red-700">หมดอายุแล้ว</p>
+              <p className="mt-1 text-2xl font-bold text-red-700">{summary?.expired_count ?? 0}</p>
+            </div>
+          </div>
+          {topItems.length > 0 ? (
+            <ul className="space-y-2">
+              {topItems.map((item, idx) => (
+                <li key={idx} className="flex items-center justify-between text-sm">
+                  <span className="font-medium text-foreground">{item.name}</span>
+                  <span className={item.tone === "danger" ? "text-red-600" : "text-amber-600"}>{item.detail}</span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+      )}
+    </div>
   );
 }
 
