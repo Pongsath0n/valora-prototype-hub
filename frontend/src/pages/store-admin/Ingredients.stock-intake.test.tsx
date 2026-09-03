@@ -25,6 +25,7 @@ vi.mock("@/contexts/RoleContext", () => ({
 
 vi.mock("@/services/storeAdminApi", () => ({
   INGREDIENT_BASE_UNITS: ["g", "ml", "pcs", "set", "bottle"],
+  INGREDIENT_COST_TYPES: ["ingredient", "packaging", "consumable", "addon", "utility", "other"],
   INGREDIENT_WASTE_REASONS: [
     "expired",
     "damaged",
@@ -33,6 +34,9 @@ vi.mock("@/services/storeAdminApi", () => ({
     "manual_adjustment",
     "other",
   ],
+  DEFAULT_INGREDIENT_COST_TYPE: "ingredient",
+  isIngredientCostType: (value: string) =>
+    ["ingredient", "packaging", "consumable", "addon", "utility", "other"].includes(value),
   storeAdminApi: {
     listIngredients: (...args: unknown[]) => mockListIngredients(...args),
     createIngredient: vi.fn(),

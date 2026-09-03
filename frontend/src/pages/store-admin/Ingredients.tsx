@@ -29,10 +29,14 @@ import { STORE_MANAGER_ROLES } from "@/lib/guards";
 import {
   storeAdminApi,
   INGREDIENT_BASE_UNITS,
+  INGREDIENT_COST_TYPES,
   INGREDIENT_WASTE_REASONS,
+  DEFAULT_INGREDIENT_COST_TYPE,
+  isIngredientCostType,
   type ApiIngredient,
   type CreateStockIntakePayload,
   type IngredientBaseUnit,
+  type IngredientCostType,
   type IngredientPayload,
   type IngredientWasteCreatePayload,
   type IngredientWasteReason,
@@ -51,6 +55,7 @@ type FormState = {
   lowStockThreshold: string;
   supplierName: string;
   isActive: boolean;
+  costType: IngredientCostType;
 };
 
 type WasteFormState = {
@@ -74,6 +79,17 @@ const BASE_UNIT_OPTIONS = INGREDIENT_BASE_UNITS.map((unit) => ({ value: unit, la
 const UNIT_HELPER_TEXT = "เลือกหน่วยฐานที่ใช้ในสูตร เช่น กาแฟใช้ g, นมหรือน้ำใช้ ml, แก้ว+ฝาใช้ set, หลอดหรือสติ๊กเกอร์ใช้ pcs";
 const COST_HELPER_TEXT = "หลังจากบันทึกซื้อเข้าสต็อก ระบบจะอัปเดตต้นทุนต่อหน่วยจากราคาซื้อจริงให้อัตโนมัติ";
 const STOCK_HELPER_TEXT = "หลังจากนี้ควรเพิ่มสต็อกผ่านปุ่มบันทึกซื้อเข้าสต็อก เพื่อให้ต้นทุนและจำนวนสต็อกถูกต้อง";
+
+const COST_TYPE_LABELS: Record<IngredientCostType, string> = {
+  ingredient: "วัตถุดิบ (ingredient)",
+  packaging: "บรรจุภัณฑ์ (packaging)",
+  consumable: "วัสดุสิ้นเปลือง (consumable)",
+  addon: "ส่วนเติมเพิ่ม (addon)",
+  utility: "ค่าใช้จ่ายดำเนินการ (utility)",
+  other: "อื่น ๆ (other)",
+};
+const COST_TYPE_OPTIONS = INGREDIENT_COST_TYPES.map((value) => ({ value, label: COST_TYPE_LABELS[value] }));
+const COST_TYPE_HELPER_TEXT = "จัดประเภทต้นทุนเพื่อใช้ในรายงานและการตัดสต็อก — ค่าเริ่มต้นคือ วัตถุดิบ";
 
 const RECEIPT_ALLOWED_TYPES = ["image/jpeg", "image/jpg", "image/png", "image/webp"];
 const RECEIPT_MAX_BYTES = 5 * 1024 * 1024;
@@ -178,6 +194,7 @@ const emptyForm: FormState = {
   lowStockThreshold: "0",
   supplierName: "",
   isActive: true,
+  costType: DEFAULT_INGREDIENT_COST_TYPE,
 };
 
 type IntakeFormState = {
@@ -533,6 +550,7 @@ export default function StoreAdminIngredientsPage() {
       low_stock_threshold: Number(form.lowStockThreshold),
       supplier_name: form.supplierName || undefined,
       is_active: form.isActive,
+      cost_type: form.costType,
     };
 
     try {
@@ -674,6 +692,9 @@ export default function StoreAdminIngredientsPage() {
         lowStockThreshold: String(ingredient.low_stock_threshold),
         supplierName: ingredient.supplier_name || "",
         isActive: ingredient.is_active ?? true,
+        costType: isIngredientCostType(ingredient.cost_type || "")
+          ? (ingredient.cost_type as IngredientCostType)
+          : DEFAULT_INGREDIENT_COST_TYPE,
       });
     } else {
       setForm(emptyForm);
@@ -1222,6 +1243,25 @@ export default function StoreAdminIngredientsPage() {
                   <select className="form-input" value={form.isActive ? "active" : "inactive"} onChange={(e) => setForm({ ...form, isActive: e.target.value === "active" })}>
                     <option value="active">เปิดใช้งาน</option>
                     <option value="inactive">ปิดใช้งาน</option>
+                  </select>
+                </FormField>
+                <FormField label="ประเภทต้นทุน" hint={COST_TYPE_HELPER_TEXT}>
+                  <select
+                    className="form-input"
+                    value={form.costType}
+                    onChange={(e) => {
+                      const nextValue = e.target.value;
+                      setForm((prev) => ({
+                        ...prev,
+                        costType: isIngredientCostType(nextValue) ? nextValue : DEFAULT_INGREDIENT_COST_TYPE,
+                      }));
+                    }}
+                  >
+                    {COST_TYPE_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
                   </select>
                 </FormField>
               </div>
