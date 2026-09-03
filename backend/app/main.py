@@ -8,6 +8,7 @@ from app.api.customer import router as customer_router
 from app.api.line import router as line_router
 from app.api.store_admin import router as store_admin_router
 from app.api.system_console import router as system_router
+from app.core.config import settings
 
 LOCAL_DEFAULT_ORIGINS = [
     "http://localhost:8080",
@@ -18,7 +19,7 @@ LOCAL_DEFAULT_ORIGINS = [
 
 
 def get_allowed_origins() -> list[str]:
-    raw = os.getenv("CORS_ALLOWED_ORIGINS", "")
+    raw = settings.cors_allowed_origins or os.getenv("CORS_ALLOWED_ORIGINS", "")
     if not raw.strip():
         return LOCAL_DEFAULT_ORIGINS
 

@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     app_env: str = Field(default="", alias="APP_ENV")
     frontend_url: str = Field(default="", alias="FRONTEND_URL")
     backend_url: str = Field(default="", alias="BACKEND_URL")
+    cors_allowed_origins: str = Field(default="", alias="CORS_ALLOWED_ORIGINS")
 
     supabase_url: str = Field(default="", alias="SUPABASE_URL")
     supabase_anon_key: str = Field(default="", alias="SUPABASE_ANON_KEY")

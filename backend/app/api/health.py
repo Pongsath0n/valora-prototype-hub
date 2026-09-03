@@ -9,30 +9,43 @@ from app.core.supabase import SupabaseConfigurationError, get_supabase_admin_cli
 
 
 SAFE_HEALTH_TABLES = ("profiles", "stores")
+# Healholic V1 storage capability matrix.
+# Active V1 buckets (required): menu-images (public), store-payment-assets (private).
+# Optional installed capabilities (not required for V1): payment-slips,
+# purchase-receipts. Buckets are not deleted; they remain installed but are not
+# required to enable disabled V1 features.
 STORAGE_BUCKETS = (
-    {
-        "key": "payment_slips",
-        "label": "Payment Slip Bucket",
-        "attr": "payment_slip_bucket",
-        "mode": "private",
-        "required": True,
-        "notes": "ใช้สำหรับสลิปการชำระเงินของลูกค้า",
-    },
     {
         "key": "menu_images",
         "label": "Menu Image Bucket",
         "attr": "menu_image_bucket",
         "mode": "public",
         "required": True,
-        "notes": "รูปเมนูและสินทรัพย์ร้านค้าสาธารณะ",
+        "notes": "รูปเมนูและสินทรัพย์ร้านค้าสาธารณะ (V1 active)",
+    },
+    {
+        "key": "store_payment_assets",
+        "label": "Store Payment Asset Bucket",
+        "attr": "store_payment_asset_bucket",
+        "mode": "private",
+        "required": True,
+        "notes": "เก็บ QR PromptPay และสินทรัพย์การชำระเงินของร้าน (V1 active, private)",
+    },
+    {
+        "key": "payment_slips",
+        "label": "Payment Slip Bucket",
+        "attr": "payment_slip_bucket",
+        "mode": "private",
+        "required": False,
+        "notes": "ความสามารถที่ติดตั้งไว้ — ปิดใช้งานใน V1 (slip review เป็น phase ถัดไป)",
     },
     {
         "key": "purchase_receipts",
         "label": "Purchase Receipt Bucket",
         "attr": "purchase_receipt_bucket",
         "mode": "private",
-        "required": True,
-        "notes": "เก็บใบเสร็จซื้อวัตถุดิบและสต็อก",
+        "required": False,
+        "notes": "ความสามารถที่ติดตั้งไว้ — ไม่จำเป็นสำหรับ V1",
     },
 )
 
@@ -388,8 +401,11 @@ def health_storage() -> Dict[str, Any]:
             elif probe_status == "manual":
                 entry["status"] = "manual"
             else:
-                entry["status"] = "action_required"
-                probe_failures = True
+                entry["status"] = "action_required" if bucket_cfg["required"] else "optional_unavailable"
+                # Only required-bucket probe failures escalate the overall
+                # health status. Optional capability buckets remain installed
+                # but are not needed to enable V1 features.
+                probe_failures = probe_failures or bucket_cfg["required"]
 
         buckets.append(entry)
 
