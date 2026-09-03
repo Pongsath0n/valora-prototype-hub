@@ -167,7 +167,7 @@ function StaffOrderDetailRedirect() {
 export function AppRoutes() {
   return (
     <Routes>
-      <Route path="/" element={<Landing />} />
+      <Route path="/" element={<Navigate to="/login" replace />} />
       <Route path="/login" element={<Login />} />
       <Route path="/client-access" element={<Navigate to="/login" replace />} />
       <Route path="/auth/login" element={<Navigate to="/login" replace />} />

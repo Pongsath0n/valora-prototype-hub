@@ -32,16 +32,47 @@ function allHrefs() {
   return screen.getAllByRole("link").map((a) => a.getAttribute("href"));
 }
 
-describe("AppLayout owner navigation", () => {
-  it("shows Profit Planning as a core nav category with the canonical route", () => {
+describe("AppLayout owner navigation (Healholic V1)", () => {
+  it("shows the V1 owner scope: Dashboard, POS, Products, Ingredients, Recipes, Orders, Reports, Payment Settings", () => {
     mockRoleState.role = "owner";
     renderLayout();
 
-    expect(screen.getAllByText("การวางแผนกำไร").length).toBeGreaterThan(0);
-    expect(allHrefs()).toContain("/owner/profit-planning");
+    const hrefs = allHrefs();
+    for (const expected of [
+      "/owner/dashboard",
+      "/staff/kiosk",
+      "/staff/orders",
+      "/owner/reports",
+      "/owner/menus",
+      "/owner/cost-items",
+      "/owner/recipes",
+      "/owner/payment-settings",
+    ]) {
+      expect(hrefs).toContain(expected);
+    }
   });
 
-  it("does not show POS, legacy /app config routes, or /admin links", () => {
+  it("hides deferred V1 features (profit-planning, system console, channels, channel-pricing) from owner nav", () => {
+    mockRoleState.role = "owner";
+    renderLayout();
+
+    const hrefs = allHrefs();
+    for (const hidden of [
+      "/owner/profit-planning",
+      "/system",
+      "/system/users",
+      "/system/roles",
+      "/system/health",
+      "/system/audit-logs",
+      "/store-admin/channels",
+      "/store-admin/channel-pricing",
+      "/staff/customers",
+    ]) {
+      expect(hrefs).not.toContain(hidden);
+    }
+  });
+
+  it("does not show legacy /app config routes, /admin links, or legacy POS routes", () => {
     mockRoleState.role = "owner";
     renderLayout();
 
@@ -60,39 +91,12 @@ describe("AppLayout owner navigation", () => {
     ]) {
       expect(hrefs).not.toContain(forbidden);
     }
-    expect(screen.queryByText("POS")).toBeNull();
-  });
-
-  it("uses canonical /owner/* and /staff/* routes and exposes the System Console to owners", () => {
-    mockRoleState.role = "owner";
-    renderLayout();
-
-    const hrefs = allHrefs();
-    for (const expected of [
-      "/owner/dashboard",
-      "/owner/reports",
-      "/owner/menus",
-      "/store-admin/channels",
-      "/store-admin/channel-pricing",
-      "/owner/cost-items",
-      "/owner/recipes",
-      "/staff/customers",
-      "/staff/orders",
-      "/system",
-      "/system/users",
-      "/system/roles",
-      "/system/health",
-      "/system/audit-logs",
-    ]) {
-      expect(hrefs).toContain(expected);
-    }
   });
 
   it("does not render duplicate pill-style portal quick links", () => {
     mockRoleState.role = "owner";
     renderLayout();
 
-    // Pill labels that used to be rendered by PortalSwitcher inside the sidebar
     for (const pillLabel of [
       "Store Admin",
       "User Management",
@@ -103,23 +107,14 @@ describe("AppLayout owner navigation", () => {
     ]) {
       expect(screen.queryByText(pillLabel)).toBeNull();
     }
-
-    // System routes appear exactly once (grouped nav only, no duplicate pills)
-    const hrefs = allHrefs();
-    for (const systemPath of ["/system", "/system/users", "/system/roles", "/system/audit-logs"]) {
-      expect(hrefs.filter((h) => h === systemPath).length).toBe(1);
-    }
-    // Profit Planning still present
-    expect(hrefs).toContain("/owner/profit-planning");
   });
 
-  it("hides system console links from non-owner roles", () => {
-    mockRoleState.role = "manager";
+  it("V1 nav is role-agnostic (no system console entries even for owner)", () => {
+    mockRoleState.role = "owner";
     renderLayout();
 
     const hrefs = allHrefs();
     expect(hrefs).not.toContain("/system");
     expect(hrefs).not.toContain("/system/users");
-    expect(hrefs).toContain("/owner/profit-planning");
   });
 });

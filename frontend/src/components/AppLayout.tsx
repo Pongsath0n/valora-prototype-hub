@@ -1,20 +1,15 @@
 import { NavLink, useNavigate } from "react-router-dom";
 import {
-  Activity,
   BarChart3,
   BookOpenCheck,
   ClipboardList,
-  FileText,
   LayoutDashboard,
   LogOut,
   Menu,
+  MonitorSmartphone,
   CreditCard,
   Settings,
-  ShieldCheck,
   Soup,
-  Store,
-  TrendingUp,
-  Users,
   X,
 } from "lucide-react";
 import { useState } from "react";
@@ -38,15 +33,20 @@ type OwnerNavSection = {
 };
 
 /**
- * Owner navigation — organized around business purpose.
- * Profit Planning (/app/planning) is the core product engine of Valora.
+ * Owner navigation — Healholic V1 aligned.
  *
- * Deliberately NOT in this nav:
+ * V1 visible scope: Dashboard, POS, Products, Ingredients/Stock, Recipes,
+ * Orders/Sales, Reports, Payment Settings.
+ *
+ * Deliberately NOT in this nav (deferred V1 features, source preserved):
+ * - Profit Planning prototype (/owner/profit-planning) → later phase
+ * - Sales Channels / Channel Pricing → later phase (single kiosk channel)
+ * - System Console / Users / Roles / Audit Logs → system audit redesign is
+ *   a later phase; routes remain accessible by deep link but are hidden
+ *   from V1 navigation.
  * - /app/pos, /store-admin/pos  → POS prototype is deferred (redirected in prod)
- * - /app/orders                 → duplicate of /store-admin/orders; redirected
- * - legacy /app/menu, /app/channels, /app/channel-pricing, /app/ingredients,
- *   /app/recipes                → canonical config lives under /store-admin/*
- * - /store-admin/reports        → canonical reports route is /app/reports
+ * - /app/orders                 → duplicate of /staff/orders; redirected
+ * - legacy /app/* prototype screens → redirected in prod
  */
 const OWNER_NAV_SECTIONS: OwnerNavSection[] = [
   {
@@ -56,9 +56,10 @@ const OWNER_NAV_SECTIONS: OwnerNavSection[] = [
     ],
   },
   {
-    title: "การวางแผนกำไร",
+    title: "POS และออเดอร์",
     items: [
-      { title: "วางแผนกำไร", path: "/owner/profit-planning", icon: TrendingUp },
+      { title: "POS (Kiosk)", path: "/staff/kiosk", icon: MonitorSmartphone },
+      { title: "ออเดอร์ (ติดตามภาพรวม)", path: "/staff/orders", icon: ClipboardList },
     ],
   },
   {
@@ -68,40 +69,16 @@ const OWNER_NAV_SECTIONS: OwnerNavSection[] = [
     ],
   },
   {
-    title: "เมนู ราคา และช่องทางขาย",
+    title: "เมนูและสูตร",
     items: [
       { title: "เมนูและหมวดหมู่", path: "/owner/menus", icon: Soup },
-      { title: "ช่องทางขาย", path: "/store-admin/channels", icon: Store },
-      { title: "ราคาตามช่องทาง", path: "/store-admin/channel-pricing", icon: Store },
+      { title: "วัตถุดิบ / สต็อก", path: "/owner/cost-items", icon: Soup },
+      { title: "สูตรและต้นทุน", path: "/owner/recipes", icon: BookOpenCheck },
     ],
   },
   {
     title: "การจัดการร้าน",
     items: [{ title: "ตั้งค่าการชำระเงิน", path: "/owner/payment-settings", icon: CreditCard }],
-  },
-  {
-    title: "ต้นทุนและสูตร",
-    items: [
-      { title: "วัตถุดิบ", path: "/owner/cost-items", icon: Soup },
-      { title: "สูตรและต้นทุน", path: "/owner/recipes", icon: BookOpenCheck },
-    ],
-  },
-  {
-    title: "ภาพรวมลูกค้าและออเดอร์",
-    items: [
-      { title: "ลูกค้า", path: "/staff/customers", icon: Users },
-      { title: "ออเดอร์ (ติดตามภาพรวม)", path: "/staff/orders", icon: ClipboardList },
-    ],
-  },
-  {
-    title: "ระบบ",
-    items: [
-      { title: "System Console", path: "/system", icon: Activity, roles: ["owner"] },
-      { title: "จัดการผู้ใช้", path: "/system/users", icon: Users, roles: ["owner"] },
-      { title: "จัดการสิทธิ์", path: "/system/roles", icon: ShieldCheck, roles: ["owner"] },
-      { title: "System Health", path: "/system/health", icon: Activity, roles: ["owner"] },
-      { title: "บันทึกเหตุการณ์", path: "/system/audit-logs", icon: FileText, roles: ["owner"] },
-    ],
   },
 ];
 
@@ -111,7 +88,7 @@ const utilityNav = [
 
 const mobileNav = [
   { title: "ภาพรวม", path: "/owner/dashboard", icon: LayoutDashboard },
-  { title: "วางแผนกำไร", path: "/owner/profit-planning", icon: TrendingUp },
+  { title: "POS", path: "/staff/kiosk", icon: MonitorSmartphone },
   { title: "รายงาน", path: "/owner/reports", icon: BarChart3 },
   { title: "ออเดอร์", path: "/staff/orders", icon: ClipboardList },
   { title: "ตั้งค่า", path: "/app/settings", icon: Settings },

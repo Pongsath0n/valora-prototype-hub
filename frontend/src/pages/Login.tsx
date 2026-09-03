@@ -68,8 +68,9 @@ export default function LoginPage() {
           return;
         }
 
-        const hasOnboarded = localStorage.getItem("valora:onboarded") === "1";
-        navigate(resolvePostLoginRoute(role, hasOnboarded), { replace: true });
+        // Healholic V1: store is pre-provisioned; onboarding is bypassed and
+        // the localStorage flag is no longer consulted for post-login routing.
+        navigate(resolvePostLoginRoute(role, true), { replace: true });
       } catch (error) {
         const message = error instanceof Error ? error.message : "";
         const permissionErrors = new Set([

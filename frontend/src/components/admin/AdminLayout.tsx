@@ -9,8 +9,6 @@ import {
   MonitorSmartphone,
   Settings,
   Soup,
-  Store,
-  Users,
   X,
 } from "lucide-react";
 import { useState } from "react";
@@ -33,23 +31,20 @@ const storeNavSections: { title: string; items: StoreNavItem[] }[] = [
   {
     title: "งานประจำวัน",
     items: [
-      // POS is a deferred prototype — intentionally not in production navigation.
-      { title: "แดชบอร์ด", path: "/staff", icon: LayoutDashboard, end: true },
+      // Healholic V1 staff scope: POS (Kiosk) + Orders/Sales only.
+      { title: "POS (Kiosk)", path: "/staff/kiosk", icon: MonitorSmartphone, end: true },
       { title: "ออเดอร์", path: "/staff/orders", icon: ClipboardList },
-      { title: "Kiosk", path: "/staff/kiosk", icon: MonitorSmartphone },
-      { title: "ลูกค้า", path: "/staff/customers", icon: Users },
     ],
   },
   {
     title: "การจัดการร้าน",
     items: [
       { title: "เมนู", path: "/owner/menus", icon: Soup, roles: MANAGER_NAV_ROLES },
-      { title: "ช่องทางขาย", path: "/store-admin/channels", icon: Store, roles: MANAGER_NAV_ROLES },
-      { title: "ราคาตามช่องทาง", path: "/store-admin/channel-pricing", icon: CreditCard, roles: MANAGER_NAV_ROLES },
-      { title: "วัตถุดิบ", path: "/owner/cost-items", icon: Settings, roles: MANAGER_NAV_ROLES },
+      { title: "วัตถุดิบ / สต็อก", path: "/owner/cost-items", icon: Settings, roles: MANAGER_NAV_ROLES },
       { title: "สูตรและต้นทุน", path: "/owner/recipes", icon: Settings, roles: MANAGER_NAV_ROLES },
       // Reports link points to the canonical owner reports route (/owner/reports).
       { title: "รายงาน", path: "/owner/reports", icon: LayoutDashboard, roles: MANAGER_NAV_ROLES },
+      { title: "ตั้งค่าการชำระเงิน", path: "/owner/payment-settings", icon: CreditCard, roles: MANAGER_NAV_ROLES },
     ],
   },
 ];

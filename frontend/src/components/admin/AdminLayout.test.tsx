@@ -31,8 +31,8 @@ function allHrefs() {
   return screen.getAllByRole("link").map((a) => a.getAttribute("href"));
 }
 
-describe("AdminLayout navigation", () => {
-  it("staff sees only operational links and stays inside store-admin", () => {
+describe("AdminLayout navigation (Healholic V1)", () => {
+  it("staff sees only POS (Kiosk) and Orders — the V1 staff scope", () => {
     mockRoleState.role = "staff";
     renderLayout();
 
@@ -40,13 +40,14 @@ describe("AdminLayout navigation", () => {
     expect(staffBackLink).toHaveAttribute("href", "/staff");
 
     const hrefs = allHrefs();
-    expect(hrefs).toContain("/staff");
+    expect(hrefs).toContain("/staff/kiosk");
     expect(hrefs).toContain("/staff/orders");
-    expect(hrefs).toContain("/staff/customers");
 
-    // No POS, planning, reports, config/cost, or system access for staff.
-    expect(screen.queryByText("POS")).toBeNull();
+    // V1 staff must NOT see customers, dashboard, management, or system links.
+    // Note: the staff back link legitimately points to /staff, which is not a
+    // nav item — it is the "back to dashboard" return link.
     for (const forbidden of [
+      "/staff/customers",
       "/store-admin/pos",
       "/app/pos",
       "/owner/profit-planning",
@@ -57,6 +58,7 @@ describe("AdminLayout navigation", () => {
       "/store-admin/channel-pricing",
       "/owner/cost-items",
       "/owner/recipes",
+      "/owner/payment-settings",
       "/store-admin/reports",
       "/system",
     ]) {
@@ -64,7 +66,7 @@ describe("AdminLayout navigation", () => {
     }
   });
 
-  it("manager sees config links, canonical reports route, and business back link — but no POS", () => {
+  it("manager sees management links, canonical reports route, payment settings, and business back link", () => {
     mockRoleState.role = "manager";
     renderLayout();
 
@@ -72,12 +74,17 @@ describe("AdminLayout navigation", () => {
     expect(backLink).toHaveAttribute("href", "/owner/dashboard");
 
     const hrefs = allHrefs();
+    expect(hrefs).toContain("/staff/kiosk");
+    expect(hrefs).toContain("/staff/orders");
     expect(hrefs).toContain("/owner/menus");
     expect(hrefs).toContain("/owner/cost-items");
     expect(hrefs).toContain("/owner/recipes");
     expect(hrefs).toContain("/owner/reports");
+    expect(hrefs).toContain("/owner/payment-settings");
+    // Deferred V1 features hidden from manager nav.
+    expect(hrefs).not.toContain("/store-admin/channels");
+    expect(hrefs).not.toContain("/store-admin/channel-pricing");
     expect(hrefs).not.toContain("/store-admin/reports");
     expect(hrefs).not.toContain("/store-admin/pos");
-    expect(screen.queryByText("POS")).toBeNull();
   });
 });
