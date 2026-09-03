@@ -2,7 +2,14 @@ import { useEffect, useMemo, useState } from "react";
 import AppLayout from "@/components/AppLayout";
 import DataTable from "@/components/shared/DataTable";
 import FormField from "@/components/shared/FormField";
-import { ingredientService, menuCatalogService, recipeService, type IngredientItem, type MenuItem } from "@/features/store/catalogService";
+import { ingredientService, menuCatalogService, recipeService, type IngredientItem, type MenuItem, type RecipeRow } from "@/features/store/catalogService";
+
+type RecipeCostRow = RecipeRow & {
+  ingredient: string;
+  unit: string;
+  costPerUnit: number;
+  lineCost: number;
+};
 
 export default function RecipeCosting() {
   const [menus, setMenus] = useState<MenuItem[]>([]);
@@ -14,7 +21,7 @@ export default function RecipeCosting() {
 
   useEffect(() => { Promise.all([menuCatalogService.list(), ingredientService.list()]).then(([m, i]) => { setMenus(m); setIngredients(i); if (m[0]) setSelectedMenu(m[0].id); }); }, []);
   const recipeRows = useMemo(() => selectedMenu ? recipeService.listByMenu(selectedMenu) : [], [selectedMenu, tick]);
-  const enriched = useMemo(() => recipeRows.map((r) => {
+  const enriched = useMemo<RecipeCostRow[]>(() => recipeRows.map((r) => {
     const ing = ingredients.find((x) => x.id === r.ingredientId);
     const costPerUnit = ing?.costPerUnit ?? 0;
     return { ...r, ingredient: ing?.name ?? "Unknown", unit: ing?.unit ?? "", costPerUnit, lineCost: Number((r.quantityUsed * costPerUnit).toFixed(2)) };
@@ -53,6 +60,6 @@ export default function RecipeCosting() {
       <div className="kpi-card"><p className="metric-label">Gross Profit</p><p className="metric-value">฿{grossProfit.toFixed(2)}</p></div>
       <div className="kpi-card"><p className="metric-label">Gross Margin %</p><p className="metric-value">{grossMarginPercent.toFixed(1)}%</p></div>
     </div>
-    <DataTable columns={[{key:"ingredient",header:"วัตถุดิบ"},{key:"quantityUsed",header:"ปริมาณ"},{key:"unit",header:"หน่วย"},{key:"costPerUnit",header:"ต้นทุน/หน่วย"},{key:"lineCost",header:"ต้นทุนรวม"},{key:"remove",header:"",render:(r)=><button className="text-red-600" onClick={()=>removeRow(r.ingredientId)}>ลบ</button>}]} rows={enriched as any} />
+    <DataTable<RecipeCostRow> columns={[{key:"ingredient",header:"วัตถุดิบ"},{key:"quantityUsed",header:"ปริมาณ"},{key:"unit",header:"หน่วย"},{key:"costPerUnit",header:"ต้นทุน/หน่วย"},{key:"lineCost",header:"ต้นทุนรวม"},{key:"remove",header:"",render:(r)=><button className="text-red-600" onClick={()=>removeRow(r.ingredientId)}>ลบ</button>}]} rows={enriched} />
   </div></AppLayout>;
 }
