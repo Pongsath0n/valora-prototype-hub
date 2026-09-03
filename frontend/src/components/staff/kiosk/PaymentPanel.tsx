@@ -28,6 +28,7 @@ type PaymentPanelProps = {
   noPaymentMethods: boolean;
   qrImageUrl?: string | null;
   promptpayDisplayName?: string | null;
+  stockSyncFailure?: { order_id: string; order_no?: string } | null;
 };
 
 const METHOD_OPTIONS: { value: PaymentMethod; title: string; hint: string; Icon: typeof QrCode }[] = [
@@ -56,9 +57,10 @@ export default function PaymentPanel({
   noPaymentMethods,
   qrImageUrl,
   promptpayDisplayName,
+  stockSyncFailure,
 }: PaymentPanelProps) {
   const visibleMethods = METHOD_OPTIONS.filter(({ value }) => availableMethods[value]);
-  const confirmDisabled = submitting || paymentSettingsLoading || noPaymentMethods;
+  const confirmDisabled = submitting || paymentSettingsLoading || noPaymentMethods || !!stockSyncFailure;
 
   return (
     <div className="mx-auto w-full max-w-4xl">
@@ -163,6 +165,23 @@ export default function PaymentPanel({
             <p className="rounded-xl border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
               {submitError}
             </p>
+          ) : null}
+
+          {stockSyncFailure ? (
+            <Alert variant="destructive">
+              <AlertDescription>
+                <div className="space-y-1">
+                  <p className="font-semibold">ห้ามสร้างรายการขายซ้ำ</p>
+                  <p>
+                    บันทึกการขายและการชำระเงินแล้ว แต่ระบบสต็อกยังซิงก์ไม่สำเร็จ
+                  </p>
+                  <p className="text-xs">
+                    ออเดอร์: {stockSyncFailure.order_no || stockSyncFailure.order_id}
+                  </p>
+                  <p className="text-xs">โปรดแจ้งผู้จัดการตรวจสอบออเดอร์นี้</p>
+                </div>
+              </AlertDescription>
+            </Alert>
           ) : null}
 
           <Button className="h-12 w-full text-base" disabled={confirmDisabled} onClick={onConfirm}>

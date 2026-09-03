@@ -48,6 +48,12 @@ from app.services.notification_sender import (
 )
 from app.services.line_service import sanitize_line_display_name
 from app.services.order_numbers import generate_order_number
+from app.services.stock_service import (
+    StockSyncFailedError,
+    StockUsageError,
+    build_usage_plan,
+    consume_for_paid_order,
+)
 from app.services.storage import (
     StorageUploadError,
     create_signed_slip_url,
@@ -156,6 +162,10 @@ _PURCHASE_COST_SOURCE = "purchase_derived"
 _STOCK_INTAKE_PAYMENT_STATUSES: Set[str] = {"paid", "unpaid"}
 _PURCHASE_RECEIPT_ALLOWED_TYPES: Set[str] = {"image/jpeg", "image/jpg", "image/png", "image/webp"}
 _INGREDIENT_BASE_UNITS: Set[str] = {"g", "ml", "pcs", "set", "bottle"}
+# Frozen DB enum for ingredients.cost_type. Do NOT change the column or
+# introduce a separate classification table.
+_INGREDIENT_COST_TYPES: Set[str] = {"ingredient", "packaging", "consumable", "addon", "utility", "other"}
+_DEFAULT_INGREDIENT_COST_TYPE = "ingredient"
 _WASTE_BASE_REASON_SET: Set[str] = {
     "expired",
     "damaged",
@@ -480,6 +490,7 @@ class IngredientCreate(BaseModel):
     low_stock_threshold: float
     supplier_name: Optional[str] = None
     is_active: Optional[bool] = True
+    cost_type: Optional[str] = None
 
 
 class IngredientUpdate(BaseModel):
@@ -490,6 +501,7 @@ class IngredientUpdate(BaseModel):
     low_stock_threshold: Optional[float] = None
     supplier_name: Optional[str] = None
     is_active: Optional[bool] = None
+    cost_type: Optional[str] = None
 
 
 class StockIntakeCreate(BaseModel):
@@ -655,6 +667,7 @@ class KioskOrderCreate(BaseModel):
     payment_method: Literal["promptpay", "cash"]
     customer: Optional[KioskOrderCustomer] = None
     note: Optional[str] = None
+    client_order_id: Optional[str] = None
 
 
 class SalesReportFilters(BaseModel):
@@ -825,14 +838,33 @@ def _normalize_store_role(value: Optional[str]) -> str:
     return str(value or "").strip().lower()
 
 
+def _canonical_store_id() -> Optional[str]:
+    """Return the configured canonical runtime store id, if any.
+
+    Healholic V1 ships with a single pre-provisioned store. When
+    DEFAULT_STORE_ID is configured, business runtime must fail closed to
+    that store and never silently fall back to an arbitrary membership.
+    """
+    value = str(getattr(settings, "default_store_id", "") or "").strip()
+    return value or None
+
+
 def _resolve_store_id(memberships: List[Dict[str, Any]], store_id: Optional[str]) -> Tuple[str, str]:
-    if store_id:
+    canonical = _canonical_store_id()
+
+    requested_id = store_id if store_id else canonical
+    if requested_id:
         for m in memberships:
-            if str(m.get("store_id")) == str(store_id):
+            if str(m.get("store_id")) == str(requested_id):
                 normalized_role = _normalize_store_role(m.get("role"))
                 return str(m.get("store_id")), normalized_role
+        # Either the caller supplied a foreign store id, or the canonical
+        # store is configured but the user has no membership there. Both
+        # cases must fail closed rather than silently switching stores.
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="store_access_denied")
 
+    # No canonical store configured and no store id supplied: preserve the
+    # legacy single-membership behavior for non-Healholic deployments.
     chosen = memberships[0]
     return str(chosen.get("store_id")), _normalize_store_role(chosen.get("role"))
 
@@ -1515,6 +1547,186 @@ def _sanitize_kiosk_order_items(items: List[OrderItemPayload]) -> List[Dict[str,
     for raw in items:
         sanitized.append(_sanitize_order_item_payload(raw))
     return sanitized
+
+
+# ── FIX-A: Pre-persistence sale configuration validation ────────────────
+# Validates that every item snapshot has a usable recipe before any
+# order/payment/stock persistence.  Rejects with 400 so no partial
+# transaction is committed.
+def _validate_sale_configuration(item_snapshots: List[Dict[str, Any]]) -> None:
+    """Validate stock-consumption prerequisites BEFORE financial persistence.
+
+    Checks each prepared snapshot for:
+    - missing base recipe (empty base_cost_breakdown)
+    - missing ingredient_id in breakdown rows
+    - quantity_used <= 0 in breakdown rows
+    - unresolved addon recipe rows with missing ingredient data
+
+    Raises HTTPException(400) with domain code
+    ``kiosk_order_invalid_inventory_configuration`` on the first issue.
+    """
+    for snapshot in item_snapshots:
+        product_name = snapshot.get("product_name") or snapshot.get("product_id") or "unknown"
+        base_breakdown = snapshot.get("base_cost_breakdown")
+        if not isinstance(base_breakdown, list) or not base_breakdown:
+            logger.warning(
+                "kiosk_preflight_missing_recipe product=%s", product_name,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="kiosk_order_invalid_inventory_configuration:missing_recipe",
+            )
+        for detail in base_breakdown:
+            if not isinstance(detail, dict):
+                continue
+            ingredient_id = detail.get("ingredient_id")
+            if not ingredient_id:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="kiosk_order_invalid_inventory_configuration:missing_ingredient_id",
+                )
+            quantity_used = _safe_float(detail.get("quantity_used"))
+            if quantity_used <= 0:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="kiosk_order_invalid_inventory_configuration:invalid_recipe_quantity",
+                )
+        addon_breakdown = snapshot.get("addon_cost_breakdown")
+        if isinstance(addon_breakdown, list):
+            for detail in addon_breakdown:
+                if not isinstance(detail, dict):
+                    continue
+                ingredient_id = detail.get("ingredient_id")
+                if not ingredient_id:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="kiosk_order_invalid_inventory_configuration:missing_addon_ingredient_id",
+                    )
+                quantity_used = _safe_float(detail.get("quantity_used"))
+                if quantity_used <= 0:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="kiosk_order_invalid_inventory_configuration:invalid_addon_recipe_quantity",
+                    )
+
+
+# ── FIX-B: Idempotent replay helpers ────────────────────────────────────
+# When a duplicate client_order_id is detected (orders_pkey unique
+# violation), fetch the existing order state and classify it.
+def _classify_existing_order(
+    client: Client,
+    store_id: str,
+    order_id: str,
+) -> Dict[str, Any]:
+    """Fetch an existing order and classify its completion state.
+
+    Returns a dict with:
+    - order_id, order_no, payment_status, stock_consumed
+    - state: "complete" | "in_progress" | "partial_paid"
+    - order: the mapped order dict (for complete state)
+    """
+    order_resp = (
+        client.table("orders")
+        .select("id,order_no,status,payment_status,store_id")
+        .eq("id", order_id)
+        .eq("store_id", store_id)
+        .limit(1)
+        .execute()
+    )
+    order_rows = getattr(order_resp, "data", None) or []
+    if not order_rows:
+        # Order exists in a different store or not at all — treat as conflict
+        return {"state": "not_found", "order_id": order_id}
+
+    order_row = order_rows[0]
+    payment_status = order_row.get("payment_status")
+    order_no = order_row.get("order_no")
+
+    # Check payment
+    pay_resp = (
+        client.table("payments")
+        .select("id,status")
+        .eq("order_id", order_id)
+        .limit(1)
+        .execute()
+    )
+    has_payment = bool(getattr(pay_resp, "data", None))
+
+    # Check stock movements
+    sm_resp = (
+        client.table("stock_movements")
+        .select("id")
+        .eq("ref_order_id", order_id)
+        .eq("movement_type", "used")
+        .limit(1)
+        .execute()
+    )
+    has_stock = bool(getattr(sm_resp, "data", None))
+
+    if payment_status == "paid" and has_payment and has_stock:
+        return {
+            "state": "complete",
+            "order_id": order_id,
+            "order_no": order_no,
+            "payment_status": payment_status,
+            "stock_consumed": True,
+        }
+    elif payment_status == "paid" and has_payment and not has_stock:
+        return {
+            "state": "partial_paid",
+            "order_id": order_id,
+            "order_no": order_no,
+            "payment_status": "paid",
+            "stock_consumed": False,
+        }
+    else:
+        return {
+            "state": "in_progress",
+            "order_id": order_id,
+            "order_no": order_no,
+            "payment_status": payment_status,
+            "stock_consumed": has_stock,
+        }
+
+
+def _is_orders_pkey_violation(error: Any) -> bool:
+    """Check if an error is a unique violation on orders_pkey (PostgreSQL 23505)."""
+    message = str(getattr(error, "message", error) or "").lower()
+    # PostgREST / supabase-py may surface "duplicate key value" or code 23505
+    return ("duplicate key value" in message or "23505" in message) and (
+        "orders_pkey" in message or "orders" in message or "id" in message
+    )
+
+
+def _compare_payload_with_existing_order(
+    client: Client,
+    store_id: str,
+    order_id: str,
+    incoming_items: List[Dict[str, Any]],
+) -> bool:
+    """Compare incoming payload items against existing order items.
+
+    Returns True if the payloads match (safe replay), False if they differ
+    (conflict).  Compares product_id and quantity at minimum.
+    """
+    items_resp = (
+        client.table("order_items")
+        .select("product_id,quantity")
+        .eq("order_id", order_id)
+        .execute()
+    )
+    existing_items = getattr(items_resp, "data", None) or []
+    if len(existing_items) != len(incoming_items):
+        return False
+    # Sort both by product_id for comparison
+    existing_sorted = sorted(existing_items, key=lambda r: str(r.get("product_id") or ""))
+    incoming_sorted = sorted(incoming_items, key=lambda r: str(r.get("product_id") or ""))
+    for existing, incoming in zip(existing_sorted, incoming_sorted):
+        if str(existing.get("product_id")) != str(incoming.get("product_id")):
+            return False
+        if int(existing.get("quantity") or 0) != int(incoming.get("quantity") or 0):
+            return False
+    return True
 
 
 def _normalize_channel_name(value: Any) -> str:
@@ -2860,6 +3072,17 @@ def _sanitize_ingredient_payload(payload: IngredientCreate | IngredientUpdate, p
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="low_stock_non_negative")
         data["low_stock_threshold"] = low
 
+    if "cost_type" in data:
+        cost_type_value = str(data.get("cost_type") or "").strip().lower()
+        if not cost_type_value:
+            data.pop("cost_type", None)
+        elif cost_type_value not in _INGREDIENT_COST_TYPES:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="cost_type_invalid")
+        else:
+            data["cost_type"] = cost_type_value
+    elif not partial:
+        data["cost_type"] = _DEFAULT_INGREDIENT_COST_TYPE
+
     # supplier_name, is_active are optional and may not exist in schema; keep for now
     return data
 
@@ -3394,6 +3617,7 @@ def list_ingredients(authorization: Optional[str] = Header(None), store_id: Opti
     include_supplier = True
     include_is_active = True
     include_cost_metadata = True
+    include_cost_type = True
     attempts = 0
     resp = None
     err = None
@@ -3414,6 +3638,8 @@ def list_ingredients(authorization: Optional[str] = Header(None), store_id: Opti
             columns.append("is_active")
         if include_cost_metadata:
             columns.extend(["cost_source", "last_purchase_at", "cost_updated_at"])
+        if include_cost_type:
+            columns.append("cost_type")
         columns.append("created_at")
         resp, err = _query_ingredients(", ".join(columns))
         if not err:
@@ -3429,6 +3655,9 @@ def list_ingredients(authorization: Optional[str] = Header(None), store_id: Opti
             continue
         if include_cost_metadata and any(_is_missing_column(err, fld) for fld in ("cost_source", "last_purchase_at", "cost_updated_at")):
             include_cost_metadata = False
+            continue
+        if include_cost_type and _is_missing_column(err, "cost_type"):
+            include_cost_type = False
             continue
         break
     if err:
@@ -3447,7 +3676,7 @@ def create_ingredient(payload: IngredientCreate, authorization: Optional[str] = 
     data = _sanitize_ingredient_payload(payload)
     data["store_id"] = store_id_resolved
 
-    optional_fields = ["supplier_name", "is_active"]
+    optional_fields = ["supplier_name", "is_active", "cost_type"]
     try:
         try:
             resp = ctx["client"].table("ingredients").insert(data).execute()
@@ -3498,7 +3727,7 @@ def update_ingredient(ingredient_id: str, payload: IngredientUpdate, authorizati
     if not (getattr(exists, "data", None) or []):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="ingredient_not_found")
 
-    optional_fields = ["supplier_name", "is_active"]
+    optional_fields = ["supplier_name", "is_active", "cost_type"]
     try:
         try:
             resp = ctx["client"].table("ingredients").update(data).eq("id", ingredient_id).eq("store_id", store_id_resolved).execute()
@@ -4165,19 +4394,31 @@ def list_stock_intakes(
     _require_manager(role)
 
     limit_value = max(1, min(limit, 100))
-    query = (
-        ctx["client"]
-        .table("ingredient_purchases")
-        .select(_stock_intake_select_clause(include_relations=True))
-        .eq("store_id", store_id_resolved)
-        .order("created_at", desc=True)
-        .limit(limit_value)
-    )
-    if ingredient_id:
-        query = query.eq("ingredient_id", ingredient_id)
+    select_clause = _stock_intake_select_clause(include_relations=True)
 
-    resp = query.execute()
-    err = getattr(resp, "error", None)
+    def _build_intake_query(clause: str):
+        q = (
+            ctx["client"]
+            .table("ingredient_purchases")
+            .select(clause)
+            .eq("store_id", store_id_resolved)
+            .order("created_at", desc=True)
+            .limit(limit_value)
+        )
+        if ingredient_id:
+            q = q.eq("ingredient_id", ingredient_id)
+        return q
+
+    try:
+        resp = _build_intake_query(select_clause).execute()
+        err = getattr(resp, "error", None)
+    except Exception as exc:
+        if _is_missing_column(exc, "expiry_note"):
+            select_clause = select_clause.replace(", expiry_note", "")
+            resp = _build_intake_query(select_clause).execute()
+            err = getattr(resp, "error", None)
+        else:
+            raise HTTPException(status_code=500, detail="stock_intake_query_failed")
     if err:
         raise HTTPException(status_code=500, detail="stock_intake_query_failed")
     rows = getattr(resp, "data", None) or []
@@ -4191,10 +4432,23 @@ def get_stock_intake(intake_id: str, authorization: Optional[str] = Header(None)
     store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
     _require_manager(role)
 
-    resp = (
-        ctx["client"].table("ingredient_purchases").select(_stock_intake_select_clause(include_relations=True)).eq("id", intake_id).eq("store_id", store_id_resolved).limit(1).execute()
-    )
-    err = getattr(resp, "error", None)
+    select_clause = _stock_intake_select_clause(include_relations=True)
+
+    def _build_single_intake_query(clause: str):
+        return (
+            ctx["client"].table("ingredient_purchases").select(clause).eq("id", intake_id).eq("store_id", store_id_resolved).limit(1)
+        )
+
+    try:
+        resp = _build_single_intake_query(select_clause).execute()
+        err = getattr(resp, "error", None)
+    except Exception as exc:
+        if _is_missing_column(exc, "expiry_note"):
+            select_clause = select_clause.replace(", expiry_note", "")
+            resp = _build_single_intake_query(select_clause).execute()
+            err = getattr(resp, "error", None)
+        else:
+            raise HTTPException(status_code=500, detail="stock_intake_lookup_failed")
     if err:
         raise HTTPException(status_code=500, detail="stock_intake_lookup_failed")
     rows = getattr(resp, "data", None) or []
@@ -7311,6 +7565,11 @@ def create_kiosk_order(payload: KioskOrderCreate, authorization: Optional[str] =
         )
         item_snapshots.append(snapshot)
 
+    # ── FIX-A: Validate sale configuration BEFORE any persistence ────────
+    # Reject missing recipes, invalid quantities, unresolved ingredients
+    # before creating order/payment/stock.  No partial transaction.
+    _validate_sale_configuration(item_snapshots)
+
     subtotal = sum(float(snapshot.get("total_price") or 0) for snapshot in item_snapshots)
     total_cost = sum(float(snapshot.get("total_cost") or 0) for snapshot in item_snapshots)
     channel_fee_value = resolve_channel_fee(client, store_id_resolved, channel_id_value, subtotal)
@@ -7321,6 +7580,23 @@ def create_kiosk_order(payload: KioskOrderCreate, authorization: Optional[str] =
     customer_id, customer_name, customer_phone = _ensure_customer_record_for_kiosk(client, store_id_resolved, payload.customer)
     note_value = _strip_text(payload.note)
     order_no = generate_order_number(client)
+
+    # ── FIX-B: Use client_order_id as the order primary key ──────────────
+    # If the client provides a UUID, use it as orders.id.  The PRIMARY KEY
+    # constraint is the durable idempotency primitive — two concurrent
+    # requests with the same client_order_id cannot both insert.
+    client_order_id = None
+    if payload.client_order_id:
+        client_order_id = str(payload.client_order_id).strip()
+        # Validate UUID format (basic check)
+        try:
+            import uuid as _uuid
+            _uuid.UUID(client_order_id)
+        except (ValueError, AttributeError):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="kiosk_order_invalid_client_order_id",
+            )
 
     order_payload: Dict[str, Any] = {
         "store_id": store_id_resolved,
@@ -7337,6 +7613,8 @@ def create_kiosk_order(payload: KioskOrderCreate, authorization: Optional[str] =
         "note": note_value,
         "order_no": order_no,
     }
+    if client_order_id:
+        order_payload["id"] = client_order_id
     if customer_id:
         order_payload["customer_id"] = customer_id
     if customer_name and _orders_has_column(client, "customer_name"):
@@ -7378,6 +7656,20 @@ def create_kiosk_order(payload: KioskOrderCreate, authorization: Optional[str] =
         if _is_unique_violation(insert_err, "order_no"):
             attempt_data["order_no"] = generate_order_number(client)
             continue
+        # ── FIX-B: Handle orders_pkey duplicate (idempotent replay) ──────
+        if client_order_id and _is_orders_pkey_violation(insert_err):
+            logger.info(
+                "kiosk_order_idempotent_replay store=%s client_order_id=%s",
+                store_id_resolved,
+                client_order_id,
+            )
+            return _handle_idempotent_replay(
+                client,
+                store_id_resolved,
+                client_order_id,
+                sanitized_items,
+                is_staff,
+            )
         raise HTTPException(status_code=500, detail="kiosk_order_create_failed")
     else:
         raise HTTPException(status_code=500, detail="kiosk_order_create_failed:max_attempts")
@@ -7402,6 +7694,8 @@ def create_kiosk_order(payload: KioskOrderCreate, authorization: Optional[str] =
     if getattr(items_resp, "error", None):
         raise HTTPException(status_code=500, detail="kiosk_order_items_failed")
 
+    inserted_item_rows = getattr(items_resp, "data", None) or []
+
     _create_paid_payment(
         client,
         store_id_resolved,
@@ -7414,7 +7708,165 @@ def create_kiosk_order(payload: KioskOrderCreate, authorization: Optional[str] =
     recalculate_order_totals(client, store_id_resolved, order_id)
     _write_order_status_log(client, order_id, None, "accepted", ctx.get("user_id"), note_value)
 
-    return _map_created_order_with_items(client, store_id_resolved, order_id, is_staff)
+    # ── Stock consumption (Healholic V1) ─────────────────────────────────
+    # Order, order items, and paid payment now exist. Build the usage plan
+    # from the immutable cost snapshots paired with the real order_item_ids,
+    # then call the frozen SECURITY DEFINER RPC via the service-role client.
+    # The RPC validates paid status and the partial unique index
+    # uq_stock_used_order_item_ingredient is the final idempotency safety net.
+    actor_id = ctx.get("user_id")
+    stock_consumed = False
+    stock_failure_detail: Optional[str] = None
+    if inserted_item_rows and actor_id:
+        # Pair each inserted order item row with its original snapshot by
+        # position (insert order is preserved by PostgREST).
+        usage_entries: List[Dict[str, Any]] = []
+        for index, snapshot in enumerate(item_snapshots):
+            item_row = inserted_item_rows[index] if index < len(inserted_item_rows) else {}
+            usage_entries.append(
+                {
+                    "id": item_row.get("id"),
+                    "quantity": snapshot.get("quantity"),
+                    "snapshot": snapshot,
+                }
+            )
+        try:
+            usage_plan = build_usage_plan(usage_entries)
+            if usage_plan:
+                # FIX-C: consume_for_paid_order now retries transient
+                # failures internally and raises StockSyncFailedError with
+                # order context if all attempts fail.
+                consume_for_paid_order(
+                    client,
+                    store_id=store_id_resolved,
+                    order_id=order_id,
+                    actor_id=actor_id,
+                    usage_plan=usage_plan,
+                    order_no=order_no,
+                )
+                stock_consumed = True
+            else:
+                # No usage produced (e.g. empty cart). Treat as no-op.
+                stock_consumed = True
+        except StockSyncFailedError as exc:
+            # FIX-D: Structured partial-commit response with order context.
+            # The order+payment are persisted but stock sync failed after
+            # all retries.  Return a 503 with order_id so the client can
+            # display a "do not resubmit" warning.
+            logger.error(
+                "kiosk_order_stock_sync_failed store=%s order=%s reason=%s",
+                store_id_resolved,
+                order_id,
+                exc.reason,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={
+                    "code": "kiosk_order_stock_sync_failed",
+                    "order_id": order_id,
+                    "order_no": order_no,
+                    "payment_status": "paid",
+                    "stock_consumed": False,
+                    "retryable": True,
+                    "action": "do_not_resubmit",
+                },
+            )
+        except StockUsageError as exc:
+            # Non-transient stock error (e.g. missing_context).  The
+            # order/payment are already persisted; surface a structured
+            # error with order context.
+            logger.error(
+                "kiosk_order_stock_failed store=%s order=%s reason=%s detail=%s",
+                store_id_resolved,
+                order_id,
+                exc.reason,
+                exc.detail,
+            )
+            stock_failure_detail = exc.detail
+
+    if stock_failure_detail:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "kiosk_order_stock_sync_failed",
+                "order_id": order_id,
+                "order_no": order_no,
+                "payment_status": "paid",
+                "stock_consumed": False,
+                "retryable": True,
+                "action": "do_not_resubmit",
+            },
+        )
+
+    mapped_order = _map_created_order_with_items(client, store_id_resolved, order_id, is_staff)
+    if stock_consumed and not stock_failure_detail:
+        mapped_order["stock_consumed"] = True
+    return mapped_order
+
+
+def _handle_idempotent_replay(
+    client: Client,
+    store_id: str,
+    order_id: str,
+    incoming_items: List[Dict[str, Any]],
+    is_staff: bool,
+) -> Dict[str, Any]:
+    """Handle a duplicate client_order_id by classifying and returning the
+    existing order state.
+
+    FIX-B idempotent replay states:
+    - complete: return existing order with idempotent_replay=true (200)
+    - partial_paid: return structured response (409) with order context
+    - in_progress: return 409 kiosk_order_in_progress
+    - payload mismatch: return 409 idempotency_key_conflict
+    """
+    classification = _classify_existing_order(client, store_id, order_id)
+    state = classification.get("state")
+
+    if state == "not_found":
+        # Order exists in a different store — conflict
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "idempotency_key_conflict", "order_id": order_id},
+        )
+
+    # Compare incoming payload with existing order items
+    payloads_match = _compare_payload_with_existing_order(client, store_id, order_id, incoming_items)
+    if not payloads_match:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "idempotency_key_conflict", "order_id": order_id},
+        )
+
+    if state == "complete":
+        # Return the existing completed order
+        mapped = _map_created_order_with_items(client, store_id, order_id, is_staff)
+        mapped["idempotent_replay"] = True
+        mapped["stock_consumed"] = True
+        return mapped
+    elif state == "partial_paid":
+        # Paid order without stock — recovery state
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "kiosk_order_stock_sync_failed",
+                "order_id": order_id,
+                "order_no": classification.get("order_no"),
+                "payment_status": "paid",
+                "stock_consumed": False,
+                "retryable": True,
+                "action": "do_not_resubmit",
+            },
+        )
+    else:
+        # in_progress — another request is still processing
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "kiosk_order_in_progress",
+                "order_id": order_id,
+            },
+        )
 
 
 @router.get("/orders/{order_id}")

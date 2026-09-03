@@ -62,6 +62,21 @@ export function useKioskOrder() {
   const [submitting, setSubmitting] = useState(false);
   const [successOrder, setSuccessOrder] = useState<ApiOrder | null>(null);
 
+  // --- FIX-B: Transaction idempotency --------------------------------------
+  // client_order_id is generated ONCE per logical checkout attempt and
+  // survives accidental duplicate submissions and retries.  It is reset
+  // only after a successful sale or when the user starts a new transaction.
+  const [clientOrderId, setClientOrderId] = useState<string | null>(null);
+
+  // --- FIX-D: Partial-commit safety state ----------------------------------
+  // When the backend returns kiosk_order_stock_sync_failed, the order +
+  // payment are persisted but stock sync failed.  The UI must NOT allow
+  // a resubmit — that would create a duplicate charge.
+  const [stockSyncFailure, setStockSyncFailure] = useState<{
+    order_id: string;
+    order_no?: string;
+  } | null>(null);
+
   // --- Payment settings ------------------------------------------------------
   const [paymentSettings, setPaymentSettings] = useState<StorePaymentSettings | null>(null);
   const [paymentSettingsLoading, setPaymentSettingsLoading] = useState(true);
@@ -297,11 +312,14 @@ export function useKioskOrder() {
     setSuccessOrder(null);
     setActiveStep("menu");
     setSubmitError("");
+    setClientOrderId(null);
+    setStockSyncFailure(null);
   }, []);
 
   // --- Submission -----------------------------------------------------------
   const handleSubmit = useCallback(async () => {
     if (cart.length === 0 || submitting) return;
+    if (stockSyncFailure) return; // FIX-D: do not resubmit after partial commit
     if (paymentSettingsLoading) {
       setSubmitError("กำลังโหลดการตั้งค่าชำระเงิน โปรดรอสักครู่");
       return;
@@ -327,6 +345,15 @@ export function useKioskOrder() {
     setSubmitting(true);
     setSubmitError("");
     try {
+      // FIX-B: Generate client_order_id ONCE for this logical checkout.
+      // Survives duplicate submissions and retries. Reset only on success
+      // or new transaction (resetFlow).
+      let orderId = clientOrderId;
+      if (!orderId) {
+        orderId = crypto.randomUUID();
+        setClientOrderId(orderId);
+      }
+
       const payload: KioskOrderPayload = {
         items: cart.map((item) => ({
           product_id: item.productId,
@@ -334,6 +361,7 @@ export function useKioskOrder() {
           options: buildItemOptions(item),
         })),
         payment_method: paymentMethod,
+        client_order_id: orderId,
       };
 
       const trimmedOrderNote = orderNote.trim();
@@ -356,14 +384,34 @@ export function useKioskOrder() {
       setCustomerPhone("");
       setPaymentMethod("promptpay");
       setActiveStep("success");
+      // FIX-B: reset client_order_id after successful sale
+      setClientOrderId(null);
+      setStockSyncFailure(null);
       toast({
         title: "บันทึกออเดอร์แล้ว",
         description: response.order_no || response.order_number || "สร้างสำเร็จ",
       });
     } catch (error: any) {
-      const message = error?.message || "ไม่สามารถสร้างออเดอร์ได้";
-      setSubmitError(message);
-      toast({ title: "เกิดข้อผิดพลาด", description: message, variant: "destructive" });
+      // FIX-D: Check for structured partial-commit error
+      const detail = error?.detail;
+      if (detail && typeof detail === "object" && detail.code === "kiosk_order_stock_sync_failed") {
+        setStockSyncFailure({
+          order_id: detail.order_id,
+          order_no: detail.order_no,
+        });
+        setSubmitError(
+          "บันทึกการขายและการชำระเงินแล้ว แต่ระบบสต็อกยังซิงก์ไม่สำเร็จ ห้ามสร้างรายการขายซ้ำสำหรับออเดอร์นี้",
+        );
+        toast({
+          title: "สต็อกซิงก์ล้มเหลว",
+          description: `ออเดอร์ ${detail.order_no || detail.order_id} ชำระแล้ว ห้ามสร้างซ้ำ`,
+          variant: "destructive",
+        });
+      } else {
+        const message = error?.message || "ไม่สามารถสร้างออเดอร์ได้";
+        setSubmitError(message);
+        toast({ title: "เกิดข้อผิดพลาด", description: message, variant: "destructive" });
+      }
     } finally {
       setSubmitting(false);
     }
@@ -378,6 +426,8 @@ export function useKioskOrder() {
     noPaymentMethods,
     promptpayEnabled,
     cashEnabled,
+    clientOrderId,
+    stockSyncFailure,
   ]);
 
   return {
@@ -438,6 +488,9 @@ export function useKioskOrder() {
     reloadPaymentSettings: loadPaymentSettings,
     availablePaymentMethods,
     noPaymentMethods,
+    // FIX-B/D
+    clientOrderId,
+    stockSyncFailure,
   };
 }
 

@@ -76,6 +76,7 @@ export default function StaffKioskPage() {
             noPaymentMethods={kiosk.noPaymentMethods}
             qrImageUrl={kiosk.paymentSettings?.promptpay_qr_url}
             promptpayDisplayName={kiosk.paymentSettings?.promptpay_display_name}
+            stockSyncFailure={kiosk.stockSyncFailure}
           />
         ) : null}
 

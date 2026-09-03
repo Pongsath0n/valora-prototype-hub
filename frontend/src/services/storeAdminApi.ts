@@ -19,6 +19,21 @@ export type ApiSalesChannel = {
 export const INGREDIENT_BASE_UNITS = ["g", "ml", "pcs", "set", "bottle"] as const;
 export type IngredientBaseUnit = (typeof INGREDIENT_BASE_UNITS)[number];
 
+// Frozen DB enum for ingredients.cost_type. Must match the backend
+// _INGREDIENT_COST_TYPES set and the database check constraint exactly.
+export const INGREDIENT_COST_TYPES = [
+  "ingredient",
+  "packaging",
+  "consumable",
+  "addon",
+  "utility",
+  "other",
+] as const;
+export type IngredientCostType = (typeof INGREDIENT_COST_TYPES)[number];
+export const DEFAULT_INGREDIENT_COST_TYPE: IngredientCostType = "ingredient";
+export const isIngredientCostType = (value: string): value is IngredientCostType =>
+  (INGREDIENT_COST_TYPES as readonly string[]).includes(value);
+
 export type ApiChannelPrice = {
   id: string;
   store_id: string;
@@ -309,6 +324,7 @@ export type IngredientPayload = {
   low_stock_threshold: number;
   supplier_name?: string | null;
   is_active?: boolean;
+  cost_type?: IngredientCostType;
 };
 
 export type RecipePayload = {
@@ -382,6 +398,8 @@ export type ApiOrder = {
   items?: ApiOrderItem[];
   mock_notification?: string;
   latest_payment?: LatestPaymentSummary | null;
+  stock_consumed?: boolean;
+  idempotent_replay?: boolean;
 };
 
 export type DashboardQueueStatus =
@@ -794,6 +812,7 @@ export type KioskOrderPayload = {
   payment_method: "promptpay" | "cash";
   customer?: KioskOrderCustomerPayload | null;
   note?: string | null;
+  client_order_id?: string;
 };
 
 export type ApiPayment = {
@@ -979,7 +998,13 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   if (!res.ok) {
     const reason = (body as any)?.detail || (body as any)?.error || "request_failed";
-    throw new Error(typeof reason === "string" ? reason : "request_failed");
+    if (typeof reason === "string") {
+      throw new Error(reason);
+    }
+    // Structured error detail (e.g. kiosk_order_stock_sync_failed)
+    const err = new Error(reason?.code || "request_failed") as any;
+    err.detail = reason;
+    throw err;
   }
 
   return body as T;

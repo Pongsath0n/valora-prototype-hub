@@ -175,6 +175,7 @@ describe("/staff/kiosk route", () => {
       payment_method: "cash",
       note: "pickup soon",
       customer: { name: "Alice", phone: "0812345678" },
+      client_order_id: expect.any(String),
     });
 
     expect(await screen.findByText("Q-10")).toBeInTheDocument();
@@ -327,5 +328,121 @@ describe("/staff/kiosk route", () => {
         expect(item).not.toHaveProperty(key);
       });
     });
+  });
+
+  // ── FIX-B: Transaction idempotency tests ─────────────────────────────
+
+  it("generates client_order_id UUID once per checkout", async () => {
+    renderKioskPage();
+
+    await waitFor(() => expect(mockListMenu).toHaveBeenCalled());
+    fireEvent.click(await screen.findByLabelText(/เพิ่ม Iced Latte/i));
+    fireEvent.click(await screen.findByRole("button", { name: "เพิ่มลงรายการ" }));
+    fireEvent.click(screen.getByRole("button", { name: "ไปขั้นตอนการชำระเงิน" }));
+    fireEvent.click(screen.getByRole("button", { name: "ยืนยันว่าได้รับชำระแล้ว" }));
+
+    await waitFor(() => expect(mockCreateKioskOrder).toHaveBeenCalled());
+    const payload1 = mockCreateKioskOrder.mock.calls[0]?.[0];
+    expect(payload1.client_order_id).toBeDefined();
+    expect(typeof payload1.client_order_id).toBe("string");
+    // UUID format check (36 chars with dashes)
+    expect(payload1.client_order_id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
+  });
+
+  it("retains same client_order_id across retry after error", async () => {
+    // First call fails with a generic error, second call should reuse the same UUID
+    mockCreateKioskOrder.mockRejectedValueOnce(new Error("network_error"));
+
+    renderKioskPage();
+
+    await waitFor(() => expect(mockListMenu).toHaveBeenCalled());
+    fireEvent.click(await screen.findByLabelText(/เพิ่ม Iced Latte/i));
+    fireEvent.click(await screen.findByRole("button", { name: "เพิ่มลงรายการ" }));
+    fireEvent.click(screen.getByRole("button", { name: "ไปขั้นตอนการชำระเงิน" }));
+    fireEvent.click(screen.getByRole("button", { name: "ยืนยันว่าได้รับชำระแล้ว" }));
+
+    await waitFor(() => expect(mockCreateKioskOrder).toHaveBeenCalledTimes(1));
+    const payload1 = mockCreateKioskOrder.mock.calls[0]?.[0];
+    const firstUuid = payload1.client_order_id;
+    expect(firstUuid).toBeDefined();
+
+    // Wait for error to show, then retry (click confirm again)
+    await waitFor(() => expect(screen.getByText("network_error")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "ยืนยันว่าได้รับชำระแล้ว" }));
+
+    await waitFor(() => expect(mockCreateKioskOrder).toHaveBeenCalledTimes(2));
+    const payload2 = mockCreateKioskOrder.mock.calls[1]?.[0];
+    // FIX-B: same UUID must be retained across retries
+    expect(payload2.client_order_id).toBe(firstUuid);
+  });
+
+  it("generates new UUID after successful sale", async () => {
+    renderKioskPage();
+
+    await waitFor(() => expect(mockListMenu).toHaveBeenCalled());
+    fireEvent.click(await screen.findByLabelText(/เพิ่ม Iced Latte/i));
+    fireEvent.click(await screen.findByRole("button", { name: "เพิ่มลงรายการ" }));
+    fireEvent.click(screen.getByRole("button", { name: "ไปขั้นตอนการชำระเงิน" }));
+    fireEvent.click(screen.getByRole("button", { name: "ยืนยันว่าได้รับชำระแล้ว" }));
+
+    await waitFor(() => expect(mockCreateKioskOrder).toHaveBeenCalled());
+    const firstUuid = mockCreateKioskOrder.mock.calls[0]?.[0].client_order_id;
+    expect(firstUuid).toBeDefined();
+
+    // Wait for success, then start a new order
+    await waitFor(() => expect(screen.getByText("Q-10")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /เริ่มรายการใหม่|ออเดอร์ใหม่|สร้างออเดอร์ใหม่/ }));
+
+    // Add another item and submit
+    fireEvent.click(await screen.findByLabelText(/เพิ่ม Iced Latte/i));
+    fireEvent.click(await screen.findByRole("button", { name: "เพิ่มลงรายการ" }));
+    fireEvent.click(screen.getByRole("button", { name: "ไปขั้นตอนการชำระเงิน" }));
+    fireEvent.click(screen.getByRole("button", { name: "ยืนยันว่าได้รับชำระแล้ว" }));
+
+    await waitFor(() => expect(mockCreateKioskOrder).toHaveBeenCalledTimes(2));
+    const secondUuid = mockCreateKioskOrder.mock.calls[1]?.[0].client_order_id;
+    // FIX-B: new UUID after successful sale
+    expect(secondUuid).toBeDefined();
+    expect(secondUuid).not.toBe(firstUuid);
+  });
+
+  // ── FIX-D: Partial-commit safety tests ───────────────────────────────
+
+  it("shows DO NOT RESUBMIT warning on stock sync failure", async () => {
+    // Simulate a structured partial-commit error (503 with order context)
+    const stockError = new Error("kiosk_order_stock_sync_failed") as any;
+    stockError.detail = {
+      code: "kiosk_order_stock_sync_failed",
+      order_id: "order-abc",
+      order_no: "ORD-500",
+      payment_status: "paid",
+      stock_consumed: false,
+      retryable: true,
+      action: "do_not_resubmit",
+    };
+    mockCreateKioskOrder.mockRejectedValueOnce(stockError);
+
+    renderKioskPage();
+
+    await waitFor(() => expect(mockListMenu).toHaveBeenCalled());
+    fireEvent.click(await screen.findByLabelText(/เพิ่ม Iced Latte/i));
+    fireEvent.click(await screen.findByRole("button", { name: "เพิ่มลงรายการ" }));
+    fireEvent.click(screen.getByRole("button", { name: "ไปขั้นตอนการชำระเงิน" }));
+    fireEvent.click(screen.getByRole("button", { name: "ยืนยันว่าได้รับชำระแล้ว" }));
+
+    // FIX-D: must show blocking warning, not generic "try again"
+    await waitFor(() => expect(screen.getByText("ห้ามสร้างรายการขายซ้ำ")).toBeInTheDocument());
+    // The Alert contains the order number
+    expect(screen.getByText(/ORD-500/)).toBeInTheDocument();
+    // The submitError also shows the warning text
+    expect(screen.getAllByText(/บันทึกการขายและการชำระเงินแล้ว/).length).toBeGreaterThan(0);
+
+    // FIX-D: confirm button must be disabled
+    const confirmButton = screen.getByRole("button", { name: "ยืนยันว่าได้รับชำระแล้ว" });
+    expect(confirmButton).toBeDisabled();
+
+    // FIX-D: clicking confirm must NOT trigger another submission
+    fireEvent.click(confirmButton);
+    expect(mockCreateKioskOrder).toHaveBeenCalledTimes(1);
   });
 });
