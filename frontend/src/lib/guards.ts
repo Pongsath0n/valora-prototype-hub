@@ -53,11 +53,11 @@ export const BUSINESS_PORTAL_ROLES = MANAGER_ROLES;
 /**
  * Roles allowed to access the internal system console (/system/*).
  *
- * TODO: introduce a dedicated `internal_system` (or platform staff) role once
- * the role model supports it. For now we restrict to `owner` so the console
- * is not exposed to store-level admins or staff.
+ * Healholic V1: `admin` is the canonical System Console operator (system
+ * health, audit logs, user/role management, store membership inspection).
+ * `owner` retains access for co-ownership of the deployed system.
  */
-export const SYSTEM_CONSOLE_ROLES: AppRole[] = ["owner"];
+export const SYSTEM_CONSOLE_ROLES: AppRole[] = ["owner", "admin"];
 
 /** Convenience guard for store-admin routes. */
 export function useAdminGuard() {

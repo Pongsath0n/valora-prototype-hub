@@ -52,7 +52,7 @@ describe("AppLayout owner navigation (Healholic V1)", () => {
     }
   });
 
-  it("hides deferred V1 features (profit-planning, system console, channels, channel-pricing) from owner nav", () => {
+  it("hides deferred V1 features (profit-planning, system console overview, channels, channel-pricing) from owner nav", () => {
     mockRoleState.role = "owner";
     renderLayout();
 
@@ -60,8 +60,6 @@ describe("AppLayout owner navigation (Healholic V1)", () => {
     for (const hidden of [
       "/owner/profit-planning",
       "/system",
-      "/system/users",
-      "/system/roles",
       "/system/health",
       "/system/audit-logs",
       "/store-admin/channels",
@@ -70,6 +68,15 @@ describe("AppLayout owner navigation (Healholic V1)", () => {
     ]) {
       expect(hrefs).not.toContain(hidden);
     }
+  });
+
+  it("owner nav includes User/Role Management under store-management group", () => {
+    mockRoleState.role = "owner";
+    renderLayout();
+
+    const hrefs = allHrefs();
+    expect(hrefs).toContain("/system/users");
+    expect(hrefs).toContain("/system/roles");
   });
 
   it("does not show legacy /app config routes, /admin links, or legacy POS routes", () => {
@@ -109,12 +116,14 @@ describe("AppLayout owner navigation (Healholic V1)", () => {
     }
   });
 
-  it("V1 nav is role-agnostic (no system console entries even for owner)", () => {
+  it("V1 nav does not expose the full System Console overview to owner", () => {
     mockRoleState.role = "owner";
     renderLayout();
 
     const hrefs = allHrefs();
+    // Owner gets User/Role Management links but NOT the full System Console.
     expect(hrefs).not.toContain("/system");
-    expect(hrefs).not.toContain("/system/users");
+    expect(hrefs).not.toContain("/system/health");
+    expect(hrefs).not.toContain("/system/audit-logs");
   });
 });

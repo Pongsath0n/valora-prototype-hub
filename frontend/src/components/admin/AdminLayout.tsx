@@ -1,58 +1,26 @@
 import { NavLink, useNavigate } from "react-router-dom";
-import {
-  ArrowLeft,
-  ClipboardList,
-  CreditCard,
-  LayoutDashboard,
-  LogOut,
-  Menu,
-  MonitorSmartphone,
-  Settings,
-  Soup,
-  X,
-} from "lucide-react";
+import { ArrowLeft, LogOut, Menu, X } from "lucide-react";
 import { useState } from "react";
 import LogoBrand from "@/components/LogoBrand";
 import { useAuth } from "@/contexts/AuthContext";
 import { useProfileRole } from "@/contexts/RoleContext";
-import type { AppRole } from "@/lib/guards";
+import {
+  ADMIN_MOBILE_NAV,
+  ADMIN_NAV_SECTIONS,
+  OWNER_MOBILE_NAV,
+  OWNER_NAV_SECTIONS,
+  OWNER_UTILITY_NAV,
+  STAFF_NAV_SECTIONS,
+  isAdminRole,
+  isManagerRole,
+  resolveNavSections,
+  type NavItem,
+  type NavSection,
+} from "@/config/navigation";
 
-const MANAGER_NAV_ROLES: AppRole[] = ["owner", "admin", "manager"];
+/* ── Nav item renderer ────────────────────────────────────────────────── */
 
-type StoreNavItem = {
-  title: string;
-  path: string;
-  icon: React.ElementType;
-  end?: boolean;
-  roles?: AppRole[];
-};
-
-const storeNavSections: { title: string; items: StoreNavItem[] }[] = [
-  {
-    title: "งานประจำวัน",
-    items: [
-      // Healholic V1 staff scope: POS (Kiosk) + Orders/Sales only.
-      { title: "POS (Kiosk)", path: "/staff/kiosk", icon: MonitorSmartphone, end: true },
-      { title: "ออเดอร์", path: "/staff/orders", icon: ClipboardList },
-    ],
-  },
-  {
-    title: "การจัดการร้าน",
-    items: [
-      { title: "เมนู", path: "/owner/menus", icon: Soup, roles: MANAGER_NAV_ROLES },
-      { title: "วัตถุดิบ / สต็อก", path: "/owner/cost-items", icon: Settings, roles: MANAGER_NAV_ROLES },
-      { title: "สูตรและต้นทุน", path: "/owner/recipes", icon: Settings, roles: MANAGER_NAV_ROLES },
-      // Reports link points to the canonical owner reports route (/owner/reports).
-      { title: "รายงาน", path: "/owner/reports", icon: LayoutDashboard, roles: MANAGER_NAV_ROLES },
-      { title: "ตั้งค่าการชำระเงิน", path: "/owner/payment-settings", icon: CreditCard, roles: MANAGER_NAV_ROLES },
-    ],
-  },
-];
-
-const PLACEHOLDER_PATHS = new Set(["/store-admin/pos", "/store-admin/reports", "/staff/pos", "/staff/reports"]);
-const shouldHidePlaceholderNav = () => !import.meta.env.DEV;
-
-function StoreNavItem({
+function SidebarNavItem({
   path,
   icon: Icon,
   title,
@@ -84,68 +52,83 @@ function StoreNavItem({
   );
 }
 
+/* ── Layout ───────────────────────────────────────────────────────────── */
+
 interface AdminLayoutProps {
   title?: string;
   subtitle?: string;
   children: React.ReactNode;
+  /** @deprecated Placeholder nav hiding is no longer needed — the shared
+   *  navigation config does not include placeholder routes. Retained for
+   *  backwards compatibility with existing callers. */
   forceHidePlaceholderNav?: boolean;
 }
 
 export default function AdminLayout({
-  title = "Valora Store Admin",
-  subtitle = "จัดการออเดอร์ การชำระเงิน เมนู และการตั้งค่าร้าน",
+  title,
+  subtitle,
   children,
-  forceHidePlaceholderNav,
 }: AdminLayoutProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const navigate = useNavigate();
   const { signOut } = useAuth();
   const { role } = useProfileRole();
 
-  const hidePlaceholders = forceHidePlaceholderNav ?? shouldHidePlaceholderNav();
+  const isOwner = isManagerRole(role);
+  const isAdmin = isAdminRole(role);
 
-  const visibleSections = storeNavSections
-    .map((section) => ({
-      title: section.title,
-      items: section.items.filter((item) => {
-        if (hidePlaceholders && PLACEHOLDER_PATHS.has(item.path)) {
-          return false;
-        }
-        if (!item.roles) return true;
-        return role ? item.roles.includes(role) : false;
-      }),
-    }))
-    .filter((section) => section.items.length > 0);
+  // Resolve nav sections based on role.
+  // Admin sees admin nav (System Console link + Business View).
+  // Owner/manager see owner nav. Staff see staff nav.
+  const navSections: NavSection[] = isAdmin
+    ? resolveNavSections(ADMIN_NAV_SECTIONS, role)
+    : isOwner
+      ? resolveNavSections(OWNER_NAV_SECTIONS, role)
+      : resolveNavSections(STAFF_NAV_SECTIONS, role);
 
-  const canAccessBusinessPortal = role ? MANAGER_NAV_ROLES.includes(role) : false;
-  const backLinkPath = canAccessBusinessPortal ? "/owner/dashboard" : "/staff";
-  const backLinkLabel = canAccessBusinessPortal ? "กลับไปหน้าร้าน" : "กลับไปแดชบอร์ดร้าน";
+  const utilityNav: NavItem[] = isOwner && !isAdmin ? OWNER_UTILITY_NAV : [];
+  const mobileNav: NavItem[] = isAdmin
+    ? ADMIN_MOBILE_NAV
+    : isOwner
+      ? OWNER_MOBILE_NAV
+      : [];
+
+  // Role-aware defaults.
+  const effectiveTitle = title ?? (isAdmin || isOwner ? "Valora" : "Staff");
+  const effectiveSubtitle = subtitle ?? (isAdmin || isOwner ? "" : "");
+
+  // Staff back link — sends staff back to their primary workspace (POS).
+  const staffBackLinkPath = "/staff/kiosk";
+  const staffBackLinkLabel = "กลับไป POS";
 
   async function handleLogout() {
     await signOut();
     navigate("/login", { replace: true });
   }
 
+  const sidebarLabel = isAdmin ? "System Operator" : isOwner ? "Business Intelligence" : "Staff";
+  const mobileHeaderLabel = isAdmin ? "Valora Admin" : isOwner ? "Valora" : "Valora Staff";
+
   return (
     <div className="min-h-screen flex w-full bg-background">
-      {/* Desktop Sidebar */}
+      {/* ── Desktop Sidebar ─────────────────────────────────────────── */}
       <aside className="hidden md:flex flex-col w-60 bg-sidebar text-sidebar-foreground border-r border-sidebar-border fixed inset-y-0 left-0 z-40">
         <div className="flex items-center gap-2.5 px-4 py-5 border-b border-sidebar-border">
           <LogoBrand size="sm" iconOnly dark />
           <div>
             <p className="font-bold text-sidebar-accent-foreground leading-none">Valora</p>
-            <p className="text-[10px] text-sidebar-foreground/60 mt-0.5">Store Admin</p>
+            <p className="text-[10px] text-sidebar-foreground/60 mt-0.5">{sidebarLabel}</p>
           </div>
         </div>
 
         <nav className="flex-1 py-4 px-3 space-y-4 overflow-y-auto">
-          {visibleSections.map((section) => (
+          {navSections.map((section) => (
             <div key={section.title} className="space-y-0.5">
               <p className="text-[10px] font-semibold text-sidebar-foreground/40 uppercase tracking-widest px-3 mb-2">
                 {section.title}
               </p>
               {section.items.map((item) => (
-                <StoreNavItem key={item.path} {...item} />
+                <SidebarNavItem key={item.path} {...item} />
               ))}
             </div>
           ))}
@@ -155,13 +138,18 @@ export default function AdminLayout({
           <p className="text-[10px] font-semibold text-sidebar-foreground/40 uppercase tracking-widest px-3 mb-2">
             บัญชี
           </p>
-          <NavLink
-            to={backLinkPath}
-            className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-sidebar-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground transition-colors cursor-pointer"
-          >
-            <ArrowLeft className="w-4 h-4 flex-shrink-0" />
-            <span>{backLinkLabel}</span>
-          </NavLink>
+          {utilityNav.map((item) => (
+            <SidebarNavItem key={item.path} {...item} />
+          ))}
+          {!isOwner ? (
+            <NavLink
+              to={staffBackLinkPath}
+              className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-sidebar-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground transition-colors cursor-pointer"
+            >
+              <ArrowLeft className="w-4 h-4 flex-shrink-0" />
+              <span>{staffBackLinkLabel}</span>
+            </NavLink>
+          ) : null}
           <button
             type="button"
             onClick={handleLogout}
@@ -173,11 +161,11 @@ export default function AdminLayout({
         </div>
       </aside>
 
-      {/* Mobile Header */}
+      {/* ── Mobile Header ───────────────────────────────────────────── */}
       <header className="md:hidden fixed top-0 left-0 right-0 z-50 bg-card border-b h-14 flex items-center justify-between px-4 shadow-sm">
         <div className="flex items-center gap-2">
           <LogoBrand size="sm" iconOnly />
-          <span className="font-semibold text-sm">Store Admin</span>
+          <span className="font-semibold text-sm">{mobileHeaderLabel}</span>
         </div>
         <button
           type="button"
@@ -189,36 +177,49 @@ export default function AdminLayout({
         </button>
       </header>
 
-      {/* Mobile Sidebar */}
+      {/* ── Mobile Sidebar Drawer ───────────────────────────────────── */}
       {sidebarOpen && (
         <div className="md:hidden fixed inset-0 z-40">
           <div
             className="absolute inset-0 bg-foreground/30 backdrop-blur-sm"
             onClick={() => setSidebarOpen(false)}
           />
-          <aside className="absolute left-0 top-14 bottom-0 w-64 bg-sidebar text-sidebar-foreground px-3 py-4 space-y-0.5 overflow-y-auto shadow-xl">
-            <p className="text-[10px] font-semibold text-sidebar-foreground/40 uppercase tracking-widest px-3 mb-2">
-              เมนูร้าน
-            </p>
-            {visibleSections.map((section) => (
-              <div key={section.title} className="space-y-0.5">
+          <aside className="absolute left-0 top-14 bottom-0 w-64 bg-sidebar text-sidebar-foreground px-3 py-4 space-y-4 overflow-y-auto shadow-xl pb-24">
+            {navSections.map((section) => (
+              <div key={`mobile-${section.title}`} className="space-y-0.5">
                 <p className="text-[10px] font-semibold text-sidebar-foreground/40 uppercase tracking-widest px-3 mb-2">
                   {section.title}
                 </p>
                 {section.items.map((item) => (
-                  <StoreNavItem key={item.path} {...item} onClick={() => setSidebarOpen(false)} />
+                  <SidebarNavItem
+                    key={`mobile-${section.title}-${item.path}`}
+                    {...item}
+                    onClick={() => setSidebarOpen(false)}
+                  />
                 ))}
               </div>
             ))}
             <div className="pt-3 mt-3 border-t border-sidebar-border space-y-0.5">
-              <NavLink
-                to={backLinkPath}
-                onClick={() => setSidebarOpen(false)}
-                className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-sidebar-foreground hover:bg-sidebar-accent/60 transition-colors"
-              >
-                <ArrowLeft className="w-4 h-4" />
-                {backLinkLabel}
-              </NavLink>
+              <p className="text-[10px] font-semibold text-sidebar-foreground/40 uppercase tracking-widest px-3 mb-2">
+                บัญชี
+              </p>
+              {utilityNav.map((item) => (
+                <SidebarNavItem
+                  key={`mobile-utility-${item.path}`}
+                  {...item}
+                  onClick={() => setSidebarOpen(false)}
+                />
+              ))}
+              {!isOwner ? (
+                <NavLink
+                  to={staffBackLinkPath}
+                  onClick={() => setSidebarOpen(false)}
+                  className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-sidebar-foreground hover:bg-sidebar-accent/60 transition-colors"
+                >
+                  <ArrowLeft className="w-4 h-4" />
+                  {staffBackLinkLabel}
+                </NavLink>
+              ) : null}
               <button
                 type="button"
                 onClick={() => {
@@ -235,12 +236,35 @@ export default function AdminLayout({
         </div>
       )}
 
-      {/* Main Content */}
-      <main className="flex-1 md:ml-60 pt-14 md:pt-0 pb-10 md:pb-0 min-h-screen overflow-x-hidden">
-        <div className="max-w-6xl mx-auto px-3 sm:px-4 md:px-6 py-6 animate-fade-in space-y-6">
+      {/* ── Mobile Bottom Nav (Owner only) ──────────────────────────── */}
+      {isOwner && mobileNav.length > 0 ? (
+        <nav className={`bottom-nav md:hidden ${sidebarOpen ? "hidden" : ""}`}>
+          {mobileNav.map((item) => (
+            <NavLink
+              key={`bottom-${item.path}`}
+              to={item.path}
+              end={item.end}
+              className={({ isActive }) =>
+                `bottom-nav-item ${isActive ? "active" : ""}`
+              }
+            >
+              <item.icon className="w-5 h-5" />
+              <span className="text-[10px]">{item.title}</span>
+            </NavLink>
+          ))}
+        </nav>
+      ) : null}
+
+      {/* ── Main Content ────────────────────────────────────────────── */}
+      <main className="flex-1 md:ml-60 pt-14 md:pt-0 min-h-screen overflow-x-hidden">
+        <div
+          className={`max-w-6xl mx-auto px-3 sm:px-4 md:px-6 py-6 animate-fade-in space-y-6 ${
+            isOwner && mobileNav.length > 0 ? "pb-20 md:pb-6" : "pb-10 md:pb-0"
+          }`}
+        >
           <header>
-            <h1 className="page-title">{title}</h1>
-            {subtitle ? <p className="page-subtitle">{subtitle}</p> : null}
+            <h1 className="page-title">{effectiveTitle}</h1>
+            {effectiveSubtitle ? <p className="page-subtitle">{effectiveSubtitle}</p> : null}
           </header>
           {children}
         </div>

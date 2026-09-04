@@ -901,8 +901,15 @@ def _require_staff_or_above(role: str) -> None:
 
 
 def _require_owner_profile(profile: Dict[str, Any]) -> None:
+    """Authorize System Console access.
+
+    Healholic V1: the `admin` role is the canonical System Console operator
+    (system health, audit logs, user/role management, store membership
+    inspection). The `owner` role retains System Console access for
+    co-ownership of the deployed system. No other role may enter.
+    """
     role_value = _normalize_store_role((profile or {}).get("role"))
-    if role_value != "owner":
+    if role_value not in ("owner", "admin"):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="owner_role_required")
 
 

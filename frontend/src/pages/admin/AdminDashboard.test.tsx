@@ -43,6 +43,8 @@ describe("Store Admin dashboard cards", () => {
     renderPage();
 
     expect(screen.getByText("การจัดการร้าน (ผู้จัดการขึ้นไป)")).toBeInTheDocument();
-    expect(screen.queryByText("POS")).toBeNull();
+    // "POS" may appear in the mobile bottom nav; verify it does NOT appear
+    // as a card heading (the POS card was intentionally removed).
+    expect(screen.queryByRole("heading", { name: "POS" })).toBeNull();
   });
 });

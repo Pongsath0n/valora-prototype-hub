@@ -52,7 +52,7 @@ vi.mock("@/lib/guards", () => ({
   STORE_ADMIN_ROLES: ["staff"],
   BUSINESS_PORTAL_ROLES: ["owner"],
   STORE_MANAGER_ROLES: ["owner"],
-  SYSTEM_CONSOLE_ROLES: ["owner"],
+  SYSTEM_CONSOLE_ROLES: ["owner", "admin"],
 }));
 
 const MENU_FIXTURE = [

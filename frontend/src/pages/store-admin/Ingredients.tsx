@@ -927,11 +927,12 @@ export default function StoreAdminIngredientsPage() {
             {
               key: "unit",
               header: "หน่วย",
+              className: "hidden md:table-cell",
               render: (r) => BASE_UNIT_LABELS[r.unit as IngredientBaseUnit] || r.unit,
             },
-            { key: "cost_per_unit", header: "ต้นทุน/หน่วย", render: (r) => `฿${Number(r.cost_per_unit).toFixed(4)}` },
+            { key: "cost_per_unit", header: "ต้นทุน/หน่วย", className: "hidden md:table-cell", render: (r) => `฿${Number(r.cost_per_unit).toFixed(4)}` },
             { key: "current_stock", header: "สต็อก", render: (r) => Number(r.current_stock).toLocaleString(undefined, { maximumFractionDigits: 2 }) },
-            { key: "low_stock_threshold", header: "แจ้งเตือนต่ำกว่า" },
+            { key: "low_stock_threshold", header: "แจ้งเตือนต่ำกว่า", className: "hidden md:table-cell" },
             {
               key: "stock_status",
               header: "สถานะสต็อก",
@@ -954,17 +955,18 @@ export default function StoreAdminIngredientsPage() {
     );
               },
             },
-            { key: "last_purchase_at", header: "ซื้อครั้งล่าสุด", render: (r) => formatDateTime(r.last_purchase_at) },
+            { key: "last_purchase_at", header: "ซื้อครั้งล่าสุด", className: "hidden lg:table-cell", render: (r) => formatDateTime(r.last_purchase_at) },
             {
               key: "cost_source",
               header: "แหล่งต้นทุน",
+              className: "hidden lg:table-cell",
               render: (r) => {
                 if (!r.cost_source) return "-";
                 if (r.cost_source === "purchase_derived") return "จากการซื้อ";
                 return r.cost_source;
               },
             },
-            { key: "supplier_name", header: "ผู้จัดจำหน่าย", render: (r) => r.supplier_name || "-" },
+            { key: "supplier_name", header: "ผู้จัดจำหน่าย", className: "hidden lg:table-cell", render: (r) => r.supplier_name || "-" },
             { key: "is_active", header: "สถานะ", render: (r) => <StatusBadge label={(r.is_active ?? true) ? "active" : "inactive"} tone={(r.is_active ?? true) ? "success" : "warning"} /> },
             {
               key: "actions",

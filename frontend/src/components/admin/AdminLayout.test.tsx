@@ -20,7 +20,7 @@ vi.mock("@/contexts/RoleContext", () => ({
 function renderLayout() {
   return render(
     <MemoryRouter>
-      <AdminLayout title="test" subtitle="" forceHidePlaceholderNav>
+      <AdminLayout title="test" subtitle="">
         <div>content</div>
       </AdminLayout>
     </MemoryRouter>,
@@ -36,16 +36,15 @@ describe("AdminLayout navigation (Healholic V1)", () => {
     mockRoleState.role = "staff";
     renderLayout();
 
-    const staffBackLink = screen.getByRole("link", { name: "กลับไปแดชบอร์ดร้าน" });
-    expect(staffBackLink).toHaveAttribute("href", "/staff");
+    // Staff back link sends them to their primary workspace (POS).
+    const staffBackLink = screen.getByRole("link", { name: "กลับไป POS" });
+    expect(staffBackLink).toHaveAttribute("href", "/staff/kiosk");
 
     const hrefs = allHrefs();
     expect(hrefs).toContain("/staff/kiosk");
     expect(hrefs).toContain("/staff/orders");
 
     // V1 staff must NOT see customers, dashboard, management, or system links.
-    // Note: the staff back link legitimately points to /staff, which is not a
-    // nav item — it is the "back to dashboard" return link.
     for (const forbidden of [
       "/staff/customers",
       "/store-admin/pos",
@@ -61,19 +60,19 @@ describe("AdminLayout navigation (Healholic V1)", () => {
       "/owner/payment-settings",
       "/store-admin/reports",
       "/system",
+      "/app/settings",
     ]) {
       expect(hrefs).not.toContain(forbidden);
     }
   });
 
-  it("manager sees management links, canonical reports route, payment settings, and business back link", () => {
+  it("manager sees full owner navigation with management links, reports, and payment settings", () => {
     mockRoleState.role = "manager";
     renderLayout();
 
-    const backLink = screen.getByRole("link", { name: "กลับไปหน้าร้าน" });
-    expect(backLink).toHaveAttribute("href", "/owner/dashboard");
-
     const hrefs = allHrefs();
+    // Owner nav items
+    expect(hrefs).toContain("/owner/dashboard");
     expect(hrefs).toContain("/staff/kiosk");
     expect(hrefs).toContain("/staff/orders");
     expect(hrefs).toContain("/owner/menus");
@@ -81,10 +80,50 @@ describe("AdminLayout navigation (Healholic V1)", () => {
     expect(hrefs).toContain("/owner/recipes");
     expect(hrefs).toContain("/owner/reports");
     expect(hrefs).toContain("/owner/payment-settings");
+    // Healholic V1: legacy /app/settings is removed from production nav.
+    expect(hrefs).not.toContain("/app/settings");
+    // User/Role Management are now in the store-management group.
+    expect(hrefs).toContain("/system/users");
+    expect(hrefs).toContain("/system/roles");
     // Deferred V1 features hidden from manager nav.
     expect(hrefs).not.toContain("/store-admin/channels");
     expect(hrefs).not.toContain("/store-admin/channel-pricing");
     expect(hrefs).not.toContain("/store-admin/reports");
     expect(hrefs).not.toContain("/store-admin/pos");
+  });
+
+  it("owner sees same navigation as manager", () => {
+    mockRoleState.role = "owner";
+    renderLayout();
+
+    const hrefs = allHrefs();
+    expect(hrefs).toContain("/owner/dashboard");
+    expect(hrefs).toContain("/staff/kiosk");
+    expect(hrefs).toContain("/owner/menus");
+    expect(hrefs).toContain("/owner/cost-items");
+    expect(hrefs).toContain("/owner/recipes");
+    expect(hrefs).toContain("/owner/reports");
+    expect(hrefs).toContain("/owner/payment-settings");
+  });
+
+  it("admin sees System Console link + business view nav, no staff back link", () => {
+    mockRoleState.role = "admin";
+    renderLayout();
+
+    const hrefs = allHrefs();
+    // System Console link present
+    expect(hrefs).toContain("/system");
+    // Business view nav present
+    expect(hrefs).toContain("/owner/dashboard");
+    expect(hrefs).toContain("/staff/kiosk");
+    expect(hrefs).toContain("/owner/menus");
+    expect(hrefs).toContain("/owner/cost-items");
+    expect(hrefs).toContain("/owner/recipes");
+    expect(hrefs).toContain("/owner/reports");
+    expect(hrefs).toContain("/owner/payment-settings");
+    // Admin must NOT see prototype /app/settings (utility nav hidden for admin)
+    expect(hrefs).not.toContain("/app/settings");
+    // Admin must NOT see the staff back link label
+    expect(screen.queryByRole("link", { name: "กลับไป POS" })).toBeNull();
   });
 });

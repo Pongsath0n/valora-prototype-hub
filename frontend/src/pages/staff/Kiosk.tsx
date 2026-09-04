@@ -1,3 +1,5 @@
+import { useRef } from "react";
+import { ArrowRight, ShoppingBag } from "lucide-react";
 import AdminLayout from "@/components/admin/AdminLayout";
 import {
   CartPanel,
@@ -7,7 +9,7 @@ import {
   PaymentPanel,
   SuccessPanel,
 } from "@/components/staff/kiosk";
-import { STEPS, useKioskOrder } from "@/features/staff/kiosk";
+import { STEPS, useKioskOrder, formatCurrency } from "@/features/staff/kiosk";
 
 /**
  * Staff Kiosk — walk-in order creation.
@@ -18,6 +20,11 @@ import { STEPS, useKioskOrder } from "@/features/staff/kiosk";
  */
 export default function StaffKioskPage() {
   const kiosk = useKioskOrder();
+  const cartRef = useRef<HTMLDivElement>(null);
+
+  function scrollCartIntoView() {
+    cartRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
 
   return (
     <AdminLayout title="Staff Kiosk" subtitle="สร้างออเดอร์ walk-in ที่ปลอดภัยและเชื่อมต่อคิวอัตโนมัติ">
@@ -40,22 +47,24 @@ export default function StaffKioskPage() {
               visibleMenus={kiosk.visibleMenus}
               onSelectProduct={(product) => kiosk.openItemDialog(product, null)}
             />
-            <CartPanel
-              cart={kiosk.cart}
-              orderTotal={kiosk.orderTotal}
-              hasItems={kiosk.hasItems}
-              onAdjustQuantity={kiosk.adjustItemQuantity}
-              onEditItem={kiosk.editCartItem}
-              onRemoveItem={kiosk.removeItem}
-              onClearCart={kiosk.clearCart}
-              onNext={kiosk.goToPayment}
-              orderNote={kiosk.orderNote}
-              onOrderNoteChange={kiosk.setOrderNote}
-              customerName={kiosk.customerName}
-              onCustomerNameChange={kiosk.setCustomerName}
-              customerPhone={kiosk.customerPhone}
-              onCustomerPhoneChange={kiosk.setCustomerPhone}
-            />
+            <div ref={cartRef} className="scroll-mt-20">
+              <CartPanel
+                cart={kiosk.cart}
+                orderTotal={kiosk.orderTotal}
+                hasItems={kiosk.hasItems}
+                onAdjustQuantity={kiosk.adjustItemQuantity}
+                onEditItem={kiosk.editCartItem}
+                onRemoveItem={kiosk.removeItem}
+                onClearCart={kiosk.clearCart}
+                onNext={kiosk.goToPayment}
+                orderNote={kiosk.orderNote}
+                onOrderNoteChange={kiosk.setOrderNote}
+                customerName={kiosk.customerName}
+                onCustomerNameChange={kiosk.setCustomerName}
+                customerPhone={kiosk.customerPhone}
+                onCustomerPhoneChange={kiosk.setCustomerPhone}
+              />
+            </div>
           </div>
         ) : null}
 
@@ -103,6 +112,26 @@ export default function StaffKioskPage() {
         onAddonQuantityChange={kiosk.setDraftAddonQuantity}
         onConfirm={kiosk.persistDraft}
       />
+
+      {/* Mobile floating cart CTA — jumps to the cart panel when the product
+          list is long. Desktop has a sticky sidebar cart so this is hidden. */}
+      {kiosk.activeStep === "menu" && kiosk.hasItems ? (
+        <button
+          type="button"
+          onClick={scrollCartIntoView}
+          className="fixed bottom-16 left-4 right-4 z-30 flex items-center justify-between rounded-xl bg-primary px-4 py-3 text-primary-foreground shadow-lg transition hover:opacity-90 lg:hidden"
+          aria-label="ดูตะกร้าและไปชำระเงิน"
+        >
+          <span className="flex items-center gap-2 text-sm font-semibold">
+            <ShoppingBag className="h-4 w-4" />
+            ตะกร้า {kiosk.cart.length} รายการ
+          </span>
+          <span className="flex items-center gap-2 text-sm font-bold tabular-nums">
+            {formatCurrency(kiosk.orderTotal)}
+            <ArrowRight className="h-4 w-4" />
+          </span>
+        </button>
+      ) : null}
     </AdminLayout>
   );
 }

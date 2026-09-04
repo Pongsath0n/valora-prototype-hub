@@ -11,10 +11,13 @@ import type { AppRole } from "@/lib/guards";
  *   longer gates the owner redirect.
  * - Staff land directly on the POS kiosk (/staff/kiosk), the operational
  *   direct-sale workspace.
- * - Owner / admin / manager land on the business dashboard (/owner/dashboard).
+ * - Admin (system operator) lands on the System Console (/system), their
+ *   primary workspace for system health, audit logs, and user management.
+ * - Owner / manager land on the business dashboard (/owner/dashboard).
  */
 export function resolvePostLoginRoute(role: AppRole | string | null, hasOnboarded: boolean): string {
   void hasOnboarded; // Healholic store is pre-provisioned; onboarding is bypassed.
   if (role === "staff") return "/staff/kiosk";
+  if (role === "admin") return "/system";
   return "/owner/dashboard";
 }

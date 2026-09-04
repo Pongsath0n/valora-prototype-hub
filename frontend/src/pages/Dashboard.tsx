@@ -341,16 +341,6 @@ export default function DashboardPage() {
       helper: "รวมทุกสถานะที่สร้างในวันนี้",
     },
     {
-      label: "รอตรวจสลิป",
-      value: formatNumber(summary.pending_payment_review_count),
-      helper: "จำนวนรายการที่อยู่ในคิวรอตรวจ",
-    },
-    {
-      label: "มูลค่ารอตรวจสลิป",
-      value: formatCurrency(summary.pending_payment_review_value),
-      helper: "ยอดรวมออเดอร์ที่ยังไม่ได้ยืนยันสลิป",
-    },
-    {
       label: "ออเดอร์กำลังดำเนินการ",
       value: formatNumber(summary.active_orders_count),
       helper: "ยังไม่เสร็จสิ้น / ไม่ถูกยกเลิก",
@@ -373,7 +363,12 @@ export default function DashboardPage() {
     order_count: { label: "จำนวนออเดอร์", color: "hsl(260, 83%, 57%)" },
   } as const;
 
-  const queueRows = queueStatusDefinitions.map(({ key, label }) => ({
+  // Healholic V1: Payment Slip Review is deferred — filter out the
+  // waiting_payment_review queue from the dashboard display.
+  const v1QueueStatuses = queueStatusDefinitions.filter(
+    (q) => q.key !== "waiting_payment_review",
+  );
+  const queueRows = v1QueueStatuses.map(({ key, label }) => ({
     key,
     label,
     count: formatNumber(summary.queues?.[key] ?? 0),
@@ -481,8 +476,8 @@ export default function DashboardPage() {
             </div>
           </div>
           <div>
-            <h2 className="mb-2 text-base font-semibold text-foreground">สถานะออเดอร์ & การตรวจสลิป</h2>
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3">
+            <h2 className="mb-2 text-base font-semibold text-foreground">สถานะออเดอร์</h2>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-4">
               {operationsCards.map((card) => (
                 <MetricCard key={card.label} label={card.label} value={card.value} helper={card.helper} />
               ))}
@@ -490,7 +485,10 @@ export default function DashboardPage() {
           </div>
         </section>
 
-        <div className="grid gap-4 lg:grid-cols-3">
+        {/* Healholic V1: Payment Slip Review panel removed — deferred feature.
+            The backend still returns pending_payment_review_count/value; only
+            the UI presentation is hidden. Re-enable by restoring the Panel. */}
+        <div className="grid gap-4 lg:grid-cols-2">
           <Panel title="ภาพรวมสถานะออเดอร์">
             <ul className="space-y-3">
               {queueRows.map((row) => (
@@ -502,27 +500,6 @@ export default function DashboardPage() {
                 </li>
               ))}
             </ul>
-          </Panel>
-
-          <Panel title="คิวรอตรวจสลิป">
-            <div className="rounded-2xl bg-amber-50 p-4 text-amber-900 shadow-inner">
-              <p className="text-xs uppercase tracking-[0.3em]">Pending review</p>
-              <p className="mt-2 text-4xl font-bold">{formatNumber(summary.pending_payment_review_count)}</p>
-              <p className="text-sm text-amber-900/80">รายการที่ต้องตรวจสอบเพิ่มเติมใน Store Admin</p>
-              <div className="mt-4 rounded-xl bg-white/70 px-4 py-3 text-amber-900">
-                <div className="flex items-center justify-between text-sm">
-                  <span>มูลค่ารวม</span>
-                  <span className="font-semibold">{formatCurrency(summary.pending_payment_review_value)}</span>
-                </div>
-                <div className="mt-1 text-xs text-amber-900/70">กดที่ปุ่มด้านล่างเพื่อตรวจสลิป</div>
-              </div>
-              <Link
-                to="/staff/orders"
-                className="mt-3 inline-flex w-full items-center justify-center rounded-xl border border-amber-900/20 bg-amber-900/10 px-3 py-2 text-sm font-semibold text-amber-900 transition hover:bg-amber-900/20"
-              >
-                เปิดหน้าตรวจสลิป
-              </Link>
-            </div>
           </Panel>
 
           <RevenuePanel
@@ -844,7 +821,7 @@ function RevenuePanel({
       <div className="mt-5 space-y-3">
         <RevenueStatRow label="ยอดขายรวม" value={formatCurrency(kpi?.total_sales_amount)} helper={totalOrdersText} />
         <RevenueStatRow label="ยอดรับชำระแล้ว" value={formatCurrency(kpi?.paid_sales_amount)} helper={paidOrdersText} />
-        <RevenueStatRow label="ยอดรอชำระ / รอตรวจสลิป" value={formatCurrency(kpi?.pending_sales_amount)} helper={pendingOrdersText} />
+        <RevenueStatRow label="ยอดรอชำระ" value={formatCurrency(kpi?.pending_sales_amount)} helper={pendingOrdersText} />
       </div>
 
       <div className="mt-4 rounded-xl bg-muted/30 px-4 py-3 text-xs text-muted-foreground">

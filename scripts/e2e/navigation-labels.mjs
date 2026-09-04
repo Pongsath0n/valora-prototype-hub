@@ -19,6 +19,7 @@ function assertCondition(condition, message, detail = {}) {
 
 // ── Check A: Staff navigation visibility ─────────────────────────────────────
 const adminLayout = read("frontend/src/components/admin/AdminLayout.tsx");
+const navConfig = read("frontend/src/config/navigation.tsx");
 const adminDashboard = read("frontend/src/pages/admin/AdminDashboard.tsx");
 const customersPage = read("frontend/src/pages/store-admin/CustomersPage.tsx");
 
@@ -55,16 +56,19 @@ const staffForbiddenKeywords = [
   "role management",
 ];
 
-for (const match of adminLayout.matchAll(navItemRegex)) {
+// Scan the STAFF_NAV_SECTIONS block from the shared navigation config for
+// forbidden keywords. Owner nav items are excluded because they are filtered
+// by role in the layout component and never shown to staff.
+const staffNavBlockMatch = navConfig.match(/STAFF_NAV_SECTIONS[^[]*\[([\s\S]*?)\];/);
+const staffNavBlock = staffNavBlockMatch ? staffNavBlockMatch[1] : "";
+for (const match of staffNavBlock.matchAll(navItemRegex)) {
   const [block, title, itemPath] = match;
-  if (!/roles\s*:/.test(block)) {
-    const lowerTitle = title.toLowerCase();
-    const lowerPath = itemPath.toLowerCase();
-    for (const keyword of staffForbiddenKeywords) {
-      const condensed = keyword.replace(/\s+/g, "");
-      if (lowerTitle.includes(keyword) || lowerPath.includes(condensed)) {
-        assertCondition(false, "Forbidden staff navigation item detected", { title, path: itemPath, keyword });
-      }
+  const lowerTitle = title.toLowerCase();
+  const lowerPath = itemPath.toLowerCase();
+  for (const keyword of staffForbiddenKeywords) {
+    const condensed = keyword.replace(/\s+/g, "");
+    if (lowerTitle.includes(keyword) || lowerPath.includes(condensed)) {
+      assertCondition(false, "Forbidden staff navigation item detected", { title, path: itemPath, keyword });
     }
   }
 }
@@ -101,6 +105,19 @@ businessRoutes.forEach((route) => {
     { route },
   );
 });
+
+// ── Check B2: System Console roles include admin ────────────────────────────
+const guardsFile = read("frontend/src/lib/guards.ts");
+assertCondition(
+  /SYSTEM_CONSOLE_ROLES:\s*AppRole\[\]\s*=\s*\["owner",\s*"admin"\]/.test(guardsFile),
+  "SYSTEM_CONSOLE_ROLES must include both owner and admin",
+);
+
+const postLoginFile = read("frontend/src/lib/postLogin.ts");
+assertCondition(
+  /role === "admin"\s*\)\s*return\s*"\/system"/.test(postLoginFile),
+  "postLogin must route admin to /system",
+);
 
 // ── Check C: Formatter coverage ─────────────────────────────────────────────
 const formatFile = read("frontend/src/lib/format.ts");

@@ -13,15 +13,11 @@ import {
 import { useState } from "react";
 import LogoBrand from "@/components/LogoBrand";
 import { useAuth } from "@/contexts/AuthContext";
+import { useProfileRole } from "@/contexts/RoleContext";
+import { SYSTEM_NAV_SECTIONS, type NavItem, type NavSection } from "@/config/navigation";
 
-const systemNav = [
-  { title: "ภาพรวมระบบ", path: "/system", icon: Terminal, end: true },
-  { title: "จัดการผู้ใช้", path: "/system/users", icon: Users },
-  { title: "จัดการสิทธิ์", path: "/system/roles", icon: ShieldCheck },
-  { title: "ตรวจสอบระบบ", path: "/system/health", icon: Activity },
-  { title: "บันทึกเหตุการณ์", path: "/system/audit-logs", icon: FileText },
-  // "Storage Check" duplicate removed — storage status lives inside the
-  // Health Check page (/system/health#storage); /system/storage still redirects there.
+const businessViewNav: NavItem[] = [
+  { title: "แดชบอร์ดธุรกิจ", path: "/owner/dashboard", icon: ArrowLeft },
 ];
 
 function SystemNavItem({
@@ -70,6 +66,9 @@ export default function SystemLayout({
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const navigate = useNavigate();
   const { signOut } = useAuth();
+  const { role } = useProfileRole();
+
+  const systemSections = SYSTEM_NAV_SECTIONS;
 
   async function handleLogout() {
     await signOut();
@@ -87,26 +86,31 @@ export default function SystemLayout({
           </div>
         </div>
 
-        <nav className="flex-1 py-4 px-3 space-y-0.5 overflow-y-auto">
-          <p className="text-[10px] font-semibold text-sidebar-foreground/40 uppercase tracking-widest px-3 mb-2">
-            Internal System Console
-          </p>
-          {systemNav.map((item) => (
-            <SystemNavItem key={item.path} {...item} />
+        <nav className="flex-1 py-4 px-3 space-y-4 overflow-y-auto">
+          {systemSections.map((section) => (
+            <div key={section.title} className="space-y-0.5">
+              <p className="text-[10px] font-semibold text-sidebar-foreground/40 uppercase tracking-widest px-3 mb-2">
+                {section.title}
+              </p>
+              {section.items.map((item) => (
+                <SystemNavItem key={item.path} {...item} />
+              ))}
+            </div>
           ))}
+          <div className="space-y-0.5">
+            <p className="text-[10px] font-semibold text-sidebar-foreground/40 uppercase tracking-widest px-3 mb-2">
+              Business View
+            </p>
+            {businessViewNav.map((item) => (
+              <SystemNavItem key={item.path} {...item} />
+            ))}
+          </div>
         </nav>
 
         <div className="px-3 py-4 border-t border-sidebar-border space-y-0.5">
           <p className="text-[10px] font-semibold text-sidebar-foreground/40 uppercase tracking-widest px-3 mb-2">
             บัญชี
           </p>
-          <NavLink
-            to="/owner/dashboard"
-            className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-sidebar-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground transition-colors cursor-pointer"
-          >
-            <ArrowLeft className="w-4 h-4 flex-shrink-0" />
-            <span>กลับไปแดชบอร์ดธุรกิจ</span>
-          </NavLink>
           <button
             type="button"
             onClick={handleLogout}
@@ -139,22 +143,34 @@ export default function SystemLayout({
             className="absolute inset-0 bg-foreground/30 backdrop-blur-sm"
             onClick={() => setSidebarOpen(false)}
           />
-          <aside className="absolute left-0 top-14 bottom-0 w-64 bg-sidebar text-sidebar-foreground px-3 py-4 space-y-0.5 overflow-y-auto shadow-xl">
-            <p className="text-[10px] font-semibold text-sidebar-foreground/40 uppercase tracking-widest px-3 mb-2">
-              Internal System Console
-            </p>
-            {systemNav.map((item) => (
-              <SystemNavItem key={item.path} {...item} onClick={() => setSidebarOpen(false)} />
+          <aside className="absolute left-0 top-14 bottom-0 w-64 bg-sidebar text-sidebar-foreground px-3 py-4 space-y-4 overflow-y-auto shadow-xl pb-24">
+            {systemSections.map((section) => (
+              <div key={`mobile-${section.title}`} className="space-y-0.5">
+                <p className="text-[10px] font-semibold text-sidebar-foreground/40 uppercase tracking-widest px-3 mb-2">
+                  {section.title}
+                </p>
+                {section.items.map((item) => (
+                  <SystemNavItem
+                    key={`mobile-${section.title}-${item.path}`}
+                    {...item}
+                    onClick={() => setSidebarOpen(false)}
+                  />
+                ))}
+              </div>
             ))}
+            <div className="space-y-0.5">
+              <p className="text-[10px] font-semibold text-sidebar-foreground/40 uppercase tracking-widest px-3 mb-2">
+                Business View
+              </p>
+              {businessViewNav.map((item) => (
+                <SystemNavItem
+                  key={`mobile-business-${item.path}`}
+                  {...item}
+                  onClick={() => setSidebarOpen(false)}
+                />
+              ))}
+            </div>
             <div className="pt-3 mt-3 border-t border-sidebar-border space-y-0.5">
-              <NavLink
-                to="/owner/dashboard"
-                onClick={() => setSidebarOpen(false)}
-                className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-sidebar-foreground hover:bg-sidebar-accent/60 transition-colors"
-              >
-                <ArrowLeft className="w-4 h-4" />
-                กลับไปแดชบอร์ดธุรกิจ
-              </NavLink>
               <button
                 type="button"
                 onClick={() => {

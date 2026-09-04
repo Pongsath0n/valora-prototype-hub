@@ -1,103 +1,28 @@
 import { NavLink, useNavigate } from "react-router-dom";
-import {
-  BarChart3,
-  BookOpenCheck,
-  ClipboardList,
-  LayoutDashboard,
-  LogOut,
-  Menu,
-  MonitorSmartphone,
-  CreditCard,
-  Settings,
-  Soup,
-  X,
-} from "lucide-react";
+import { LogOut, Menu, X } from "lucide-react";
 import { useState } from "react";
 import LogoBrand from "@/components/LogoBrand";
 // PortalSwitcher pill links removed from the Owner sidebar — they duplicated the
 // main grouped navigation. PortalSwitcher remains available for other surfaces.
 import { useProfileRole } from "@/contexts/RoleContext";
 import { useAuth } from "@/contexts/AuthContext";
-import type { AppRole } from "@/lib/guards";
+import {
+  ADMIN_MOBILE_NAV,
+  ADMIN_NAV_SECTIONS,
+  OWNER_MOBILE_NAV,
+  OWNER_NAV_SECTIONS,
+  OWNER_UTILITY_NAV,
+  isAdminRole,
+  resolveNavSections,
+  type NavItem,
+  type NavSection,
+} from "@/config/navigation";
 
-type OwnerNavItem = {
-  title: string;
-  path: string;
-  icon: React.ElementType;
-  roles?: AppRole[];
-};
-
-type OwnerNavSection = {
-  title: string;
-  items: OwnerNavItem[];
-};
-
-/**
- * Owner navigation — Healholic V1 aligned.
- *
- * V1 visible scope: Dashboard, POS, Products, Ingredients/Stock, Recipes,
- * Orders/Sales, Reports, Payment Settings.
- *
- * Deliberately NOT in this nav (deferred V1 features, source preserved):
- * - Profit Planning prototype (/owner/profit-planning) → later phase
- * - Sales Channels / Channel Pricing → later phase (single kiosk channel)
- * - System Console / Users / Roles / Audit Logs → system audit redesign is
- *   a later phase; routes remain accessible by deep link but are hidden
- *   from V1 navigation.
- * - /app/pos, /store-admin/pos  → POS prototype is deferred (redirected in prod)
- * - /app/orders                 → duplicate of /staff/orders; redirected
- * - legacy /app/* prototype screens → redirected in prod
- */
-const OWNER_NAV_SECTIONS: OwnerNavSection[] = [
-  {
-    title: "ภาพรวมธุรกิจ",
-    items: [
-      { title: "แดชบอร์ดธุรกิจ", path: "/owner/dashboard", icon: LayoutDashboard },
-    ],
-  },
-  {
-    title: "POS และออเดอร์",
-    items: [
-      { title: "POS (Kiosk)", path: "/staff/kiosk", icon: MonitorSmartphone },
-      { title: "ออเดอร์ (ติดตามภาพรวม)", path: "/staff/orders", icon: ClipboardList },
-    ],
-  },
-  {
-    title: "ผลประกอบการ",
-    items: [
-      { title: "รายงานสรุป", path: "/owner/reports", icon: BarChart3 },
-    ],
-  },
-  {
-    title: "เมนูและสูตร",
-    items: [
-      { title: "เมนูและหมวดหมู่", path: "/owner/menus", icon: Soup },
-      { title: "วัตถุดิบ / สต็อก", path: "/owner/cost-items", icon: Soup },
-      { title: "สูตรและต้นทุน", path: "/owner/recipes", icon: BookOpenCheck },
-    ],
-  },
-  {
-    title: "การจัดการร้าน",
-    items: [{ title: "ตั้งค่าการชำระเงิน", path: "/owner/payment-settings", icon: CreditCard }],
-  },
-];
-
-const utilityNav = [
-  { title: "ตั้งค่า", path: "/app/settings", icon: Settings },
-];
-
-const mobileNav = [
-  { title: "ภาพรวม", path: "/owner/dashboard", icon: LayoutDashboard },
-  { title: "POS", path: "/staff/kiosk", icon: MonitorSmartphone },
-  { title: "รายงาน", path: "/owner/reports", icon: BarChart3 },
-  { title: "ออเดอร์", path: "/staff/orders", icon: ClipboardList },
-  { title: "ตั้งค่า", path: "/app/settings", icon: Settings },
-];
-
-function NavItem({ path, icon: Icon, title }: { path: string; icon: React.ElementType; title: string }) {
+function NavItem({ path, icon: Icon, title, end }: { path: string; icon: React.ElementType; title: string; end?: boolean }) {
   return (
     <NavLink
       to={path}
+      end={end}
       className={({ isActive }) =>
         `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors cursor-pointer ${
           isActive
@@ -117,14 +42,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const navigate = useNavigate();
   const { signOut } = useAuth();
   const { role, loading } = useProfileRole();
-  const resolvedSections = OWNER_NAV_SECTIONS.map((section) => ({
-    title: section.title,
-    items: section.items.filter((item) => {
-      if (!item.roles?.length) return true;
-      if (!role) return false;
-      return item.roles.includes(role as AppRole);
-    }),
-  })).filter((section) => section.items.length);
+  const isAdmin = isAdminRole(role);
+  const resolvedSections: NavSection[] = isAdmin
+    ? resolveNavSections(ADMIN_NAV_SECTIONS, role)
+    : resolveNavSections(OWNER_NAV_SECTIONS, role);
+  const mobileNav = isAdmin ? ADMIN_MOBILE_NAV : OWNER_MOBILE_NAV;
+  const utilityNav = isAdmin ? [] : OWNER_UTILITY_NAV;
+  const sidebarLabel = isAdmin ? "System Operator" : "Business Intelligence";
 
   async function handleLogout() {
     await signOut();
@@ -133,14 +57,14 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="min-h-screen flex w-full bg-background">
-      {/* ── Desktop Sidebar ──────────────────────────────── */}
-      <aside className="hidden md:flex flex-col w-56 bg-sidebar text-sidebar-foreground border-r border-sidebar-border fixed inset-y-0 left-0 z-40">
+      {/* ── Desktop Sidebar ──────────────────────────────────────── */}
+      <aside className="hidden md:flex flex-col w-60 bg-sidebar text-sidebar-foreground border-r border-sidebar-border fixed inset-y-0 left-0 z-40">
         {/* Logo */}
         <div className="flex items-center gap-2.5 px-4 py-5 border-b border-sidebar-border">
           <LogoBrand size="sm" iconOnly dark />
           <div>
             <p className="font-bold text-sidebar-accent-foreground leading-none">Valora</p>
-            <p className="text-[10px] text-sidebar-foreground/60 mt-0.5">Business Intelligence</p>
+            <p className="text-[10px] text-sidebar-foreground/60 mt-0.5">{sidebarLabel}</p>
           </div>
         </div>
 
@@ -165,7 +89,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           <p className="text-[10px] font-semibold text-sidebar-foreground/40 uppercase tracking-widest px-3 mb-2">
             บัญชี
           </p>
-          {utilityNav.map((item) => (
+          {utilityNav.map((item: NavItem) => (
             <NavItem key={item.path} {...item} />
           ))}
           <button
@@ -179,12 +103,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         </div>
       </aside>
 
-      {/* ── Mobile Header ─────────────────────────────────── */}
+      {/* ── Mobile Header ─────────────────────────────────────────── */}
       <header className="md:hidden fixed top-0 left-0 right-0 z-50 bg-card border-b h-14 flex items-center justify-between px-4 shadow-sm">
         <LogoBrand size="sm" iconOnly />
         <button
           onClick={() => setSidebarOpen(!sidebarOpen)}
           className="p-2 text-foreground rounded-lg hover:bg-muted transition-colors"
+          aria-label="Toggle navigation"
         >
           {sidebarOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
         </button>
@@ -197,7 +122,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             className="absolute inset-0 bg-foreground/30 backdrop-blur-sm"
             onClick={() => setSidebarOpen(false)}
           />
-          <aside className="absolute left-0 top-14 bottom-0 w-64 bg-sidebar text-sidebar-foreground px-3 py-4 space-y-4 overflow-y-auto shadow-xl">
+          <aside className="absolute left-0 top-14 bottom-0 w-64 bg-sidebar text-sidebar-foreground px-3 py-4 space-y-4 overflow-y-auto shadow-xl pb-24">
             {resolvedSections.map((section) => (
               <div key={`mobile-${section.title}`} className="space-y-1">
                 <p className="text-[10px] font-semibold text-sidebar-foreground/40 uppercase tracking-widest px-3">
@@ -207,6 +132,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                   <NavLink
                     key={`mobile-${section.title}-${item.path}`}
                     to={item.path}
+                    end={item.end}
                     onClick={() => setSidebarOpen(false)}
                     className={({ isActive }) =>
                       `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
@@ -223,9 +149,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               </div>
             ))}
             <div className="pt-3 mt-3 border-t border-sidebar-border space-y-0.5">
+              <p className="text-[10px] font-semibold text-sidebar-foreground/40 uppercase tracking-widest px-3 mb-2">
+                บัญชี
+              </p>
               {utilityNav.map((item) => (
                 <NavLink
-                  key={item.path}
+                  key={`mobile-utility-${item.path}`}
                   to={item.path}
                   onClick={() => setSidebarOpen(false)}
                   className={({ isActive }) =>
@@ -256,12 +185,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         </div>
       )}
 
-      {/* Mobile Bottom Nav */}
-      <nav className="bottom-nav md:hidden">
+      {/* Mobile Bottom Nav — hidden when drawer is open to prevent z-index overlap */}
+      <nav className={`bottom-nav md:hidden ${sidebarOpen ? "hidden" : ""}`}>
         {mobileNav.map((item) => (
           <NavLink
-            key={item.path}
+            key={`bottom-${item.path}`}
             to={item.path}
+            end={item.end}
             className={({ isActive }) =>
               `bottom-nav-item ${isActive ? "active" : ""}`
             }
@@ -272,8 +202,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         ))}
       </nav>
 
-      {/* ── Main Content ──────────────────────────────────── */}
-      <main className="flex-1 md:ml-56 pt-14 md:pt-0 pb-20 md:pb-0 min-h-screen overflow-x-hidden">
+      {/* ── Main Content ──────────────────────────────────────────── */}
+      <main className="flex-1 md:ml-60 pt-14 md:pt-0 pb-20 md:pb-0 min-h-screen overflow-x-hidden">
         <div className="max-w-5xl mx-auto px-3 sm:px-4 md:px-6 py-6 animate-fade-in">
           {children}
         </div>

@@ -37,7 +37,6 @@ import OrderStatusPage from "./pages/order/OrderStatusPage";
 import PrivacyNoticePage from "./pages/PrivacyNotice";
 import CustomerThemeLayout from "./components/customer/CustomerThemeLayout";
 
-import AdminDashboardPage from "./pages/admin/AdminDashboard";
 import AdminOrdersPage from "./pages/admin/AdminOrders";
 import AdminOrderDetailPage from "./pages/admin/AdminOrderDetail";
 import AdminProductsPage from "./pages/admin/AdminProducts";
@@ -151,7 +150,7 @@ export function AdminLegacyRedirect() {
       return <div className="min-h-screen flex items-center justify-center">กำลังโหลด...</div>;
     }
     if (!user) return <Navigate to="/login" replace />;
-    if (role === "staff") return <Navigate to="/staff" replace />;
+    if (role === "staff") return <Navigate to="/staff/kiosk" replace />;
     return <Navigate to="/owner/dashboard" replace />;
   }
 
@@ -177,7 +176,11 @@ export function AppRoutes() {
       <Route path="/dashboard" element={<Navigate to="/owner/dashboard" replace />} />
 
       {/* ── Canonical Staff routes ── */}
-      <Route path="/staff" element={<AdminRoute><AdminDashboardPage /></AdminRoute>} />
+      {/* Staff root redirects to the primary operational workspace (POS Kiosk).
+       * AdminDashboardPage is no longer routed — owners use /owner/dashboard,
+       * staff land directly on /staff/kiosk. The component is retained in
+       * source for potential future use. */}
+      <Route path="/staff" element={<AdminRoute><Navigate to="/staff/kiosk" replace /></AdminRoute>} />
       <Route path="/staff/orders" element={<AdminRoute><AdminOrdersPage /></AdminRoute>} />
       <Route path="/staff/orders/:id" element={<AdminRoute><AdminOrderDetailPage /></AdminRoute>} />
       <Route path="/staff/customers" element={<AdminRoute><CustomersPage /></AdminRoute>} />
@@ -197,7 +200,7 @@ export function AppRoutes() {
       />
 
       {/* ── Legacy /store-admin redirects → canonical ── */}
-      <Route path="/store-admin" element={<Navigate to="/staff" replace />} />
+      <Route path="/store-admin" element={<Navigate to="/staff/kiosk" replace />} />
       <Route path="/store-admin/orders" element={<Navigate to="/staff/orders" replace />} />
       <Route path="/store-admin/orders/:id" element={<StaffOrderDetailRedirect />} />
       <Route path="/store-admin/customers" element={<Navigate to="/staff/customers" replace />} />
