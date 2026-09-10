@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Navigate, Route, Routes, useLocation, useParams } from "react-router-dom";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { RoleProvider, useProfileRole } from "@/contexts/RoleContext";
-import { BUSINESS_PORTAL_ROLES, STORE_ADMIN_ROLES, SYSTEM_CONSOLE_ROLES, STORE_MANAGER_ROLES, useRoleGuard } from "@/lib/guards";
+import { BUSINESS_PORTAL_ROLES, STORE_ADMIN_ROLES, SYSTEM_CONSOLE_ROLES, STORE_MANAGER_ROLES, useRoleGuard, useOwnerGuard } from "@/lib/guards";
 
 import Landing from "./pages/Landing";
 import Login from "./pages/Login";
@@ -130,6 +130,13 @@ function ManagerRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+function OwnerRoute({ children }: { children: React.ReactNode }) {
+  const { checking, accessDenied } = useOwnerGuard();
+  if (checking) return <div className="min-h-screen flex items-center justify-center">กำลังโหลด...</div>;
+  if (accessDenied) return <div className="min-h-screen flex items-center justify-center text-xl font-semibold">Access Denied</div>;
+  return <>{children}</>;
+}
+
 function SystemRoute({ children }: { children: React.ReactNode }) {
   // TODO: introduce a dedicated `internal_system` role; until then, only `owner` can access.
   const { checking, accessDenied } = useRoleGuard(SYSTEM_CONSOLE_ROLES);
@@ -154,7 +161,7 @@ export function AdminLegacyRedirect() {
     return <Navigate to="/owner/dashboard" replace />;
   }
 
-  const targetPath = `/store-admin${suffix}` || "/store-admin";
+  const targetPath = `/store-admin${suffix || ""}`;
   return <Navigate to={{ pathname: targetPath, search: location.search, hash: location.hash }} replace />;
 }
 
@@ -220,7 +227,7 @@ export function AppRoutes() {
 
       {/* ── Canonical Owner routes ── */}
       <Route path="/owner/dashboard" element={<ProtectedRoute><BusinessRoute><Dashboard /></BusinessRoute></ProtectedRoute>} />
-      <Route path="/owner/profit-planning" element={<ProtectedRoute><BusinessRoute><Scenario /></BusinessRoute></ProtectedRoute>} />
+      <Route path="/owner/profit-planning" element={<ProtectedRoute><OwnerRoute><Scenario /></OwnerRoute></ProtectedRoute>} />
       {/* e2e-manager-route-marker path="/owner/reports" element={<ManagerRoute> */}
       <Route path="/owner/reports" element={<ProtectedRoute><BusinessRoute><ManagerRoute><Reports /></ManagerRoute></BusinessRoute></ProtectedRoute>} />
       <Route path="/owner/menus" element={<ManagerRoute><AdminProductsPage /></ManagerRoute>} />

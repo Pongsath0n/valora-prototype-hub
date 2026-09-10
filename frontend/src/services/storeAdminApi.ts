@@ -1091,7 +1091,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     },
   });
 
-  let body: any = null;
+  let body: unknown = null;
   try {
     body = await res.json();
   } catch {
@@ -1099,7 +1099,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   if (!res.ok) {
-    const reason = (body as any)?.detail || (body as any)?.error || "request_failed";
+    const bodyRecord = body && typeof body === "object" ? (body as Record<string, unknown>) : null;
+    const detail = bodyRecord?.detail ?? bodyRecord?.error;
+    const reason: unknown = detail ?? "request_failed";
     if (typeof reason === "string") {
       throw new Error(reason);
     }
@@ -1110,7 +1112,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     //   invalid_status_for_cancellation, etc.
     // The `code` becomes the Error message; the full `{code, message}`
     // object is attached as `err.detail` so callers can access both.
-    const err = new Error(reason?.code || "request_failed") as any;
+    const reasonRecord = reason && typeof reason === "object" ? (reason as Record<string, unknown>) : null;
+    const err = new Error(String(reasonRecord?.code ?? "request_failed")) as Error & { detail?: unknown };
     err.detail = reason;
     throw err;
   }
@@ -1172,7 +1175,8 @@ export const storeAdminApi = {
     });
     const body = await res.json().catch(() => null);
     if (!res.ok || !body) {
-      const reason = (body as any)?.detail || (body as any)?.error || res.statusText || "upload_failed";
+      const bodyRecord = body && typeof body === "object" ? (body as Record<string, unknown>) : null;
+      const reason = bodyRecord?.detail ?? bodyRecord?.error ?? res.statusText ?? "upload_failed";
       throw new Error(typeof reason === "string" ? reason : "upload_failed");
     }
     return body as StorePaymentSettingsResponse;
@@ -1327,7 +1331,8 @@ export const storeAdminApi = {
     });
     const body = await res.json().catch(() => null);
     if (!res.ok || !body) {
-      const reason = (body as any)?.detail || res.statusText || "upload_failed";
+      const bodyRecord = body && typeof body === "object" ? (body as Record<string, unknown>) : null;
+      const reason = bodyRecord?.detail ?? res.statusText ?? "upload_failed";
       throw new Error(typeof reason === "string" ? reason : "upload_failed");
     }
     return body.product as ApiProduct;
@@ -1444,7 +1449,8 @@ export const storeAdminApi = {
     });
     const body = await res.json().catch(() => null);
     if (!res.ok) {
-      const reason = (body as any)?.detail || (body as any)?.error || res.statusText;
+      const bodyRecord = body && typeof body === "object" ? (body as Record<string, unknown>) : null;
+      const reason = bodyRecord?.detail ?? bodyRecord?.error ?? res.statusText;
       throw new Error(typeof reason === "string" ? reason : "receipt_upload_failed");
     }
     return body as StockIntake;
@@ -1583,54 +1589,12 @@ export const storeAdminApi = {
     return request<{ status: string }>(`/api/store-admin/order-items/${itemId}`, { method: "DELETE" });
   },
 
-  // ── LEGACY PAYMENTS — OUT OF V1 FRONTEND SCOPE ───────────────────────────
-  // The following methods call backend endpoints that remain available but
-  // are OUT OF V1 Frontend scope. They exist for legacy slip-review UI that
-  // will be removed in FE-03/FE-10. Canonical V1 code MUST NOT use these for
-  // new flows — use `finalizePayment` for counter payment and `cancelOrder`
-  // for cancellation instead.
-  async listPayments(): Promise<{ items: ApiPayment[]; payment_queue: ApiPayment[]; store_id: string }> {
-    return request("/api/store-admin/payments");
-  },
-
-  /** @legacy OUT OF V1 FRONTEND SCOPE — legacy slip-review export. */
-  async exportPaymentsCsv(): Promise<CsvDownload> {
-    return requestCsv("/api/store-admin/payments/export");
-  },
-
-  /** @legacy OUT OF V1 FRONTEND SCOPE — legacy per-order payment listing. */
+  // ── Per-order payment listing (read-only display) ────────────────────────
+  // Used by AdminOrderDetail for read-only payment record display.
+  // Canonical V1 payment flow uses `finalizePayment` for counter payment,
+  // NOT slip review/approval/rejection.
   async listOrderPayments(orderId: string): Promise<{ items: ApiPayment[]; order_id: string; store_id: string }> {
     return request(`/api/store-admin/orders/${orderId}/payments`);
-  },
-
-  /** @legacy OUT OF V1 FRONTEND SCOPE — do not create payment rows manually. */
-  async createOrderPayment(orderId: string, payload: PaymentPayload): Promise<{ id: string; status: string }> {
-    return request<{ id: string; status: string }>(`/api/store-admin/orders/${orderId}/payments`, { method: "POST", body: JSON.stringify(payload) });
-  },
-
-  /** @legacy OUT OF V1 FRONTEND SCOPE — do not update payment rows manually. */
-  async updatePayment(paymentId: string, payload: PaymentUpdatePayload): Promise<{ id: string; status: string }> {
-    return request<{ id: string; status: string }>(`/api/store-admin/payments/${paymentId}`, { method: "PATCH", body: JSON.stringify(payload) });
-  },
-
-  /** @legacy OUT OF V1 FRONTEND SCOPE — legacy slip upload. */
-  async submitPaymentSlip(paymentId: string, payload: PaymentSubmitSlipPayload): Promise<{ id: string; status: string }> {
-    return request<{ id: string; status: string }>(`/api/store-admin/payments/${paymentId}/submit-slip`, { method: "POST", body: JSON.stringify(payload) });
-  },
-
-  /** @legacy OUT OF V1 FRONTEND SCOPE — legacy slip approval. */
-  async approvePayment(paymentId: string, payload?: PaymentApprovePayload): Promise<{ id: string; status: string; mock_notification?: string }> {
-    return request<{ id: string; status: string; mock_notification?: string }>(`/api/store-admin/payments/${paymentId}/approve`, { method: "POST", body: JSON.stringify(payload || {}) });
-  },
-
-  /** @legacy OUT OF V1 FRONTEND SCOPE — legacy slip rejection. */
-  async rejectPayment(paymentId: string, payload: PaymentRejectPayload): Promise<{ id: string; status: string; message?: string }> {
-    return request<{ id: string; status: string; message?: string }>(`/api/store-admin/payments/${paymentId}/reject`, { method: "POST", body: JSON.stringify(payload) });
-  },
-
-  /** @legacy OUT OF V1 FRONTEND SCOPE — legacy slip preview. */
-  async getPaymentSlipPreview(paymentId: string): Promise<PaymentSlipPreviewResponse> {
-    return request<PaymentSlipPreviewResponse>(`/api/store-admin/payments/${paymentId}/slip-preview`);
   },
 
   // Customers + LINE binding

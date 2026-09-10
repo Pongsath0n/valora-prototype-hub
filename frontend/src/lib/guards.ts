@@ -93,3 +93,34 @@ export function useIsStoreOwner(): boolean {
   const { currentStoreRole } = useProfileRole();
   return currentStoreRole === "owner";
 }
+
+/**
+ * Route guard for owner-only store pages (e.g. Profit Planning).
+ *
+ * Authorizes via `currentStoreRole === "owner"` — NOT `profileRole`.
+ * Example: profileRole="admin" + currentStoreRole="manager" → DENIED.
+ * Example: profileRole="owner" + currentStoreRole="manager" → DENIED.
+ * Example: currentStoreRole="owner" → ALLOWED.
+ */
+export function useOwnerGuard(): { checking: boolean; accessDenied: boolean } {
+  const { user, loading: authLoading } = useAuth();
+  const { currentStoreRole, loading: roleLoading } = useProfileRole();
+  const navigate = useNavigate();
+  const [checking, setChecking] = useState(true);
+  const [accessDenied, setAccessDenied] = useState(false);
+
+  useEffect(() => {
+    if (authLoading || roleLoading) {
+      setChecking(true);
+      return;
+    }
+    if (!user) {
+      navigate("/login", { replace: true });
+      return;
+    }
+    setChecking(false);
+    setAccessDenied(currentStoreRole !== "owner");
+  }, [authLoading, roleLoading, user, navigate, currentStoreRole]);
+
+  return { checking, accessDenied };
+}

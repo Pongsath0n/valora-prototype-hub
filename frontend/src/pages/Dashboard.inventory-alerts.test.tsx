@@ -8,8 +8,8 @@ const mockedGetInventoryAlerts = vi.fn();
 
 vi.mock("@/services/storeAdminApi", () => ({
   storeAdminApi: {
-    getDashboardSummary: (...args: any[]) => mockedGetDashboardSummary(...args),
-    getInventoryAlerts: (...args: any[]) => mockedGetInventoryAlerts(...args),
+    getDashboardSummary: (...args: unknown[]) => mockedGetDashboardSummary(...args),
+    getInventoryAlerts: (...args: unknown[]) => mockedGetInventoryAlerts(...args),
   },
 }));
 
@@ -93,10 +93,10 @@ function createDashboardSummary() {
       pending_sales_order_count: 0,
       excluded_cancelled_order_count: 0,
     },
-  } as any;
+  } as Record<string, unknown>;
 }
 
-function createInventoryAlerts(overrides?: Partial<any>) {
+function createInventoryAlerts(overrides?: Partial<Record<string, unknown>>) {
   return {
     low_stock: overrides?.low_stock ?? [],
     near_expiry: overrides?.near_expiry ?? [],
@@ -106,7 +106,7 @@ function createInventoryAlerts(overrides?: Partial<any>) {
       near_expiry_count: 0,
       expired_count: 0,
     },
-  } as any;
+  } as Record<string, unknown>;
 }
 
 function renderDashboard() {

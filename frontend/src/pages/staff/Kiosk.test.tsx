@@ -9,6 +9,7 @@ import StaffKioskPage from "./Kiosk";
 const mockListMenu = vi.fn();
 const mockCreateKioskOrder = vi.fn();
 const mockGetPaymentSettings = vi.fn();
+const mockListIncomingQueue = vi.fn();
 const mockToast = vi.fn();
 
 vi.mock("@/components/admin/AdminLayout", () => ({
@@ -35,6 +36,7 @@ vi.mock("@/services/storeAdminApi", async () => {
       ...actual.storeAdminApi,
       createKioskOrder: (...args: unknown[]) => mockCreateKioskOrder(...args),
       getPaymentSettings: (...args: unknown[]) => mockGetPaymentSettings(...args),
+      listIncomingQueue: (...args: unknown[]) => mockListIncomingQueue(...args),
     },
   };
 });
@@ -44,11 +46,16 @@ vi.mock("@/contexts/AuthContext", () => ({
 }));
 
 vi.mock("@/contexts/RoleContext", () => ({
-  useProfileRole: () => ({ role: "staff", loading: false }),
+  useProfileRole: () => ({ role: "staff", loading: false, storeId: "store-1" }),
+}));
+
+vi.mock("@/hooks/useStoreOrdersRealtimeInvalidation", () => ({
+  useStoreOrdersRealtimeInvalidation: () => {},
 }));
 
 vi.mock("@/lib/guards", () => ({
   useRoleGuard: () => ({ checking: false, accessDenied: false }),
+  useIsStoreOwner: () => false,
   STORE_ADMIN_ROLES: ["staff"],
   BUSINESS_PORTAL_ROLES: ["owner"],
   STORE_MANAGER_ROLES: ["owner"],
@@ -111,6 +118,8 @@ describe("/staff/kiosk route", () => {
     mockCreateKioskOrder.mockResolvedValue(ORDER_RESPONSE);
     mockGetPaymentSettings.mockReset();
     mockGetPaymentSettings.mockResolvedValue(PAYMENT_SETTINGS_RESPONSE);
+    mockListIncomingQueue.mockReset();
+    mockListIncomingQueue.mockResolvedValue({ orders: [], store_id: "store-1" });
     mockToast.mockReset();
   });
 
@@ -276,8 +285,14 @@ describe("/staff/kiosk route", () => {
   });
 
   it("recovers when payment settings initially fail and retry succeeds", async () => {
+    // First call (mount) fails, auto-retry (entering payment step) also fails,
+    // then manual retry succeeds. This validates both the auto-retry lifecycle
+    // and the manual recovery path.
+    mockGetPaymentSettings.mockReset();
+    mockGetPaymentSettings.mockRejectedValueOnce(new Error("network_down"));
     mockGetPaymentSettings.mockRejectedValueOnce(new Error("network_down"));
     mockGetPaymentSettings.mockResolvedValueOnce(PAYMENT_SETTINGS_RESPONSE);
+    mockGetPaymentSettings.mockResolvedValue(PAYMENT_SETTINGS_RESPONSE);
 
     renderKioskPage();
 
@@ -293,7 +308,7 @@ describe("/staff/kiosk route", () => {
 
     fireEvent.click(retryButton);
 
-    await waitFor(() => expect(mockGetPaymentSettings).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(mockGetPaymentSettings.mock.calls.length).toBeGreaterThanOrEqual(3));
     await waitFor(() => expect(screen.getByRole("button", { name: /PromptPay/ })).toBeInTheDocument());
     await waitFor(() => expect(screen.getByRole("button", { name: "ยืนยันว่าได้รับชำระแล้ว" })).not.toBeDisabled());
 
@@ -410,7 +425,7 @@ describe("/staff/kiosk route", () => {
 
   it("shows DO NOT RESUBMIT warning on stock sync failure", async () => {
     // Simulate a structured partial-commit error (503 with order context)
-    const stockError = new Error("kiosk_order_stock_sync_failed") as any;
+    const stockError = new Error("kiosk_order_stock_sync_failed") as Error & { detail?: { code?: string; order_id?: string; order_no?: string } };
     stockError.detail = {
       code: "kiosk_order_stock_sync_failed",
       order_id: "order-abc",

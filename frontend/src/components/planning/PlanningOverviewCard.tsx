@@ -21,7 +21,7 @@ type Props = {
   overhead: PlanningBaselineOverhead | null;
   loading?: boolean;
   dataQualityLevel: "confirmed" | "estimated";
-  dataQualityStatus: "live" | "fallback" | "loading";
+  dataQualityStatus: "live" | "fallback" | "loading" | "error";
   dataQualityTimestamp?: string;
   statusTag: string;
   warnings: string[];

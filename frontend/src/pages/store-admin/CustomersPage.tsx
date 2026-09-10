@@ -66,8 +66,8 @@ export default function CustomersPage() {
     try {
       const data = await storeAdminApi.listCustomers();
       setRows(data.items ?? []);
-    } catch (err: any) {
-      setError(friendlyError(err?.message || "โหลดข้อมูลไม่สำเร็จ"));
+    } catch (err) {
+      setError(friendlyError(err instanceof Error ? err.message : "โหลดข้อมูลไม่สำเร็จ"));
     } finally {
       setLoading(false);
     }
@@ -107,8 +107,8 @@ export default function CustomersPage() {
       const res = await storeAdminApi.bindLineUser(selectedCustomer.id, raw);
       setInfo(`ผูก LINE สำเร็จ: ${res.line_user_id_masked || "linked"}`);
       await refresh();
-    } catch (err: any) {
-      setError(friendlyError(err?.message || "request_failed"));
+    } catch (err) {
+      setError(friendlyError(err instanceof Error ? err.message : "request_failed"));
     } finally {
       setSubmitting(false);
     }
@@ -122,8 +122,8 @@ export default function CustomersPage() {
       await storeAdminApi.unbindLineUser(customer.id);
       setInfo("ปลดผูก LINE สำเร็จ");
       await refresh();
-    } catch (err: any) {
-      setError(friendlyError(err?.message || "request_failed"));
+    } catch (err) {
+      setError(friendlyError(err instanceof Error ? err.message : "request_failed"));
     }
   };
 

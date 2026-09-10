@@ -17,7 +17,7 @@ export async function getLiffProfile(): Promise<LiffProfile> {
   if (!enabled || !liffId || typeof window === "undefined") return MOCK;
 
   try {
-    const liff = (window as any).liff;
+    const liff = (window as unknown as { liff?: { init: (a: { liffId: string }) => Promise<void>; isLoggedIn: () => boolean; login: () => void; getProfile: () => Promise<{ userId?: string; displayName?: string }> } }).liff;
     if (!liff) return MOCK;
     await liff.init({ liffId });
     if (!liff.isLoggedIn()) liff.login();

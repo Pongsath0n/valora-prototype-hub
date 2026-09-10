@@ -27,7 +27,7 @@ export function maskLineUserId(value?: string | null): string | null {
 
 export function isLiffRuntimeAvailable(): boolean {
   if (typeof window === "undefined") return false;
-  const maybeLiff = (window as any).liff;
+  const maybeLiff = (window as unknown as { liff?: { getProfile?: unknown } }).liff;
   return Boolean(maybeLiff && typeof maybeLiff.getProfile === "function");
 }
 
@@ -82,7 +82,7 @@ export async function getCustomerIdentity(): Promise<CustomerIdentity> {
   try {
     const { getLiffProfile } = await import("./liffService");
     const profile = await getLiffProfile();
-    const profileUserId = safeTrim((profile as any)?.userId as string | undefined);
+    const profileUserId = safeTrim((profile as { userId?: string } | null)?.userId);
     const isMockProfile = profileUserId === "U_mock_001";
     const isReady = source === "future_liff" && isLiffRuntimeAvailable() && import.meta.env.VITE_LIFF_ENABLED === "true";
 

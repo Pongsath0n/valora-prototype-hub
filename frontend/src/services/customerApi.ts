@@ -55,10 +55,6 @@ export type OrderStatusPaymentSummary = {
   status: string;
   method: string;
   amount: number;
-  slip_submitted: boolean;
-  last_submitted_at?: string | null;
-  reject_reason?: string | null;
-  can_upload_slip?: boolean;
 };
 
 export type OrderStatusSummary = {
@@ -72,18 +68,6 @@ export type OrderStatusSummary = {
   items: OrderStatusItem[];
   payment: OrderStatusPaymentSummary;
   public_token?: string | null;
-};
-
-export type PaymentInstructionsResponse = {
-  enabled: boolean;
-  method_label: string;
-  bank_name?: string | null;
-  account_name?: string | null;
-  account_number?: string | null;
-  promptpay_id?: string | null;
-  note_lines: string[];
-  allowed_file_types: string[];
-  max_file_mb: number;
 };
 
 export type CustomerOrderItemOptions = {
@@ -165,7 +149,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       signal: controller.signal,
     });
 
-    let body: any = null;
+    let body: unknown = null;
     try {
       body = await res.json();
     } catch {
@@ -173,7 +157,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     }
 
     if (!res.ok) {
-      const reason = (body as any)?.detail || (body as any)?.error || res.statusText;
+      const bodyRecord = (body && typeof body === "object") ? body as Record<string, unknown> : null;
+      const reason = bodyRecord?.detail ?? bodyRecord?.error ?? res.statusText;
       throw new Error(
         typeof reason === "string" && reason.trim().length > 0
           ? reason
@@ -186,8 +171,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     }
 
     return body as T;
-  } catch (error: any) {
-    if (error?.name === "AbortError") {
+  } catch (error) {
+    const err = error as { name?: string; message?: string };
+    if (err?.name === "AbortError") {
       throw new Error("เซิร์ฟเวอร์ตอบสนองช้า โปรดลองใหม่อีกครั้ง");
     }
     throw error instanceof Error
@@ -238,53 +224,6 @@ export const customerApi = {
   async getOrderStatusByToken(token: string): Promise<OrderStatusSummary> {
     const query = new URLSearchParams({ token });
     return request<OrderStatusSummary>(`/api/customer/orders/status?${query.toString()}`);
-  },
-
-  async lookupOrderStatus(payload: { order_no: string; phone: string }): Promise<OrderStatusSummary> {
-    return request<OrderStatusSummary>("/api/customer/orders/lookup", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    });
-  },
-
-  /** @legacy OUT OF V1 FRONTEND SCOPE — legacy bank-transfer payment instructions. */
-  async getPaymentInstructions(): Promise<PaymentInstructionsResponse> {
-    return request<PaymentInstructionsResponse>("/api/customer/payment-instructions");
-  },
-
-  /** @legacy OUT OF V1 FRONTEND SCOPE — legacy customer slip upload. */
-  async uploadPaymentSlip(publicToken: string, file: File): Promise<OrderStatusSummary> {
-    const formData = new FormData();
-    formData.append("public_token", publicToken);
-    formData.append("file", file);
-
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10_000);
-
-    try {
-      const res = await fetch(`${BACKEND_BASE}/api/customer/orders/status/slip`, {
-        method: "POST",
-        body: formData,
-        signal: controller.signal,
-      });
-      const body = await res.json().catch(() => null);
-      if (!res.ok || body == null) {
-        const reason = (body as any)?.detail || (body as any)?.error || res.statusText;
-        throw new Error(
-          typeof reason === "string" && reason.trim().length > 0
-            ? reason
-            : "อัปโหลดหลักฐานไม่สำเร็จ",
-        );
-      }
-      return body as OrderStatusSummary;
-    } catch (error: any) {
-      if (error?.name === "AbortError") {
-        throw new Error("ระบบตอบสนองช้า โปรดลองใหม่อีกครั้ง");
-      }
-      throw error instanceof Error ? error : new Error("เกิดข้อผิดพลาดขณะอัปโหลดสลิป");
-    } finally {
-      clearTimeout(timeout);
-    }
   },
 };
 

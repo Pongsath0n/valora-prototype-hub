@@ -45,16 +45,17 @@ export default function SystemHealthPage() {
   const summaryCards = useMemo(() => {
     if (!health) return [];
 
-    const envData = (health.environment.data as any) ?? {};
-    const appEnvDetail = envData?.details?.app_env;
-    const lineData = (health.lineReady.data as any) ?? {};
-    const lineChecks = (lineData.checks as Record<string, any>) ?? {};
-    const storage = (health.storage.data as any)?.storage;
+    const envData = (health.environment.data as Record<string, unknown>) ?? {};
+    const envDetails = envData?.details as { app_env?: { value?: string }; matrix?: Array<{ key: string; status: string; required?: boolean }> } | undefined;
+    const appEnvDetail = envDetails?.app_env;
+    const lineData = (health.lineReady.data as Record<string, unknown>) ?? {};
+    const lineChecks = (lineData.checks as Record<string, { status?: string; mode?: string }>) ?? {};
+    const storage = (health.storage.data as Record<string, unknown>)?.storage as { buckets?: Array<{ status?: string }> } | undefined;
 
-    const sendMode = lineChecks.send_mode?.mode ?? lineData.mode ?? "mock";
+    const sendMode = lineChecks.send_mode?.mode ?? (lineData.mode as string) ?? "mock";
     const liffStatus = lineChecks.liff?.status ?? "not_enabled";
     const storageBucketSummary = Array.isArray(storage?.buckets)
-      ? `${storage.buckets.filter((b: any) => (b.status || "").toLowerCase() === "ok").length}/${storage.buckets.length} buckets ready`
+      ? `${storage.buckets.filter((b) => (b.status || "").toLowerCase() === "ok").length}/${storage.buckets.length} buckets ready`
       : "—";
 
     return [
@@ -105,18 +106,18 @@ export default function SystemHealthPage() {
   const detailCards: CardItem[] = useMemo(() => {
     if (!health) return [];
 
-    const envData = (health.environment.data as any) ?? {};
-    const env = envData?.environment ?? envData;
-    const envDetails = envData?.details;
+    const envData = (health.environment.data as Record<string, unknown>) ?? {};
+    const env = (envData?.environment as Record<string, unknown>) ?? envData;
+    const envDetails = envData?.details as { app_env?: { value?: string }; matrix?: Array<{ key: string; status: string; required?: boolean }> } | undefined;
     const envMatrix: Array<{ key: string; status: string; required?: boolean }> = envDetails?.matrix ?? [];
     const appEnvDetail = envDetails?.app_env;
 
-    const db = (health.database.data as any)?.database;
-    const auth = (health.auth.data as any)?.auth;
-    const lineData = (health.lineReady.data as any) ?? {};
-    const lineChecks = lineData.checks as Record<string, any> | undefined;
+    const db = (health.database.data as Record<string, unknown>)?.database;
+    const auth = (health.auth.data as Record<string, unknown>)?.auth;
+    const lineData = (health.lineReady.data as Record<string, unknown>) ?? {};
+    const lineChecks = lineData.checks as Record<string, { status?: string; mode?: string }> | undefined;
 
-    const storage = (health.storage.data as any)?.storage;
+    const storage = (health.storage.data as Record<string, unknown>)?.storage;
 
     return [
       {
@@ -265,7 +266,7 @@ export default function SystemHealthPage() {
               tone={toneFromStatus(storage.supabase_configured ? "ok" : "warning")}
             />
             <div className="space-y-2">
-              {(storage.buckets ?? []).map((bucket: any) => (
+              {(storage.buckets ?? []).map((bucket: { key: string; status?: string; public?: boolean }) => (
                 <div key={bucket.key} className="rounded-lg border border-border/70 p-3 space-y-2">
                   <div className="flex items-center justify-between">
                     <div>

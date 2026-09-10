@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import AdminLayout from "@/components/admin/AdminLayout";
+import IncomingOrdersQueue from "@/components/admin/IncomingOrdersQueue";
+import ProductionOrdersQueue from "@/components/admin/ProductionOrdersQueue";
 import { useProfileRole } from "@/contexts/RoleContext";
 import DataTable from "@/components/shared/DataTable";
 import StatusBadge from "@/components/shared/StatusBadge";
@@ -8,18 +10,12 @@ import { Download, Search, ClipboardList, Inbox, AlertTriangle } from "lucide-re
 import {
   storeAdminApi,
   type ApiOrder,
-  type ApiPayment,
   type OrderPayload,
 } from "@/services/storeAdminApi";
 import { saveBlobAsFile } from "@/lib/download";
-import { PaymentSlipPreviewModal } from "@/components/admin/PaymentSlipPreviewModal";
-import { CancelOrderDialog } from "@/components/admin/CancelOrderDialog";
-import { friendlyCancelError, isClearlyUncancellableByStaff } from "@/lib/orderCancel";
 import {
   compareOrdersFifo,
-  comparePaymentsFifo,
   isCancelledOrArchivedOrder,
-  shouldShowPaymentInReviewQueue,
 } from "@/lib/orderQueue";
 import {
   formatOrderStatus,
@@ -43,27 +39,23 @@ export function shouldShowDevCreateOrderForm(isDevBuild: boolean): boolean {
 const showDevCreateOrderForm = shouldShowDevCreateOrderForm(Boolean(import.meta.env.DEV));
 
 type TabKey =
-  | "queue"
-  | "payments"
+  | "incoming"
+  | "production"
   | "preparing"
   | "ready"
   | "completed";
 
 const statusTabs: { key: TabKey; label: string; filter: string[] }[] = [
   {
-    key: "queue",
-    label: "คิวออเดอร์",
-    filter: [
-      "pending_payment",
-      "waiting_payment_review",
-      "pending_review",
-      "accepted",
-      "preparing",
-      "ready",
-      "ready_for_pickup",
-    ],
+    key: "incoming",
+    label: "คิวออเดอร์ใหม่",
+    filter: ["pending_payment"],
   },
-  { key: "payments", label: "รอตรวจสลิป", filter: ["waiting_payment_review", "pending_review"] },
+  {
+    key: "production",
+    label: "คิวผลิต",
+    filter: ["accepted", "preparing", "ready"],
+  },
   { key: "preparing", label: "กำลังเตรียม", filter: ["preparing", "accepted"] },
   { key: "ready", label: "พร้อมรับ", filter: ["ready", "ready_for_pickup"] },
   { key: "completed", label: "เสร็จสิ้น", filter: ["completed", "paid"] },
@@ -71,7 +63,7 @@ const statusTabs: { key: TabKey; label: string; filter: string[] }[] = [
 
 // Active operation tabs where cancelled/archived orders must never appear and
 // where Staff process orders oldest-first (FIFO).
-const ACTIVE_OPERATION_TABS: TabKey[] = ["queue", "preparing", "ready"];
+const ACTIVE_OPERATION_TABS: TabKey[] = ["preparing", "ready"];
 
 const normalizeStatus = (value: string | null | undefined): string => (value ?? "").toLowerCase();
 
@@ -83,29 +75,19 @@ const doesTabContainStatus = (tabKey: TabKey, status: string | null | undefined)
 };
 
 const nextStatusByCurrent: Record<string, string[]> = {
-  pending_payment: ["waiting_payment_review", "cancelled"],
-  waiting_payment_review: ["accepted", "cancelled"],
-  accepted: ["preparing", "ready", "cancelled"],
-  preparing: ["ready", "completed", "cancelled"],
-  ready: ["completed", "cancelled"],
+  accepted: ["preparing", "ready"],
+  preparing: ["ready", "completed"],
+  ready: ["completed"],
 };
 
 /**
  * A short, human-readable "what to do next" hint for a queued order, derived
- * entirely from already-loaded order/payment status. `attention` marks orders
- * that need immediate Staff action (slip waiting for review).
+ * entirely from already-loaded order/payment status.
  */
 type QueueHint = { label: string; tone: "attention" | "info" | "muted" };
 
 function getQueueHint(order: ApiOrder): QueueHint | null {
-  const payment = normalizeStatus(order.payment_status);
   const status = normalizeStatus(order.status);
-  if (payment === "waiting_payment_review" || payment === "pending_review") {
-    return { label: "ต้องตรวจสลิป", tone: "attention" };
-  }
-  if (status === "pending_payment") {
-    return { label: "รอลูกค้าชำระเงิน", tone: "muted" };
-  }
   if (status === "accepted") {
     return { label: "พร้อมเริ่มเตรียม", tone: "info" };
   }
@@ -134,12 +116,12 @@ function friendlyError(message: string): string {
   if (message === "insufficient_role") {
     return "สิทธิ์ไม่เพียงพอสำหรับการแก้ไขข้อมูล";
   }
-  // Cancellation-specific backend enums (single source of friendly copy).
-  const cancelMessage = friendlyCancelError(message);
-  if (cancelMessage) {
-    return cancelMessage;
-  }
   return message;
+}
+
+function errorMessage(err: unknown, fallback: string): string {
+  const msg = err instanceof Error ? err.message : undefined;
+  return friendlyError(msg ?? fallback);
 }
 
 function QueueLoadingState() {
@@ -169,8 +151,8 @@ function QueueEmptyState({ title, hint }: { title: string; hint: string }) {
 }
 
 const emptyStateCopy: Record<TabKey, { title: string; hint: string }> = {
-  queue: { title: "ยังไม่มีออเดอร์ในคิว", hint: "ออเดอร์ใหม่จะปรากฏที่นี่โดยอัตโนมัติเมื่อมีลูกค้าสั่ง" },
-  payments: { title: "ไม่มีสลิปรอตรวจสอบ", hint: "เมื่อมีลูกค้าส่งสลิปการชำระเงิน รายการจะแสดงที่นี่" },
+  incoming: { title: "ยังไม่มีออเดอร์ใหม่", hint: "ออเดอร์ใหม่จะปรากฏที่นี่โดยอัตโนมัติเมื่อมีลูกค้าสั่ง" },
+  production: { title: "ยังไม่มีออเดอร์ในคิวผลิต", hint: "ออเดอร์ที่ชำระเงินแล้วจะปรากฏที่นี่โดยอัตโนมัติ" },
   preparing: { title: "ยังไม่มีออเดอร์ที่กำลังเตรียม", hint: "ออเดอร์ที่ยืนยันแล้วจะย้ายมาที่นี่เพื่อเริ่มเตรียม" },
   ready: { title: "ยังไม่มีออเดอร์พร้อมรับ", hint: "ออเดอร์ที่เตรียมเสร็จจะแสดงที่นี่เพื่อรอลูกค้ามารับ" },
   completed: { title: "ยังไม่มีออเดอร์ที่เสร็จสิ้น", hint: "ออเดอร์ที่ปิดงานแล้วจะถูกเก็บไว้ที่นี่" },
@@ -182,8 +164,7 @@ export default function AdminOrdersPage() {
   const { role } = useProfileRole();
   const canExport = role ? ["owner", "admin", "manager"].includes(role) : false;
   const [rows, setRows] = useState<ApiOrder[]>([]);
-  const [paymentQueue, setPaymentQueue] = useState<ApiPayment[]>([]);
-  const [activeTab, setActiveTab] = useState<TabKey>("queue");
+  const [activeTab, setActiveTab] = useState<TabKey>("incoming");
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
@@ -196,13 +177,7 @@ export default function AdminOrdersPage() {
     pickup_time: "",
     note: "",
   });
-  const [previewOpen, setPreviewOpen] = useState(false);
-  const [activePayment, setActivePayment] = useState<ApiPayment | null>(null);
-  const [modalRejectReason, setModalRejectReason] = useState("");
   const [exportingOrders, setExportingOrders] = useState(false);
-  const [exportingPayments, setExportingPayments] = useState(false);
-  const [pendingCancel, setPendingCancel] = useState<ApiOrder | null>(null);
-  const [cancelSubmitting, setCancelSubmitting] = useState(false);
 
   const applyOrderStatusOptimistic = (orderId: string, nextStatus: string) => {
     setRows((prev) =>
@@ -210,67 +185,15 @@ export default function AdminOrdersPage() {
     );
   };
 
-  const removePaymentFromQueue = (paymentId: string) => {
-    setPaymentQueue((prev) => prev.filter((payment) => payment.id !== paymentId));
-  };
-
   const refresh = async () => {
     setRefreshing(true);
     setError("");
     try {
-      const [ordersData, paymentsData] = await Promise.all([
-        storeAdminApi.listOrders(),
-        storeAdminApi.listPayments(),
-      ]);
+      const ordersData = await storeAdminApi.listOrders();
       const orders = ordersData.items ?? [];
-      const payments = paymentsData.payment_queue ?? [];
-
-      const orderIds = new Set(orders.map((o) => o.id));
-      const syntheticOrders: ApiOrder[] = payments
-        .filter((p) => p.order_id && !orderIds.has(p.order_id))
-        .map((p) => ({
-          id: p.order_id!,
-          store_id: p.store_id,
-          order_no: p.order_no ?? null,
-          status: p.order_status || "pending_payment",
-          payment_status: p.order_payment_status || p.status,
-          customer_name: p.customer_name ?? null,
-          customer_phone: p.customer_phone ?? null,
-          channel_id: null,
-          channel_name: null,
-          order_type: null,
-          pickup_type: null,
-          pickup_time: null,
-          subtotal: p.amount,
-          discount_amount: 0,
-          channel_fee: 0,
-          total_amount: p.amount,
-          total_cost: 0,
-          gross_profit: 0,
-          note: null,
-          cancelled_reason: null,
-          cancelled_at: null,
-          archived: false,
-          created_at: p.created_at ?? null,
-          updated_at: p.created_at ?? null,
-          latest_payment: {
-            id: p.id,
-            payment_id: p.id,
-            status: p.status,
-            method: p.method,
-            amount: p.amount,
-            slip_submitted: p.slip_submitted ?? null,
-            slip_file_name: p.slip_file_name ?? null,
-            slip_storage_path: p.slip_storage_path ?? null,
-            submitted_at: p.submitted_at ?? null,
-            reject_reason: p.reject_reason ?? null,
-          },
-        }));
-
-      setRows([...orders, ...syntheticOrders]);
-      setPaymentQueue(payments);
-    } catch (err: any) {
-      setError(friendlyError(err?.message || "โหลดข้อมูลไม่สำเร็จ"));
+      setRows(orders);
+    } catch (err) {
+      setError(errorMessage(err, "โหลดข้อมูลไม่สำเร็จ"));
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -282,22 +205,10 @@ export default function AdminOrdersPage() {
     try {
       const { blob, filename } = await storeAdminApi.exportOrdersCsv();
       saveBlobAsFile(blob, filename ?? "orders.csv");
-    } catch (err: any) {
-      setError(err?.message || "ส่งออกออเดอร์ไม่สำเร็จ");
+    } catch (err) {
+      setError(errorMessage(err, "ส่งออกออเดอร์ไม่สำเร็จ"));
     } finally {
       setExportingOrders(false);
-    }
-  };
-
-  const handleExportPayments = async () => {
-    setExportingPayments(true);
-    try {
-      const { blob, filename } = await storeAdminApi.exportPaymentsCsv();
-      saveBlobAsFile(blob, filename ?? "payments.csv");
-    } catch (err: any) {
-      setError(err?.message || "ส่งออกการชำระเงินไม่สำเร็จ");
-    } finally {
-      setExportingPayments(false);
     }
   };
 
@@ -317,13 +228,7 @@ export default function AdminOrdersPage() {
           if (isActiveOperationTab && isCancelledOrArchivedOrder(r)) {
             return false;
           }
-          const statusMatch = tab.filter.includes(r.status);
-          if (activeTab === "queue") {
-            const isTerminal = ["completed", "cancelled", "rejected"].includes(r.status);
-            const paymentMatch = ["waiting_payment_review", "pending_review"].includes(r.payment_status);
-            return (statusMatch || paymentMatch) && !isTerminal;
-          }
-          return statusMatch;
+          return tab.filter.includes(r.status);
         })
       : rows;
     const searched = query
@@ -347,12 +252,6 @@ export default function AdminOrdersPage() {
     return searched;
   }, [rows, activeTab, searchText]);
 
-  // "รอตรวจสลิป" queue: drop cancelled/archived and non-review payments, then
-  // order FIFO so the earliest-submitted slip is reviewed first.
-  const visiblePaymentQueue = useMemo(() => {
-    return paymentQueue.filter(shouldShowPaymentInReviewQueue).sort(comparePaymentsFifo);
-  }, [paymentQueue]);
-
   const handleStatusChange = async (order: ApiOrder, nextStatus: string) => {
     setError("");
     try {
@@ -360,72 +259,9 @@ export default function AdminOrdersPage() {
       if (res.mock_notification) setInfo(res.mock_notification);
       applyOrderStatusOptimistic(order.id, nextStatus);
       await refresh();
-    } catch (err: any) {
-      setError(friendlyError(err?.message || "อัปเดตสถานะไม่สำเร็จ"));
+    } catch (err) {
+      setError(errorMessage(err, "อัปเดตสถานะไม่สำเร็จ"));
     }
-  };
-
-  // Real order cancellation is gated behind an explicit confirmation dialog.
-  // The queue dropdown only *requests* a cancellation here; nothing is sent
-  // until the Staff confirms in CancelOrderDialog.
-  const requestCancel = (order: ApiOrder) => {
-    setPendingCancel(order);
-  };
-
-  const confirmCancel = async () => {
-    if (!pendingCancel) return;
-    setCancelSubmitting(true);
-    await handleStatusChange(pendingCancel, "cancelled");
-    setCancelSubmitting(false);
-    setPendingCancel(null);
-  };
-
-  const handleApprovePayment = async (paymentId: string) => {
-    setError("");
-    try {
-      const res = await storeAdminApi.approvePayment(paymentId, {});
-      if (res.mock_notification) setInfo(res.mock_notification);
-      removePaymentFromQueue(paymentId);
-      await refresh();
-    } catch (err: any) {
-      setError(friendlyError(err?.message || "อนุมัติการชำระเงินไม่สำเร็จ"));
-    }
-  };
-
-  const handleRejectPayment = async (paymentId: string, providedReason?: string) => {
-    setError("");
-    try {
-      const reason = providedReason?.trim() || "rejected_by_admin";
-      const res = await storeAdminApi.rejectPayment(paymentId, { reason });
-      if (res.message) setInfo(res.message);
-      removePaymentFromQueue(paymentId);
-      await refresh();
-    } catch (err: any) {
-      setError(friendlyError(err?.message || "ปฏิเสธการชำระเงินไม่สำเร็จ"));
-    }
-  };
-
-  const openPaymentPreview = (payment: ApiPayment) => {
-    setActivePayment(payment);
-    setModalRejectReason("");
-    setPreviewOpen(true);
-  };
-
-  const closePaymentPreview = () => {
-    setPreviewOpen(false);
-    setActivePayment(null);
-    setModalRejectReason("");
-  };
-
-  const handleApproveFromModal = async (payment: ApiPayment) => {
-    await handleApprovePayment(payment.id);
-    closePaymentPreview();
-  };
-
-  const handleRejectFromModal = async (payment: ApiPayment) => {
-    const resolvedReason = modalRejectReason.trim() || "rejected_by_admin";
-    await handleRejectPayment(payment.id, resolvedReason);
-    closePaymentPreview();
   };
 
   const handleCreateOrder = async () => {
@@ -443,8 +279,8 @@ export default function AdminOrdersPage() {
       setInfo("สร้างออเดอร์รับที่ร้านแล้ว");
       setOrderForm({ order_type: "pickup", pickup_type: "pickup", pickup_time: "", note: "" });
       await refresh();
-    } catch (err: any) {
-      setError(friendlyError(err?.message || "สร้างออเดอร์ไม่สำเร็จ"));
+    } catch (err) {
+      setError(errorMessage(err, "สร้างออเดอร์ไม่สำเร็จ"));
     } finally {
       setCreatingOrder(false);
     }
@@ -453,7 +289,7 @@ export default function AdminOrdersPage() {
   return (
     <AdminLayout
       title="ออเดอร์"
-      subtitle="คิวออเดอร์ การชำระเงิน การเตรียม และพร้อมรับ"
+      subtitle="คิวออเดอร์ การเตรียม และพร้อมรับ"
     >
       {showDevCreateOrderForm ? (
       <div className="stat-card mb-4 space-y-3 border-amber-300">
@@ -521,15 +357,6 @@ export default function AdminOrdersPage() {
               <Download className="w-3 h-3" />
               {exportingOrders ? "กำลังส่งออก..." : "ส่งออกออเดอร์"}
             </button>
-            <button
-              type="button"
-              className="inline-flex items-center gap-1 rounded border px-3 py-1.5 text-xs"
-              onClick={handleExportPayments}
-              disabled={exportingPayments}
-            >
-              <Download className="w-3 h-3" />
-              {exportingPayments ? "กำลังส่งออก..." : "ส่งออกการชำระเงิน"}
-            </button>
           </div>
         ) : null}
         <div className="ml-auto flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs text-muted-foreground bg-background">
@@ -551,15 +378,6 @@ export default function AdminOrdersPage() {
       ) : null}
       {info ? <div className="stat-card mb-4 text-sm text-foreground">{info}</div> : null}
 
-      {activeTab === "payments" ? (
-        <div className="stat-card mb-4">
-          <p className="text-sm text-muted-foreground">
-            เมื่ออนุมัติการชำระเงิน ลูกค้าจะได้รับข้อความแจ้งเตือน:
-            "ตรวจสอบการชำระเงินสำเร็จแล้ว กำลังเตรียมเครื่องดื่มให้คุณ"
-          </p>
-        </div>
-      ) : null}
-
       {activeTab === "ready" || activeTab === "completed" ? (
         <div className="stat-card mb-4">
           <p className="text-sm text-muted-foreground">
@@ -569,96 +387,12 @@ export default function AdminOrdersPage() {
         </div>
       ) : null}
 
-      {loading ? (
+      {activeTab === "incoming" ? (
+        <IncomingOrdersQueue />
+      ) : activeTab === "production" ? (
+        <ProductionOrdersQueue />
+      ) : loading ? (
         <QueueLoadingState />
-      ) : activeTab === "payments" ? (
-        visiblePaymentQueue.length === 0 && !error ? (
-          <QueueEmptyState title={emptyStateCopy.payments.title} hint={emptyStateCopy.payments.hint} />
-        ) : (
-          <DataTable
-            columns={[
-              {
-                key: "order_no",
-                header: "เลขออเดอร์",
-                render: (r) => (
-                  <Link to={`/store-admin/orders/${r.order_id}`} className="underline font-mono text-xs">
-                    {r.order_no || r.order_id}
-                  </Link>
-                ),
-              },
-              {
-                key: "customer_name",
-                header: "ลูกค้า",
-                render: (r) => (
-                  <div className="flex flex-col">
-                    <span>{r.customer_name || "-"}</span>
-                    <span className="text-xs text-muted-foreground">{r.customer_phone || "-"}</span>
-                  </div>
-                ),
-              },
-              {
-                key: "amount",
-                header: "ยอดที่ต้องตรวจ",
-                className: "whitespace-nowrap",
-                render: (r) => <span className="font-semibold tabular-nums">{formatTHB(r.amount || 0)}</span>,
-              },
-              { key: "method", header: "วิธีชำระ", className: "hidden md:table-cell" },
-              {
-                key: "slip",
-                header: "หลักฐาน",
-                render: (r) => {
-                  const hasSlip = Boolean(r.slip_submitted || r.slip_storage_path || r.slip_url);
-                  return (
-                    <button
-                      type="button"
-                      className="underline disabled:no-underline disabled:text-muted-foreground"
-                      onClick={() => openPaymentPreview(r)}
-                      disabled={!hasSlip}
-                    >
-                      {hasSlip ? "ตรวจสลิป" : "ยังไม่มีสลิป"}
-                    </button>
-                  );
-                },
-              },
-              {
-                key: "submitted_at",
-                header: "ส่งเมื่อ",
-                className: "hidden lg:table-cell whitespace-nowrap",
-                render: (r) =>
-                  r.submitted_at
-                    ? formatDateTime(r.submitted_at)
-                    : r.slip_submitted
-                      ? "แนบแล้ว"
-                      : "-",
-              },
-              {
-                key: "status",
-                header: "สถานะชำระเงิน",
-                render: (r) => (
-                  <div className="flex flex-col gap-1">
-                    <StatusBadge label={formatPaymentStatus(r.status)} tone={paymentStatusTone(r.status)} />
-                    {r.order_status ? (
-                      <StatusBadge label={`ออเดอร์: ${formatOrderStatus(r.order_status)}`} tone={orderStatusTone(r.order_status)} />
-                    ) : null}
-                    {r.order_payment_status ? (
-                      <StatusBadge label={`ชำระ: ${formatPaymentStatus(r.order_payment_status)}`} tone={paymentStatusTone(r.order_payment_status)} />
-                    ) : null}
-                  </div>
-                ),
-              },
-              {
-                key: "actions",
-                header: "จัดการ",
-                render: (r) => (
-                  <div className="flex flex-col gap-1 text-sm">
-                    <button type="button" className="underline text-left" onClick={() => openPaymentPreview(r)}>เปิดหน้าตรวจสอบ</button>
-                  </div>
-                ),
-              },
-            ]}
-            rows={visiblePaymentQueue}
-          />
-        )
       ) : filteredOrders.length === 0 && !error ? (
         <QueueEmptyState title={emptyStateCopy[activeTab].title} hint={emptyStateCopy[activeTab].hint} />
       ) : (
@@ -712,21 +446,11 @@ export default function AdminOrdersPage() {
             {
               key: "payment_status",
               header: "การชำระเงิน",
-              render: (r) => {
-                const latest = r.latest_payment;
-                const hasSlip = Boolean(latest?.slip_submitted);
-                return (
-                  <div className="flex flex-col gap-1">
-                    <StatusBadge label={formatPaymentStatus(r.payment_status)} tone={paymentStatusTone(r.payment_status)} />
-                    <span className={`text-xs ${hasSlip ? "text-emerald-600" : "text-muted-foreground"}`}>
-                      {hasSlip ? "มีสลิปแนบ" : "ยังไม่แนบสลิป"}
-                    </span>
-                    {latest && typeof latest.amount === "number" ? (
-                      <span className="text-xs text-muted-foreground tabular-nums">ยอดสลิป: {formatTHB(latest.amount)}</span>
-                    ) : null}
-                  </div>
-                );
-              },
+              render: (r) => (
+                <div className="flex flex-col gap-1">
+                  <StatusBadge label={formatPaymentStatus(r.payment_status)} tone={paymentStatusTone(r.payment_status)} />
+                </div>
+              ),
             },
             {
               key: "total_amount",
@@ -752,13 +476,7 @@ export default function AdminOrdersPage() {
               key: "actions",
               header: "จัดการ",
               render: (r) => {
-                const rawOptions = nextStatusByCurrent[r.status] || [];
-                // Hide the cancel option for statuses Staff clearly cannot cancel
-                // (owner-approved rule). Other transitions are left untouched.
-                // Backend remains the final authority regardless of this filter.
-                const options = isClearlyUncancellableByStaff(r.status)
-                  ? rawOptions.filter((s) => s !== "cancelled")
-                  : rawOptions;
+                const options = nextStatusByCurrent[r.status] || [];
                 if (options.length === 0) return <span className="text-muted-foreground">-</span>;
                 return (
                   <select
@@ -768,13 +486,7 @@ export default function AdminOrdersPage() {
                     onChange={(e) => {
                       const value = e.target.value;
                       if (!value) return;
-                      // Reset the select first so it stays usable whether the
-                      // user confirms, cancels, or the request fails.
                       e.currentTarget.value = "";
-                      if (value === "cancelled") {
-                        requestCancel(r);
-                        return;
-                      }
                       void handleStatusChange(r, value);
                     }}
                   >
@@ -790,24 +502,6 @@ export default function AdminOrdersPage() {
           rows={filteredOrders}
         />
       )}
-      <PaymentSlipPreviewModal
-        payment={activePayment}
-        isOpen={previewOpen}
-        onClose={closePaymentPreview}
-        onApprove={(payment) => handleApproveFromModal(payment)}
-        onReject={(payment) => handleRejectFromModal(payment)}
-        rejectReason={modalRejectReason}
-        onRejectReasonChange={setModalRejectReason}
-      />
-      <CancelOrderDialog
-        open={pendingCancel !== null}
-        order={pendingCancel}
-        submitting={cancelSubmitting}
-        onConfirm={() => void confirmCancel()}
-        onClose={() => {
-          if (!cancelSubmitting) setPendingCancel(null);
-        }}
-      />
     </AdminLayout>
   );
 }

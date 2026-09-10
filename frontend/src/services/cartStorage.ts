@@ -33,28 +33,32 @@ function sanitizeSweetness(value: unknown): number | undefined {
   return SWEETNESS_LEVELS.has(numeric) ? numeric : undefined;
 }
 
-function sanitizeAddonSelection(raw: any): CartItemAddonSelection | null {
-  const addonId = String(raw?.addon_id ?? "").trim();
+function sanitizeAddonSelection(raw: unknown): CartItemAddonSelection | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  const addonId = String(r.addon_id ?? "").trim();
   if (!addonId) return null;
-  const quantity = Math.max(0, Math.floor(Number(raw?.quantity ?? 0) || 0));
-  const price = Number(raw?.price ?? 0) || 0;
+  const quantity = Math.max(0, Math.floor(Number(r.quantity ?? 0) || 0));
+  const price = Number(r.price ?? 0) || 0;
   return {
     addon_id: addonId,
-    code: raw?.code != null ? String(raw.code) : undefined,
-    name: raw?.name != null ? String(raw.name) : undefined,
+    code: r.code != null ? String(r.code) : undefined,
+    name: r.name != null ? String(r.name) : undefined,
     price,
     quantity,
   };
 }
 
-function normalizeOptions(raw: any, fallbackNote?: any): CartItemOptions | undefined {
-  const sweetness = sanitizeSweetness(raw?.sweetness);
-  const addons = Array.isArray(raw?.addons)
-    ? raw.addons
-        .map((addon: any) => sanitizeAddonSelection(addon))
+function normalizeOptions(raw: unknown, fallbackNote?: unknown): CartItemOptions | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const r = raw as Record<string, unknown>;
+  const sweetness = sanitizeSweetness(r.sweetness);
+  const addons = Array.isArray(r.addons)
+    ? r.addons
+        .map((addon: unknown) => sanitizeAddonSelection(addon))
         .filter((addon): addon is CartItemAddonSelection => Boolean(addon && addon.quantity > 0))
     : [];
-  const noteValue = raw?.note ?? fallbackNote;
+  const noteValue = r.note ?? fallbackNote;
   const note = typeof noteValue === "string" ? noteValue.trim() : undefined;
 
   const options: CartItemOptions = {};
@@ -70,14 +74,16 @@ function normalizeOptions(raw: any, fallbackNote?: any): CartItemOptions | undef
   return Object.keys(options).length > 0 ? options : undefined;
 }
 
-function normalizeCartItemRecord(item: any): CartItem | null {
-  const productId = String(item?.productId ?? "").trim();
-  const name = String(item?.name ?? "").trim();
+function normalizeCartItemRecord(item: unknown): CartItem | null {
+  if (!item || typeof item !== "object") return null;
+  const r = item as Record<string, unknown>;
+  const productId = String(r.productId ?? "").trim();
+  const name = String(r.name ?? "").trim();
   if (!productId || !name) return null;
-  const price = Number(item?.price ?? 0) || 0;
-  const quantity = Math.max(1, Number(item?.quantity ?? 1) || 1);
-  const options = normalizeOptions(item?.options, item?.note);
-  const note = options?.note ?? (item?.note ? String(item.note).trim() : undefined);
+  const price = Number(r.price ?? 0) || 0;
+  const quantity = Math.max(1, Number(r.quantity ?? 1) || 1);
+  const options = normalizeOptions(r.options, r.note);
+  const note = options?.note ?? (r.note ? String(r.note).trim() : undefined);
   return {
     productId,
     name,

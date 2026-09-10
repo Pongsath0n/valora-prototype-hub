@@ -52,9 +52,14 @@ export const menuCatalogService = {
     try {
       const { data } = await supabase.from("products").select("id,name,base_price,is_active,product_categories(name)").order("created_at", { ascending: false });
       if (data) {
-        return data.map((r: any) => ({ id: r.id, name: r.name, category: r.product_categories?.name ?? "General", basePrice: Number(r.base_price ?? 0), isActive: !!r.is_active, imageUrl: null }));
+        return data.map((r: Record<string, unknown>) => {
+          const pc = r.product_categories as { name?: string } | null;
+          return { id: r.id as string, name: r.name as string, category: pc?.name ?? "General", basePrice: Number(r.base_price ?? 0), isActive: Boolean(r.is_active), imageUrl: null };
+        });
       }
-    } catch {}
+    } catch {
+      // Supabase read failed; fall back to local seed data.
+    }
     return load<MenuItem[]>(K_MENU, seedMenu);
   },
   async upsert(item: Partial<MenuItem> & { name: string; category: string; basePrice: number }): Promise<void> {

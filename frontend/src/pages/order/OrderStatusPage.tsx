@@ -1,29 +1,37 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
 import { cn } from "@/lib/utils";
 import { customerApi, type OrderStatusSummary } from "@/services/customerApi";
-import { customerOrderStatus, customerPaymentStatus } from "@/lib/customerStatus";
-import { getLastOrderNo, getLastOrderToken, setLastOrderNo, setLastOrderToken } from "@/services/cartStorage";
+import { customerOrderStatus } from "@/lib/customerStatus";
+import { getLastOrderToken, setLastOrderToken } from "@/services/cartStorage";
+import { mapCustomerStatusError } from "@/lib/customerErrors";
+
+/** Canonical V1 polling interval (ms). */
+const POLL_INTERVAL_MS = 15_000;
+
+/** Terminal order statuses that should stop polling. */
+const TERMINAL_STATUSES = new Set(["completed", "cancelled", "voided"]);
 
 const TIMELINE: { key: string; label: string }[] = [
   { key: "received", label: "รับออเดอร์แล้ว" },
-  { key: "payment", label: "ชำระเงิน / ตรวจสอบการชำระเงิน" },
-  { key: "confirmed", label: "ร้านยืนยันออเดอร์" },
+  { key: "payment", label: "ชำระเงินที่เคาน์เตอร์" },
   { key: "preparing", label: "กำลังจัดเตรียม" },
-  { key: "ready", label: "พร้อมรับสินค้า / เสร็จสิ้น" },
+  { key: "ready", label: "พร้อมรับสินค้า" },
+  { key: "completed", label: "เสร็จสิ้น" },
 ];
 
 function timelineIndexForStatus(status: string): number {
   switch (status) {
     case "pending_payment":
     case "waiting_payment_review":
-      return 1;
+      return 0;
     case "accepted":
-      return 2;
+      return 1;
     case "preparing":
-      return 3;
+      return 2;
     case "ready":
+      return 3;
     case "completed":
       return 4;
     default:
@@ -43,303 +51,215 @@ function normalizeStatus(value: string | undefined | null): string {
   return (value || "").toLowerCase();
 }
 
-type PaymentInstructions = {
-  enabled: boolean;
-  method_label: string;
-  bank_name?: string | null;
-  account_name?: string | null;
-  account_number?: string | null;
-  promptpay_id?: string | null;
-  note_lines: string[];
-  allowed_file_types: string[];
-  max_file_mb: number;
-};
-
-const PAYMENT_CONFIG_FALLBACK =
-  "ร้านยังไม่ได้ตั้งค่าข้อมูลบัญชีรับชำระเงิน กรุณาติดต่อร้านโดยตรงเพื่อชำระเงิน";
-
-type UploadState = "idle" | "uploading" | "success" | "error";
-
+/**
+ * Canonical V1 Customer Status Page.
+ *
+ * Loads order status via `GET /api/customer/orders/status?token=<public_token>`.
+ * The public_token is sourced from the URL query (if present) or the persisted
+ * `getLastOrderToken()` from FE-02. No phone lookup is required.
+ *
+ * Polls every 15 seconds while the order is in an active state. Stops polling
+ * on terminal statuses (completed, cancelled, voided). Temporary network
+ * failures retain the last valid status and show a subtle retry affordance.
+ *
+ * This page does NOT:
+ * - Render slip upload controls or bank-transfer instructions.
+ * - Call `getPaymentInstructions`, `uploadPaymentSlip`, or `lookupOrderStatus`.
+ * - Consume `payment.can_upload_slip`, `payment.slip_submitted`, or
+ *   `payment.reject_reason` to build payment UI.
+ * - Display the public_token visibly.
+ */
 export default function OrderStatusPage() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const tokenFromQuery = searchParams.get("token")?.trim() || "";
   const storedToken = getLastOrderToken();
-  const tokenFromQuery = searchParams.get("token") ?? storedToken ?? "";
+  const initialToken = tokenFromQuery || storedToken || "";
 
-  const [activeToken, setActiveToken] = useState<string>(tokenFromQuery);
+  const [activeToken, setActiveToken] = useState<string>(initialToken);
   const [statusData, setStatusData] = useState<OrderStatusSummary | null>(null);
-  const [lookupOrderNo, setLookupOrderNo] = useState<string>(() => getLastOrderNo() ?? "");
-  const [lookupPhone, setLookupPhone] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
   const [animated, setAnimated] = useState(false);
-  const lastFetchedTokenRef = useRef<string | null>(null);
-  const [instructions, setInstructions] = useState<PaymentInstructions | null>(null);
-  const [instructionsError, setInstructionsError] = useState<string | null>(null);
-  const [uploadState, setUploadState] = useState<UploadState>("idle");
-  const [uploadError, setUploadError] = useState<string | null>(null);
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
 
+  const inFlightRef = useRef(false);
+  const lastFetchedTokenRef = useRef<string | null>(null);
+  const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const fetchStatus = useCallback(
+    async (tokenValue: string, isInitial: boolean) => {
+      if (!tokenValue) {
+        setStatusData(null);
+        setActiveToken("");
+        return;
+      }
+      if (inFlightRef.current) return; // prevent overlapping requests
+      inFlightRef.current = true;
+      lastFetchedTokenRef.current = tokenValue;
+      if (isInitial) setLoading(true);
+      setError(null);
+      try {
+        const response = await customerApi.getOrderStatusByToken(tokenValue);
+        setStatusData(response);
+        setRefreshError(null);
+        const resolvedToken = response.public_token ?? tokenValue;
+        setActiveToken(resolvedToken);
+        if (resolvedToken && resolvedToken !== storedToken) {
+          setLastOrderToken(resolvedToken);
+        }
+        // Persist URL token if it differs from query.
+        if (resolvedToken && resolvedToken !== tokenFromQuery) {
+          const next = new URLSearchParams(searchParams);
+          next.set("token", resolvedToken);
+          setSearchParams(next, { replace: true });
+        }
+      } catch (err) {
+        if (isInitial) {
+          setStatusData(null);
+          setError(mapCustomerStatusError(err));
+        } else {
+          // Temporary refresh failure: retain previous valid status.
+          setRefreshError(mapCustomerStatusError(err));
+        }
+      } finally {
+        inFlightRef.current = false;
+        if (isInitial) setLoading(false);
+      }
+    },
+    [searchParams, setSearchParams, storedToken, tokenFromQuery],
+  );
+
+  // Initial + token-change fetch.
+  useEffect(() => {
+    const next = (tokenFromQuery || storedToken || "").trim();
+    if (next && next !== lastFetchedTokenRef.current) {
+      void fetchStatus(next, true);
+    } else if (!next) {
+      setStatusData(null);
+      setActiveToken("");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tokenFromQuery, storedToken]);
+
+  // Entrance animation.
   useEffect(() => {
     const id = requestAnimationFrame(() => setAnimated(true));
     return () => cancelAnimationFrame(id);
   }, []);
 
-  useEffect(() => {
-    async function loadInstructions() {
-      try {
-        setInstructionsError(null);
-        const data = await customerApi.getPaymentInstructions();
-        setInstructions(data);
-      } catch (err: any) {
-        setInstructionsError(err?.message || "โหลดคำแนะนำการชำระเงินไม่สำเร็จ");
-      }
-    }
-    void loadInstructions();
-  }, []);
-
-  useEffect(() => {
-    const nextToken = tokenFromQuery.trim();
-    if (nextToken && nextToken !== lastFetchedTokenRef.current) {
-      void fetchStatusByToken(nextToken);
-    } else if (!nextToken && storedToken && storedToken !== lastFetchedTokenRef.current) {
-      void fetchStatusByToken(storedToken);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tokenFromQuery]);
-
-  async function fetchStatusByToken(tokenValue: string) {
-    if (!tokenValue) {
-      setStatusData(null);
-      setActiveToken("");
-      return;
-    }
-    lastFetchedTokenRef.current = tokenValue;
-    setLoading(true);
-    setError(null);
-    try {
-      const response = await customerApi.getOrderStatusByToken(tokenValue);
-      handleStatusSuccess(response, tokenValue);
-    } catch (err: any) {
-      setStatusData(null);
-      setError(err?.message || "ไม่พบข้อมูลคำสั่งซื้อ");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function handleUpload(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!statusData?.public_token || !selectedFile) {
-      setUploadError("กรุณาเลือกไฟล์หลักฐาน");
-      return;
-    }
-
-    const allowedTypes = instructions?.allowed_file_types ?? ["image/jpeg", "image/png", "image/webp"];
-    if (selectedFile && !allowedTypes.includes(selectedFile.type)) {
-      setUploadError("ประเภทไฟล์ไม่รองรับ");
-      return;
-    }
-
-    const maxBytes = (instructions?.max_file_mb ?? 5) * 1024 * 1024;
-    if (selectedFile.size > maxBytes) {
-      setUploadError(`ไฟล์ต้องไม่เกิน ${instructions?.max_file_mb ?? 5}MB`);
-      return;
-    }
-
-    setUploadState("uploading");
-    setUploadError(null);
-    try {
-      await customerApi.uploadPaymentSlip(statusData.public_token, selectedFile);
-      setUploadState("success");
-      setSelectedFile(null);
-      await fetchStatusByToken(statusData.public_token);
-      setTimeout(() => setUploadState("idle"), 5000);
-    } catch (err: any) {
-      setUploadState("error");
-      setUploadError(err?.message || "อัปโหลดไม่สำเร็จ");
-      setTimeout(() => setUploadState("idle"), 5000);
-    }
-  }
-
-  const canUploadSlip = (() => {
-    if (!statusData) return false;
-    if (typeof statusData.payment?.can_upload_slip === "boolean") {
-      return statusData.payment.can_upload_slip;
-    }
-    const paymentStatus = statusData.payment?.status?.toLowerCase?.() ?? "";
-    return ["pending", "unpaid", "rejected"].includes(paymentStatus);
-  })();
-
-  const isPendingReview = statusData?.payment?.status?.toLowerCase() === "pending_review";
-  const isPaid = statusData?.payment?.status?.toLowerCase() === "paid";
-  const isRejected = statusData?.payment?.status?.toLowerCase() === "rejected";
-  const hasSubmittedSlip = Boolean(statusData?.payment?.slip_submitted);
-
-  function renderInstructionCard() {
-    if (instructionsError || !instructions?.enabled) {
-      return (
-        <div className="rounded-2xl border bg-muted/30 p-4 text-sm text-muted-foreground">
-          {PAYMENT_CONFIG_FALLBACK}
-        </div>
-      );
-    }
-
-    return (
-      <div className="bw-card p-5">
-        <div className="flex flex-col gap-1">
-          <p className="text-xs font-semibold text-primary/70">ช่องทางการชำระเงิน</p>
-          <h3 className="text-xl font-semibold">{instructions.method_label}</h3>
-        </div>
-        <div className="mt-4 space-y-3 text-sm">
-          {instructions.bank_name && (
-            <p>
-              <span className="text-muted-foreground">ธนาคาร:</span> {instructions.bank_name}
-            </p>
-          )}
-          {instructions.account_name && (
-            <p>
-              <span className="text-muted-foreground">ชื่อบัญชี:</span> {instructions.account_name}
-            </p>
-          )}
-          {instructions.account_number && (
-            <p>
-              <span className="text-muted-foreground">เลขบัญชี:</span> {instructions.account_number}
-            </p>
-          )}
-          {instructions.promptpay_id && (
-            <p>
-              <span className="text-muted-foreground">PromptPay:</span> {instructions.promptpay_id}
-            </p>
-          )}
-          {statusData ? (
-            <p>
-              <span className="text-muted-foreground">ยอดโอน:</span>{" "}
-              <span className="font-semibold">{formatCurrency(statusData.total_amount)}</span>
-            </p>
-          ) : null}
-        </div>
-        {instructions.note_lines.length ? (
-          <ul className="mt-4 list-disc space-y-1 pl-4 text-sm text-muted-foreground">
-            {instructions.note_lines.map((note, idx) => (
-              <li key={`${note}-${idx}`}>{note}</li>
-            ))}
-          </ul>
-        ) : null}
-      </div>
-    );
-  }
-
-  function handleStatusSuccess(response: OrderStatusSummary, fallbackToken: string | null) {
-    setStatusData(response);
-    const resolvedToken = response.public_token ?? fallbackToken ?? "";
-    setActiveToken(resolvedToken);
-    setLastOrderToken(resolvedToken || null);
-    syncTokenInQuery(resolvedToken);
-    if (response.order_no) {
-      setLastOrderNo(response.order_no);
-      setLookupOrderNo(response.order_no);
-    }
-  }
-
-  function syncTokenInQuery(nextToken: string) {
-    const next = new URLSearchParams(searchParams);
-    if (nextToken) {
-      next.set("token", nextToken);
-    } else {
-      next.delete("token");
-    }
-    setSearchParams(next);
-  }
-
-  async function handleLookup(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!lookupOrderNo.trim() || !lookupPhone.trim()) {
-      setError("กรุณากรอกเลขออเดอร์และเบอร์โทรศัพท์");
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    try {
-      const response = await customerApi.lookupOrderStatus({
-        order_no: lookupOrderNo.trim(),
-        phone: lookupPhone.trim(),
-      });
-      lastFetchedTokenRef.current = response.public_token ?? null;
-      handleStatusSuccess(response, response.public_token ?? null);
-    } catch (err: any) {
-      setStatusData(null);
-      setError(err?.message || "ไม่พบข้อมูลตามเลขออเดอร์และเบอร์ที่ระบุ");
-    } finally {
-      setLoading(false);
-    }
-  }
-
+  // Polling: every POLL_INTERVAL_MS while order is active.
   const normalizedStatus = normalizeStatus(statusData?.order_status);
+  const isTerminal = TERMINAL_STATUSES.has(normalizedStatus);
+
+  useEffect(() => {
+    if (pollTimerRef.current) {
+      clearTimeout(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+    if (!activeToken || isTerminal) return;
+
+    pollTimerRef.current = setTimeout(() => {
+      void fetchStatus(activeToken, false);
+    }, POLL_INTERVAL_MS);
+
+    return () => {
+      if (pollTimerRef.current) {
+        clearTimeout(pollTimerRef.current);
+        pollTimerRef.current = null;
+      }
+    };
+  }, [activeToken, isTerminal, fetchStatus, statusData]);
+
+  const handleManualRefresh = useCallback(() => {
+    if (activeToken) {
+      void fetchStatus(activeToken, false);
+    }
+  }, [activeToken, fetchStatus]);
+
   const isCancelled = normalizedStatus === "cancelled" || normalizedStatus === "voided";
   const isCompleted = normalizedStatus === "completed";
-  // Customer arrived with a direct status link (or already loaded an order) —
-  // the manual search form is only for visitors without a token.
-  const showSearchForm = !statusData && !loading;
+
   const timelineSteps = useMemo(() => {
     const index = timelineIndexForStatus(normalizedStatus);
     return TIMELINE.map((step, idx) => ({
       ...step,
-      active: !isCompleted && index === idx,
+      active: !isCompleted && !isCancelled && index === idx,
       completed: isCompleted ? true : index > idx,
     }));
-  }, [normalizedStatus, isCompleted]);
+  }, [normalizedStatus, isCompleted, isCancelled]);
 
   const banner = useMemo(() => {
     if (!statusData) return null;
     if (isCancelled) {
       return {
         tone: "muted" as const,
-        title: "ออเดอร์นี้ถูกยกเลิกแล้ว",
+        title: "ออเดอร์ถูกยกเลิก",
         desc: "หากต้องการสั่งใหม่ กรุณาเปิดเมนูร้านอีกครั้ง",
-        anim: "",
       };
     }
-    if (isPaid && (normalizedStatus === "ready" || isCompleted)) {
-      return {
-        tone: "success" as const,
-        title: isCompleted ? "เสร็จสิ้น ขอบคุณที่อุดหนุน" : "ออเดอร์พร้อมรับแล้ว",
-        desc: "ยืนยันการชำระเงินแล้ว และร้านเตรียมออเดอร์เสร็จเรียบร้อย",
-        anim: "animate-check-pop",
-      };
+    switch (normalizedStatus) {
+      case "pending_payment":
+      case "waiting_payment_review":
+        return {
+          tone: "warning" as const,
+          title: "รับออเดอร์แล้ว",
+          desc: "กรุณารอพนักงานเรียกชื่อเพื่อชำระเงินที่เคาน์เตอร์",
+        };
+      case "accepted":
+        return {
+          tone: "success" as const,
+          title: "ชำระเงินเรียบร้อยแล้ว",
+          desc: "ออเดอร์ของคุณอยู่ในคิว",
+        };
+      case "preparing":
+        return {
+          tone: "info" as const,
+          title: "กำลังจัดเตรียมออเดอร์",
+          desc: "ร้านกำลังเตรียมออเดอร์ของคุณ",
+        };
+      case "ready":
+        return {
+          tone: "success" as const,
+          title: "ออเดอร์พร้อมรับแล้ว",
+          desc: "กรุณารับสินค้าที่เคาน์เตอร์",
+        };
+      case "completed":
+        return {
+          tone: "success" as const,
+          title: "ออเดอร์เสร็จสิ้น",
+          desc: "ขอบคุณที่อุดหนุน",
+        };
+      default:
+        return {
+          tone: "info" as const,
+          title: "กำลังตรวจสอบสถานะออเดอร์",
+          desc: "กรุณารอสักครู่",
+        };
     }
-    if (isPaid) {
-      return {
-        tone: "success" as const,
-        title: "ยืนยันการชำระเงินแล้ว",
-        desc: "ร้านกำลังเตรียมออเดอร์ของคุณ ติดตามสถานะได้ที่ไทม์ไลน์ด้านล่าง",
-        anim: "animate-check-pop",
-      };
-    }
-    if (isRejected) {
-      return {
-        tone: "danger" as const,
-        title: "หลักฐานการชำระเงินไม่ผ่าน",
-        desc: statusData.payment?.reject_reason
-          ? `เหตุผล: ${statusData.payment.reject_reason}`
-          : "กรุณาตรวจสอบยอดโอนและอัปโหลดสลิปใหม่อีกครั้ง",
-        anim: "animate-gentle-shake",
-      };
-    }
-    if (isPendingReview) {
-      return {
-        tone: "info" as const,
-        title: "ร้านกำลังตรวจสอบการชำระเงินของคุณ",
-        desc: "โปรดรอสักครู่ ระบบจะอัปเดตสถานะเมื่อร้านยืนยัน",
-        anim: "animate-soft-pulse",
-      };
-    }
-    return {
-      tone: "warning" as const,
-      title: "กรุณาชำระเงินและอัปโหลดสลิป",
-      desc: "โอนเงินตามช่องทางด้านล่าง แล้วแนบสลิปเพื่อให้ร้านตรวจสอบ",
-      anim: "animate-soft-pulse",
-    };
-  }, [statusData, isCancelled, isCompleted, isPaid, isRejected, isPendingReview, normalizedStatus]);
+  }, [statusData, isCancelled, normalizedStatus]);
+
+  // ── No token: empty state ──
+  if (!activeToken && !loading) {
+    return (
+      <div className="mx-auto max-w-md space-y-4 px-4 py-8">
+        <header className="space-y-2 text-center">
+          <h1 className="text-2xl font-bold tracking-tight">สถานะออเดอร์</h1>
+        </header>
+        <div className="bw-card p-6 text-center">
+          <p className="text-base font-semibold text-muted-foreground">ไม่พบออเดอร์ล่าสุด</p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            กรุณาสั่งซื้อก่อน จึงจะสามารถติดตามสถานะได้
+          </p>
+          <Link
+            to="/order"
+            className="mt-4 inline-flex w-full items-center justify-center rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground"
+          >
+            กลับไปที่เมนู
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="mx-auto max-w-3xl space-y-6 px-4 py-8">
@@ -351,19 +271,24 @@ export default function OrderStatusPage() {
       {error ? (
         <div className="rounded-2xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
           {error}
+          <button
+            type="button"
+            onClick={() => activeToken && void fetchStatus(activeToken, true)}
+            className="ml-3 underline font-semibold"
+          >
+            ลองอีกครั้ง
+          </button>
         </div>
       ) : null}
 
-      {/* 1) Current status summary */}
+      {/* ── Status banner ── */}
       {banner ? (
         <div
           className={cn(
             "rounded-2xl border p-4 shadow-sm",
-            banner.anim,
             banner.tone === "success" && "border-emerald-200 bg-emerald-50",
             banner.tone === "info" && "border-sky-200 bg-sky-50",
             banner.tone === "warning" && "border-amber-200 bg-amber-50",
-            banner.tone === "danger" && "border-destructive/30 bg-destructive/5",
             banner.tone === "muted" && "border-border bg-muted/40",
           )}
           role="status"
@@ -373,15 +298,14 @@ export default function OrderStatusPage() {
             <span
               className={cn(
                 "flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-lg font-bold",
-                banner.tone === "success" && "bg-emerald-100 text-emerald-700 animate-check-pop",
+                banner.tone === "success" && "bg-emerald-100 text-emerald-700",
                 banner.tone === "info" && "bg-sky-100 text-sky-700",
                 banner.tone === "warning" && "bg-amber-100 text-amber-700",
-                banner.tone === "danger" && "bg-destructive/10 text-destructive",
                 banner.tone === "muted" && "bg-muted text-muted-foreground",
               )}
               aria-hidden
             >
-              {banner.tone === "success" ? "✓" : banner.tone === "danger" ? "!" : banner.tone === "muted" ? "–" : "•"}
+              {banner.tone === "success" ? "✓" : banner.tone === "muted" ? "–" : "•"}
             </span>
             <div className="min-w-0">
               <p
@@ -390,7 +314,6 @@ export default function OrderStatusPage() {
                   banner.tone === "success" && "text-emerald-800",
                   banner.tone === "info" && "text-sky-800",
                   banner.tone === "warning" && "text-amber-800",
-                  banner.tone === "danger" && "text-destructive",
                   banner.tone === "muted" && "text-foreground",
                 )}
               >
@@ -402,6 +325,7 @@ export default function OrderStatusPage() {
         </div>
       ) : null}
 
+      {/* ── Order summary card ── */}
       <section
         className={cn(
           "bw-card p-5 transition-all duration-500",
@@ -421,160 +345,43 @@ export default function OrderStatusPage() {
                 <p className="text-sm text-muted-foreground">เลขออเดอร์</p>
                 <p className="text-2xl font-semibold">{statusData.order_no || "-"}</p>
               </div>
-              {activeToken ? (
+              <div className="flex items-center gap-2">
+                {refreshError ? (
+                  <span className="text-xs text-destructive">{refreshError}</span>
+                ) : null}
                 <button
                   type="button"
-                  onClick={() => {
-                    if (typeof window === "undefined" || typeof navigator === "undefined") return;
-                    const link = `${window.location.origin}/order/status?token=${activeToken}`;
-                    navigator.clipboard?.writeText(link).catch(() => {
-                      /* ignore */
-                    });
-                  }}
+                  onClick={handleManualRefresh}
                   className="text-sm font-medium text-primary"
                 >
-                  คัดลอกลิงก์สถานะ
+                  รีเฟรช
                 </button>
-              ) : null}
+              </div>
             </div>
+
+            {statusData.customer_name ? (
+              <p className="text-sm text-muted-foreground">
+                ชื่อลูกค้า: <span className="font-semibold text-foreground">{statusData.customer_name}</span>
+              </p>
+            ) : null}
 
             <div className="flex flex-wrap gap-2">
               <span className="rounded-full bg-primary/10 px-3 py-1 text-xs font-semibold text-primary">
                 {customerOrderStatus(statusData.order_status).label}
-              </span>
-              <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-800">
-                {customerPaymentStatus(statusData.payment_status).label}
               </span>
             </div>
           </div>
         ) : (
           <div className="space-y-2 text-center text-sm text-muted-foreground">
             <p>ยังไม่มีข้อมูลสถานะให้แสดง</p>
-            <p>กรุณาใช้แบบฟอร์มด้านล่างเพื่อตรวจสอบออเดอร์ของคุณ</p>
           </div>
         )}
       </section>
 
-      {/* 2) Payment action/status — the customer's main task sits high on the page */}
-      {statusData ? (
-        <section className="space-y-4">
-          <div
-            className={cn(
-              "rounded-2xl",
-              !isPaid && !isPendingReview && canUploadSlip && "animate-soft-pulse ring-2 ring-amber-200 ring-offset-2",
-            )}
-          >
-            {!isPaid ? renderInstructionCard() : null}
-          </div>
-
-          <div className="bw-card p-5">
-            <h2 className="text-base font-semibold">อัปโหลดสลิปการโอน</h2>
-            {uploadState === "success" ? (
-              <p className="mt-2 rounded-xl bg-emerald-50 px-4 py-2 text-sm text-emerald-700">
-                ส่งหลักฐานเรียบร้อย — ร้านจะตรวจสอบและยืนยันออเดอร์ของคุณโดยเร็ว
-              </p>
-            ) : null}
-            {isPaid ? (
-              <p className="mt-2 rounded-xl bg-emerald-50 px-4 py-2 text-sm text-emerald-700">
-                ร้านยืนยันการชำระเงินแล้ว ขอบคุณค่ะ
-              </p>
-            ) : isPendingReview && hasSubmittedSlip ? (
-              <div className="mt-3 overflow-hidden rounded-xl border border-sky-200 bg-sky-50 p-4">
-                <div className="flex items-center gap-2 text-sm font-medium text-sky-800">
-                  <span className="flex h-2.5 w-2.5 animate-soft-pulse rounded-full bg-sky-500" aria-hidden />
-                  ร้านกำลังตรวจสอบการชำระเงินของคุณ
-                </div>
-                <div className="relative mt-3 h-2 overflow-hidden rounded-full bg-sky-100">
-                  <div className="absolute inset-y-0 left-0 w-1/3 animate-shimmer rounded-full bg-gradient-to-r from-transparent via-sky-300 to-transparent" />
-                </div>
-                <p className="mt-2 text-xs text-sky-700/80">ระบบจะอัปเดตสถานะให้อัตโนมัติเมื่อร้านยืนยัน</p>
-              </div>
-            ) : canUploadSlip ? (
-              <form onSubmit={handleUpload} className="mt-3 space-y-3">
-                <p className="text-sm text-muted-foreground">
-                  แนบหลักฐานการโอนเงิน (สลิป) เพื่อให้ร้านตรวจสอบและยืนยันออเดอร์ของคุณ
-                </p>
-                {isRejected ? (
-                  <div className="animate-gentle-shake rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
-                    <p className="font-semibold">หลักฐานการชำระเงินไม่ผ่าน</p>
-                    <p className="mt-0.5 text-xs">
-                      {statusData.payment.reject_reason
-                        ? `เหตุผล: ${statusData.payment.reject_reason}`
-                        : "กรุณาตรวจสอบยอดโอนและอัปโหลดสลิปใหม่อีกครั้ง"}
-                    </p>
-                  </div>
-                ) : null}
-                <input
-                  type="file"
-                  accept={(instructions?.allowed_file_types ?? []).join(",")}
-                  onChange={(event) => {
-                    const file = event.target.files?.[0];
-                    setSelectedFile(file ?? null);
-                  }}
-                  className="w-full rounded-xl border px-3 py-2 text-sm file:mr-4 file:rounded-full file:border-0 file:bg-primary/10 file:px-4 file:py-1 file:text-sm file:font-semibold file:text-primary"
-                />
-                <p className="text-xs text-muted-foreground">
-                  รองรับไฟล์ JPG / PNG / WEBP ขนาดไม่เกิน {instructions?.max_file_mb ?? 5}MB —
-                  หลังอัปโหลด ร้านจะตรวจสอบยอดโอนและยืนยันออเดอร์
-                </p>
-                {uploadError ? (
-                  <p className="text-sm text-destructive">{uploadError}</p>
-                ) : null}
-                <button
-                  type="submit"
-                  disabled={uploadState === "uploading" || !selectedFile}
-                  className="bw-cta"
-                >
-                  {uploadState === "uploading"
-                    ? "กำลังอัปโหลด..."
-                    : isRejected
-                      ? "อัปโหลดสลิปใหม่อีกครั้ง"
-                      : "ส่งหลักฐานการโอน"}
-                </button>
-                <p className="text-xs text-muted-foreground">
-                  หลักฐานการชำระเงินจะถูกใช้เพื่อการตรวจสอบยอดโอนและยืนยันคำสั่งซื้อเท่านั้น
-                </p>
-              </form>
-            ) : (
-              <p className="mt-2 rounded-xl bg-muted/30 px-4 py-2 text-sm text-muted-foreground">
-                ไม่สามารถอัปโหลดสลิปได้ในสถานะปัจจุบัน
-              </p>
-            )}
-          </div>
-
-          <div className="bw-card p-5">
-            <h2 className="text-base font-semibold">สถานะการชำระเงิน</h2>
-            <div className="mt-3 grid gap-3 md:grid-cols-2">
-              <div className="rounded-xl bg-muted/40 p-3 text-sm">
-                <p className="text-muted-foreground">สถานะ</p>
-                <p className="text-base font-semibold">{customerPaymentStatus(statusData.payment.status).label}</p>
-                <p className="text-xs text-muted-foreground">
-                  {statusData.payment.slip_submitted
-                    ? `แนบล่าสุดเมื่อ ${statusData.payment.last_submitted_at ?? "-"}`
-                    : "ยังไม่ส่งหลักฐานการโอน"}
-                </p>
-                {statusData.payment.reject_reason ? (
-                  <p className="mt-2 rounded-lg bg-destructive/10 px-3 py-2 text-xs text-destructive">
-                    เหตุผลการปฏิเสธ: {statusData.payment.reject_reason}
-                  </p>
-                ) : null}
-              </div>
-              <div className="rounded-xl bg-muted/40 p-3 text-sm">
-                <p className="text-muted-foreground">ยอดที่ต้องชำระ</p>
-                <p className="text-base font-semibold">{formatCurrency(statusData.payment.amount)}</p>
-              </div>
-            </div>
-          </div>
-        </section>
-      ) : null}
-
-      {/* 3) Order item summary */}
+      {/* ── Order items ── */}
       {statusData ? (
         <section className="bw-card p-5">
           <h2 className="text-base font-semibold">สรุปรายการสินค้า</h2>
-          <p className="text-sm text-muted-foreground">
-            เวลารับโดยประมาณ: {statusData.pickup_time ? new Date(statusData.pickup_time).toLocaleString("th-TH") : "-"}
-          </p>
           <div className="mt-3 space-y-3">
             {statusData.items.map((item, idx) => (
               <div key={`${item.product_name}-${idx}`} className="flex items-center justify-between gap-3">
@@ -590,7 +397,9 @@ export default function OrderStatusPage() {
                         }}
                       />
                     ) : (
-                      <div className="flex h-full w-full items-center justify-center text-[10px] text-muted-foreground">ไม่มีรูป</div>
+                      <div className="flex h-full w-full items-center justify-center text-[10px] text-muted-foreground">
+                        ไม่มีรูป
+                      </div>
                     )}
                   </div>
                   <div>
@@ -609,7 +418,7 @@ export default function OrderStatusPage() {
         </section>
       ) : null}
 
-      {/* 4) Simple progress timeline */}
+      {/* ── Status timeline ── */}
       {statusData ? (
         <section className="bw-card p-5">
           <h2 className="text-base font-semibold">ความคืบหน้า</h2>
@@ -621,9 +430,9 @@ export default function OrderStatusPage() {
                     className={cn(
                       "flex h-7 w-7 items-center justify-center rounded-full text-xs font-semibold transition-colors",
                       step.active
-                        ? "bg-primary text-primary-foreground animate-ring-pulse"
+                        ? "bg-primary text-primary-foreground"
                         : step.completed
-                          ? "bg-primary/20 text-primary animate-check-pop"
+                          ? "bg-primary/20 text-primary"
                           : "bg-muted text-muted-foreground",
                     )}
                     aria-current={step.active ? "step" : undefined}
@@ -632,10 +441,7 @@ export default function OrderStatusPage() {
                   </span>
                   {idx < timelineSteps.length - 1 ? (
                     <span
-                      className={cn(
-                        "my-1 w-0.5 flex-1",
-                        step.completed ? "bg-primary/30" : "bg-muted",
-                      )}
+                      className={cn("my-1 w-0.5 flex-1", step.completed ? "bg-primary/30" : "bg-muted")}
                       aria-hidden
                     />
                   ) : null}
@@ -658,62 +464,12 @@ export default function OrderStatusPage() {
         </section>
       ) : null}
 
-      {/* Manual search — only when the visitor has no direct status link/order loaded */}
-      {showSearchForm ? (
-        <section className="bw-card p-5">
-          <h2 className="text-base font-semibold">ค้นหาสถานะด้วยเลขออเดอร์</h2>
-          <p className="text-sm text-muted-foreground">
-            กรอกเลขออเดอร์และเบอร์โทรศัพท์ที่ใช้สั่งซื้อเพื่อดึงข้อมูลล่าสุด
-          </p>
-          <form onSubmit={handleLookup} className="mt-4 space-y-3">
-            <div>
-              <label className="text-sm font-medium" htmlFor="order-no">
-                เลขออเดอร์
-              </label>
-              <input
-                id="order-no"
-                value={lookupOrderNo}
-                onChange={(event) => setLookupOrderNo(event.target.value)}
-                className="mt-1 w-full rounded-xl border px-3 py-2 text-sm focus:border-primary focus:outline-none"
-                placeholder="เช่น ORD-20240601-ABCD"
-              />
-            </div>
-            <div>
-              <label className="text-sm font-medium" htmlFor="phone">
-                เบอร์โทรศัพท์ที่ใช้สั่งซื้อ
-              </label>
-              <input
-                id="phone"
-                type="tel"
-                inputMode="tel"
-                value={lookupPhone}
-                onChange={(event) => setLookupPhone(event.target.value)}
-                className="mt-1 w-full rounded-xl border px-3 py-2 text-sm focus:border-primary focus:outline-none"
-                placeholder="08xxxxxxxx"
-              />
-            </div>
-            <button
-              type="submit"
-              className="bw-cta"
-              disabled={loading}
-            >
-              {loading ? "กำลังตรวจสอบ..." : "ดึงสถานะล่าสุด"}
-            </button>
-          </form>
-        </section>
-      ) : null}
-
-      {/* 5) Secondary actions */}
+      {/* ── Actions ── */}
       <div className="flex flex-wrap gap-3">
         <Link to="/order" className="bw-btn-outline flex-1">
           สั่งเพิ่ม
         </Link>
       </div>
-
-      {/* Soft dev-mode note — intentionally low-key and at the bottom */}
-      <p className="text-center text-xs text-muted-foreground/80">
-        การแจ้งเตือนผ่าน LINE อยู่ระหว่างทดสอบ หากไม่ได้รับข้อความ สามารถติดตามสถานะได้จากหน้านี้หรือสอบถามร้านค้าโดยตรง
-      </p>
     </div>
   );
 }

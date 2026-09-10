@@ -148,9 +148,9 @@ export default function DashboardPage() {
           lastUpdated: new Date().toISOString(),
         });
         return true;
-      } catch (err: any) {
+      } catch (err) {
         if (!isMountedRef.current) return;
-        const message = err?.message || "โหลดข้อมูลไม่สำเร็จ";
+        const message = err instanceof Error ? err.message : "โหลดข้อมูลไม่สำเร็จ";
         if (options?.onError) {
           options.onError(message);
           setState((prev) => ({
@@ -210,9 +210,9 @@ export default function DashboardPage() {
       const res = await storeAdminApi.getInventoryAlerts();
       if (!isMountedRef.current) return;
       setInventoryAlerts({ data: res, loading: false, error: null });
-    } catch (err: any) {
+    } catch (err) {
       if (!isMountedRef.current) return;
-      setInventoryAlerts({ data: null, loading: false, error: err?.message || "โหลดการแจ้งเตือนสต็อกไม่สำเร็จ" });
+      setInventoryAlerts({ data: null, loading: false, error: err instanceof Error ? err.message : "โหลดการแจ้งเตือนสต็อกไม่สำเร็จ" });
     }
   }, []);
 
@@ -853,7 +853,7 @@ function buildTimezoneDisplay(summary: DashboardSummaryResponse): string {
   if (display) {
     return display;
   }
-  return `${base} (${offset})` || DEFAULT_TIMEZONE_DISPLAY;
+  return `${base} (${offset || DEFAULT_TIMEZONE_DISPLAY})`;
 }
 
 function statusLabel(value?: string | null): string {

@@ -13,7 +13,7 @@ export default function POSManualOrder() {
   const [qty, setQty] = useState(1);
   const [note, setNote] = useState("");
   const [items, setItems] = useState<OrderItemInput[]>([]);
-  const [quote, setQuote] = useState<any>(null);
+  const [quote, setQuote] = useState<{ totalAmount: number; totalCost: number; totalChannelFee: number; grossProfit: number } | null>(null);
   const [error, setError] = useState("");
 
   useEffect(() => { menuCatalogService.list().then((m)=>{setMenus(m); if(m[0]) setMenuId(m[0].id);}); }, []);
@@ -31,7 +31,7 @@ export default function POSManualOrder() {
       await orderService.createManualOrder(channelId, items, "accepted", "unpaid");
       setItems([]);
       setQuote(null);
-    } catch (e: any) { setError(e?.message ?? "ไม่สามารถบันทึกออเดอร์"); }
+    } catch (e) { setError(e instanceof Error ? e.message : "ไม่สามารถบันทึกออเดอร์"); }
   }
 
   return <AppLayout><div className="space-y-4 max-w-4xl"><h1 className="page-title">POS / รับออเดอร์หน้าร้าน</h1>
@@ -46,7 +46,7 @@ export default function POSManualOrder() {
       <div className="md:col-span-4 flex gap-2"><button className="px-4 py-2 rounded border" onClick={addItem}>เพิ่มรายการ</button><button className="px-4 py-2 rounded bg-primary text-primary-foreground disabled:opacity-50" onClick={submit} disabled={!items.length}>บันทึกออเดอร์</button></div>
       {error ? <p className="md:col-span-4 text-sm text-red-600">{error}</p> : null}
     </div>
-    <DataTable columns={[{key:"menuId",header:"เมนู"},{key:"quantity",header:"จำนวน"},{key:"note",header:"โน้ต"}]} rows={items as any} />
+    <DataTable columns={[{key:"menuId",header:"เมนู"},{key:"quantity",header:"จำนวน"},{key:"note",header:"โน้ต"}]} rows={items} />
     {quote ? <div className="grid md:grid-cols-4 gap-3"> <div className="kpi-card"><p className="metric-label">Total Amount</p><p className="metric-value">฿{quote.totalAmount.toFixed(2)}</p></div><div className="kpi-card"><p className="metric-label">Total Cost</p><p className="metric-value">฿{quote.totalCost.toFixed(2)}</p></div><div className="kpi-card"><p className="metric-label">Channel Fee</p><p className="metric-value">฿{quote.totalChannelFee.toFixed(2)}</p></div><div className="kpi-card"><p className="metric-label">Gross Profit</p><p className="metric-value">฿{quote.grossProfit.toFixed(2)}</p></div></div> : null}
   </div></AppLayout>;
 }

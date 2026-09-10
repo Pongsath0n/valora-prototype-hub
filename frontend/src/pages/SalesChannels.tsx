@@ -27,7 +27,7 @@ export default function SalesChannels() {
       setShowForm(false);
       setForm(emptyForm);
       refresh();
-    } catch (err: any) { setError(err?.message || "บันทึกไม่สำเร็จ"); }
+    } catch (err) { setError(err instanceof Error ? err.message : "บันทึกไม่สำเร็จ"); }
   };
 
   return (

@@ -55,8 +55,8 @@ export default function SystemOverviewPage() {
       const report = resetDemoData();
       setResult(report);
       setConfirmationText("");
-    } catch (err: any) {
-      setError(err?.message || "ไม่สามารถรีเซ็ตข้อมูลได้");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "ไม่สามารถรีเซ็ตข้อมูลได้");
     } finally {
       setIsResetting(false);
     }

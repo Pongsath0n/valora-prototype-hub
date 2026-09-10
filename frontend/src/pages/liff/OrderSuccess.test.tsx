@@ -1,18 +1,16 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { MemoryRouter } from "react-router-dom";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import OrderSuccessPage from "./OrderSuccess";
 
 const mockGetOrder = vi.fn();
-const mockGetInstructions = vi.fn();
-const mockUploadSlip = vi.fn();
-const mockGetOrderStatus = vi.fn();
 vi.mock("@/services/customerApi", () => ({
   customerApi: {
     getOrder: (...args: unknown[]) => mockGetOrder(...args),
-    getPaymentInstructions: () => mockGetInstructions(),
-    uploadPaymentSlip: (...args: unknown[]) => mockUploadSlip(...args),
-    getOrderStatusByToken: (...args: unknown[]) => mockGetOrderStatus(...args),
+    // Legacy methods kept in source but MUST NOT be called by canonical V1 success page.
+    getPaymentInstructions: vi.fn(),
+    uploadPaymentSlip: vi.fn(),
+    getOrderStatusByToken: vi.fn(),
   },
 }));
 
@@ -31,127 +29,131 @@ const order = {
   order_id: "order-1",
   order_number: "ORD-1234",
   status: "pending_payment",
-  payment_status: "pending",
-  pickup_time: null,
+  payment_status: "unpaid",
   total_amount: 150,
+  customer_name: "สมชาย",
   items: [
     { product_id: "p1", product_name: "Latte", quantity: 2, unit_price: 75, line_total: 150 },
   ],
 };
 
-const instructions = {
-  enabled: true,
-  method_label: "โอนผ่านบัญชีธนาคาร",
-  bank_name: "ธนาคารทดสอบ",
-  account_name: "ร้านทดสอบ",
-  account_number: "000-000-0000",
-  promptpay_id: null,
-  note_lines: [],
-  allowed_file_types: [],
-  max_file_mb: 5,
-};
-
 beforeEach(() => {
   mockGetOrder.mockReset();
-  mockGetInstructions.mockReset();
-  mockUploadSlip.mockReset();
-  mockGetOrderStatus.mockReset();
   mockStoredToken = "tok-abc";
-  mockGetOrderStatus.mockResolvedValue({ payment: { slip_submitted: false } });
 });
 
-describe("OrderSuccessPage", () => {
-  it("shows payment instructions and slip upload form for a new order that has not uploaded a slip", async () => {
+describe("OrderSuccessPage (canonical V1)", () => {
+  it("shows the canonical waiting experience with order number and customer name", async () => {
     mockGetOrder.mockResolvedValue(order);
-    mockGetInstructions.mockResolvedValue(instructions);
-    mockGetOrderStatus.mockResolvedValue({ payment: { slip_submitted: false } });
-
     render(
       <MemoryRouter>
         <OrderSuccessPage />
       </MemoryRouter>,
     );
 
-    expect(await screen.findByText("สั่งซื้อสำเร็จ")).toBeInTheDocument();
+    expect(await screen.findByText("รับออเดอร์เรียบร้อยแล้ว")).toBeInTheDocument();
     expect(screen.getByText("ORD-1234")).toBeInTheDocument();
-    expect(screen.getByText("ยอดที่ต้องชำระ")).toBeInTheDocument();
-    expect(screen.getByText("ขั้นตอนถัดไป")).toBeInTheDocument();
-    expect(screen.getByText("1. โอนเงินตามยอดที่แสดง")).toBeInTheDocument();
-    expect(screen.getByText("2. อัปโหลดสลิปการโอน (ในหน้านี้ได้เลย)")).toBeInTheDocument();
-    expect(screen.getByText("3. รอร้านตรวจสอบและยืนยันออเดอร์")).toBeInTheDocument();
-    expect(screen.getByText("ธนาคารทดสอบ")).toBeInTheDocument();
-    expect(screen.queryByText(/pending_payment|waiting_payment_review/)).toBeNull();
-    expect(screen.getAllByText("รอชำระเงิน").length).toBeGreaterThan(0);
-    expect(screen.queryByText("ส่งสลิปแล้ว รอร้านตรวจสอบ")).toBeNull();
-
-    // Slip upload is merged INLINE here (Part A) — no forced navigation away.
-    expect(screen.getByLabelText("เลือกไฟล์สลิปการโอน")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "ส่งหลักฐานการโอน" })).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "อัปโหลดสลิปการโอน" })).toBeNull();
-
-    expect(screen.getByRole("link", { name: "ดูสถานะของออเดอร์" })).toHaveAttribute(
-      "href",
-      "/order/status?token=tok-abc",
-    );
-    expect(screen.getByRole("link", { name: "สั่งเพิ่ม" })).toBeInTheDocument();
+    expect(screen.getByText("สมชาย")).toBeInTheDocument();
   });
 
-  it("uploads the slip inline and shows the waiting-review state while hiding the upload form", async () => {
+  it("instructs the customer to wait for staff to call their name", async () => {
     mockGetOrder.mockResolvedValue(order);
-    mockGetInstructions.mockResolvedValue(instructions);
-    mockGetOrderStatus.mockResolvedValue({ payment: { slip_submitted: false } });
-    mockUploadSlip.mockResolvedValue({
-      payment_status: "pending_review",
-      payment: { slip_submitted: true },
-    });
-
     render(
       <MemoryRouter>
         <OrderSuccessPage />
       </MemoryRouter>,
     );
 
-    const input = (await screen.findByLabelText("เลือกไฟล์สลิปการโอน")) as HTMLInputElement;
-    const file = new File(["slip-bytes"], "slip.png", { type: "image/png" });
-    fireEvent.change(input, { target: { files: [file] } });
-    fireEvent.click(screen.getByRole("button", { name: "ส่งหลักฐานการโอน" }));
+    expect(await screen.findAllByText("กรุณารอพนักงานเรียกชื่อของคุณ")).toHaveLength(2);
+  });
 
-    expect(await screen.findByText("ส่งสลิปแล้ว รอร้านตรวจสอบ")).toBeInTheDocument();
-    expect(mockUploadSlip).toHaveBeenCalledWith("tok-abc", file);
+  it("instructs the customer to pay at the counter", async () => {
+    mockGetOrder.mockResolvedValue(order);
+    render(
+      <MemoryRouter>
+        <OrderSuccessPage />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText(/ชำระเงินที่เคาน์เตอร์/)).toBeInTheDocument();
+  });
+
+  it("does NOT render slip upload controls", async () => {
+    mockGetOrder.mockResolvedValue(order);
+    render(
+      <MemoryRouter>
+        <OrderSuccessPage />
+      </MemoryRouter>,
+    );
+
+    await screen.findByText("รับออเดอร์เรียบร้อยแล้ว");
+    expect(screen.queryByLabelText("เลือกไฟล์สลิปการโอน")).toBeNull();
     expect(screen.queryByRole("button", { name: "ส่งหลักฐานการโอน" })).toBeNull();
-    expect(screen.getByRole("link", { name: "ดูสถานะของออเดอร์" })).toBeInTheDocument();
   });
 
-  it("shows honest fallback when payment config is missing", async () => {
+  it("does NOT render bank-transfer instructions", async () => {
     mockGetOrder.mockResolvedValue(order);
-    mockGetInstructions.mockResolvedValue({ ...instructions, enabled: false });
-    mockGetOrderStatus.mockResolvedValue({ payment: { slip_submitted: false } });
-
     render(
       <MemoryRouter>
         <OrderSuccessPage />
       </MemoryRouter>,
     );
 
-    expect(
-      await screen.findByText("ร้านยังไม่ได้ตั้งค่าข้อมูลบัญชีรับชำระเงิน กรุณาติดต่อร้านโดยตรงเพื่อชำระเงิน"),
-    ).toBeInTheDocument();
+    await screen.findByText("รับออเดอร์เรียบร้อยแล้ว");
+    expect(screen.queryByText("ช่องทางการชำระเงิน")).toBeNull();
     expect(screen.queryByText("ธนาคารทดสอบ")).toBeNull();
+    expect(screen.queryByText("เลขบัญชี")).toBeNull();
   });
 
-  it("hides the status shortcut when no order token is available", async () => {
+  it("does NOT call getPaymentInstructions", async () => {
+    mockGetOrder.mockResolvedValue(order);
+    render(
+      <MemoryRouter>
+        <OrderSuccessPage />
+      </MemoryRouter>,
+    );
+
+    await screen.findByText("รับออเดอร์เรียบร้อยแล้ว");
+    // The mock for getPaymentInstructions is a vi.fn() — verify it was never called.
+    const { customerApi } = await import("@/services/customerApi");
+    expect(customerApi.getPaymentInstructions).not.toHaveBeenCalled();
+  });
+
+  it("does NOT call uploadPaymentSlip", async () => {
+    mockGetOrder.mockResolvedValue(order);
+    render(
+      <MemoryRouter>
+        <OrderSuccessPage />
+      </MemoryRouter>,
+    );
+
+    await screen.findByText("รับออเดอร์เรียบร้อยแล้ว");
+    const { customerApi } = await import("@/services/customerApi");
+    expect(customerApi.uploadPaymentSlip).not.toHaveBeenCalled();
+  });
+
+  it("preserves public_token in the status link", async () => {
+    mockGetOrder.mockResolvedValue(order);
+    render(
+      <MemoryRouter>
+        <OrderSuccessPage />
+      </MemoryRouter>,
+    );
+
+    const statusLink = await screen.findByRole("link", { name: "ดูสถานะออเดอร์" });
+    expect(statusLink).toHaveAttribute("href", "/order/status?token=tok-abc");
+  });
+
+  it("falls back to /order/status when no token is available", async () => {
     mockStoredToken = null;
     mockGetOrder.mockResolvedValue(order);
-    mockGetInstructions.mockResolvedValue(instructions);
-    mockGetOrderStatus.mockResolvedValue({ payment: { slip_submitted: false } });
-
     render(
       <MemoryRouter>
         <OrderSuccessPage />
       </MemoryRouter>,
     );
 
-    expect(await screen.findByText("สั่งซื้อสำเร็จ")).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "ดูสถานะของออเดอร์" })).toBeNull();
+    const statusLink = await screen.findByRole("link", { name: "ดูสถานะออเดอร์" });
+    expect(statusLink).toHaveAttribute("href", "/order/status");
   });
 });

@@ -1,7 +1,7 @@
-import { ShieldCheck, AlertTriangle, Loader2 } from "lucide-react";
+import { ShieldCheck, AlertTriangle, Loader2, WifiOff } from "lucide-react";
 
 type DataQualityLevel = "estimated" | "confirmed";
-type DataQualityStatus = "live" | "fallback" | "loading";
+type DataQualityStatus = "live" | "fallback" | "loading" | "error";
 
 interface DataQualityBadgeProps {
   level: DataQualityLevel;
@@ -37,6 +37,12 @@ const STATUS_META: Record<DataQualityStatus, StatusMeta> = {
     icon: Loader2,
     iconClassName: "animate-spin",
     detail: () => "กำลังซิงค์ข้อมูลสดจากระบบ",
+  },
+  error: {
+    label: "โหลดข้อมูลไม่สำเร็จ",
+    badge: "bg-destructive/10 text-destructive",
+    icon: WifiOff,
+    detail: () => "ไม่สามารถเชื่อมต่อระบบได้ กรุณาลองใหม่",
   },
 };
 

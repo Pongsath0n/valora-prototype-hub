@@ -223,7 +223,7 @@ export default function ReportsPage() {
     try {
       const { blob, filename } = await storeAdminApi.exportSalesReportCsv(filters);
       saveBlobAsFile(blob, filename ?? "sales-report.csv");
-    } catch (err: any) {
+    } catch (err) {
       console.error(err);
     } finally {
       setExporting(false);

@@ -7,7 +7,7 @@ const mockedGetDashboardSummary = vi.fn();
 
 vi.mock("@/services/storeAdminApi", () => ({
   storeAdminApi: {
-    getDashboardSummary: (...args: any[]) => mockedGetDashboardSummary(...args),
+    getDashboardSummary: (...args: unknown[]) => mockedGetDashboardSummary(...args),
   },
 }));
 
@@ -91,7 +91,7 @@ function createDashboardSummary() {
       pending_sales_order_count: 4,
       excluded_cancelled_order_count: 1,
     },
-  } as any;
+  } as Record<string, unknown>;
 }
 
 function renderDashboard() {

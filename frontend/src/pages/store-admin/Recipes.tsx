@@ -105,8 +105,8 @@ export default function StoreAdminRecipesPage() {
       setRecipes(res.items ?? []);
       setProducts(res.products ?? []);
       setIngredients(res.ingredients ?? []);
-    } catch (err: any) {
-      setError(err?.message || "โหลดสูตรไม่สำเร็จ");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "โหลดสูตรไม่สำเร็จ");
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -241,8 +241,8 @@ export default function StoreAdminRecipesPage() {
       }
       resetForm(selectedProductId ?? form.productId);
       void refresh();
-    } catch (err: any) {
-      const reason = err?.message || "บันทึกไม่สำเร็จ";
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : "บันทึกไม่สำเร็จ";
       if (reason === "recipe_exists") setError("มีสูตรนี้แล้ว");
       else if (reason === "unauthorized" || reason === "missing_token") setError("ต้องเข้าสู่ระบบก่อนใช้งาน");
       else setError(reason);
@@ -254,8 +254,8 @@ export default function StoreAdminRecipesPage() {
     try {
       const res = await storeAdminApi.deleteRecipe(id);
       setInfo(res.status === "deleted" ? "ลบสูตรแล้ว" : res.status);
-    } catch (err: any) {
-      setError(err?.message || "ลบไม่สำเร็จ");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "ลบไม่สำเร็จ");
     }
     resetForm(selectedProductId ?? undefined);
     void refresh();

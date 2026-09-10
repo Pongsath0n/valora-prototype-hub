@@ -127,8 +127,8 @@ export default function AdminProductsPage() {
       const res = await storeAdminApi.listMenus();
       setRows(res.items ?? []);
       setCategories(res.categories ?? []);
-    } catch (err: any) {
-      setError(err?.message || "โหลดเมนูไม่สำเร็จ");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "โหลดเมนูไม่สำเร็จ");
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -161,8 +161,8 @@ export default function AdminProductsPage() {
       const updated = await storeAdminApi.uploadProductImage(productId, selectedFile);
       setForm((prev) => ({ ...prev, imageUrl: updated.image_url || "" }));
       setInfo("อัปโหลดรูปสำเร็จ");
-    } catch (err: any) {
-      setError(err?.message || "อัปโหลดรูปไม่สำเร็จ");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "อัปโหลดรูปไม่สำเร็จ");
       throw err;
     } finally {
       setUploading(false);
@@ -205,8 +205,8 @@ export default function AdminProductsPage() {
       setForm(emptyForm);
       resetFileState();
       void refresh();
-    } catch (err: any) {
-      const reason = err?.message || "บันทึกไม่สำเร็จ";
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : "บันทึกไม่สำเร็จ";
       if (reason === "product_name_exists") setError("มีชื่อเมนูนี้แล้ว");
       else if (reason === "unauthorized" || reason === "missing_token") setError("ต้องเข้าสู่ระบบก่อนใช้งาน");
       else setError(reason);
@@ -221,8 +221,8 @@ export default function AdminProductsPage() {
       const res = await storeAdminApi.deleteMenu(id);
       if (res.status === "deactivated") setInfo("ปิดการใช้งานเมนูที่มีประวัติแล้ว");
       else setInfo("ลบเมนูแล้ว");
-    } catch (err: any) {
-      const msg = err?.message || "ลบไม่สำเร็จ";
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "ลบไม่สำเร็จ";
       if (msg === "product_has_history") setInfo("ไม่สามารถลบได้ มีประวัติการใช้งาน");
       else setError(msg);
     }
@@ -234,8 +234,8 @@ export default function AdminProductsPage() {
     try {
       await storeAdminApi.updateMenu(id, { is_active: nextActive });
       setInfo(nextActive ? "เปิดใช้งานเมนูแล้ว" : "ปิดใช้งานเมนูแล้ว");
-    } catch (err: any) {
-      setError(err?.message || "อัปเดตสถานะเมนูไม่สำเร็จ");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "อัปเดตสถานะเมนูไม่สำเร็จ");
     }
     void refresh();
   }
@@ -269,11 +269,11 @@ export default function AdminProductsPage() {
       setAddonError("");
       setRecipeForm(null);
       setRecipeError("");
-    } catch (err: any) {
+    } catch (err) {
       setSweetness((prev) => ({
         ...prev,
         loading: false,
-        error: err?.message || "โหลดตัวเลือกไม่สำเร็จ",
+        error: err instanceof Error ? err.message : "โหลดตัวเลือกไม่สำเร็จ",
       }));
     } finally {
       setOptionsLoading(false);
@@ -287,8 +287,8 @@ export default function AdminProductsPage() {
     try {
       const res = await storeAdminApi.listIngredients();
       setIngredients(res.items ?? []);
-    } catch (err: any) {
-      setIngredientsError(err?.message || "โหลดวัตถุดิบไม่สำเร็จ");
+    } catch (err) {
+      setIngredientsError(err instanceof Error ? err.message : "โหลดวัตถุดิบไม่สำเร็จ");
     } finally {
       setIngredientsLoading(false);
     }
@@ -323,8 +323,8 @@ export default function AdminProductsPage() {
       await storeAdminApi.updateProductOptions(form.id, payload);
       setSweetness((prev) => ({ ...prev, saving: false, dirty: false }));
       setInfo("บันทึกตั้งค่าความหวานแล้ว");
-    } catch (err: any) {
-      setSweetness((prev) => ({ ...prev, saving: false, error: err?.message || "บันทึกไม่สำเร็จ" }));
+    } catch (err) {
+      setSweetness((prev) => ({ ...prev, saving: false, error: err instanceof Error ? err.message : "บันทึกไม่สำเร็จ" }));
     }
   };
 
@@ -389,8 +389,8 @@ export default function AdminProductsPage() {
       }
       cancelAddonForm();
       await loadProductOptions(form.id);
-    } catch (err: any) {
-      setAddonError(err?.message || "บันทึกตัวเลือกเสริมไม่สำเร็จ");
+    } catch (err) {
+      setAddonError(err instanceof Error ? err.message : "บันทึกตัวเลือกเสริมไม่สำเร็จ");
     } finally {
       setAddonSaving(false);
     }
@@ -406,8 +406,8 @@ export default function AdminProductsPage() {
         cancelAddonForm();
       }
       await loadProductOptions(form.id);
-    } catch (err: any) {
-      setAddonError(err?.message || "ปิดการใช้งานไม่สำเร็จ");
+    } catch (err) {
+      setAddonError(err instanceof Error ? err.message : "ปิดการใช้งานไม่สำเร็จ");
     }
   };
 
@@ -457,8 +457,8 @@ export default function AdminProductsPage() {
       }
       cancelRecipeForm();
       await loadProductOptions(form.id);
-    } catch (err: any) {
-      setRecipeError(err?.message || "บันทึกสูตรไม่สำเร็จ");
+    } catch (err) {
+      setRecipeError(err instanceof Error ? err.message : "บันทึกสูตรไม่สำเร็จ");
     } finally {
       setRecipeSaving(false);
     }
@@ -474,8 +474,8 @@ export default function AdminProductsPage() {
         cancelRecipeForm();
       }
       await loadProductOptions(form.id);
-    } catch (err: any) {
-      setRecipeError(err?.message || "ลบสูตรไม่สำเร็จ");
+    } catch (err) {
+      setRecipeError(err instanceof Error ? err.message : "ลบสูตรไม่สำเร็จ");
     }
   };
 

@@ -1,3 +1,4 @@
+export { default as KioskIncomingAlert } from "./KioskIncomingAlert";
 export { default as KioskStepIndicator } from "./KioskStepIndicator";
 export { default as MenuBrowser } from "./MenuBrowser";
 export { default as ProductCard } from "./ProductCard";

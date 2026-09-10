@@ -311,8 +311,8 @@ export const orderService = {
 export const customerOrderService = {
   async createPickupOrder(channelId: string, inputs: OrderItemInput[], customer: CustomerPickupPayload) {
     const order = await orderService.createManualOrder(channelId, inputs, "pending_payment", "unpaid");
-    const enriched = { ...order, orderType: "pickup", lineUserId: customer.lineUserId, lineDisplayName: customer.lineDisplayName, phone: customer.phone ?? null, pickupTime: customer.pickupTime, orderNote: customer.orderNote ?? null };
-    const all = orderService.list().map((o)=>o.id===order.id ? enriched as any : o as any);
+    const enriched: Order & { orderType: string; lineUserId: string; lineDisplayName: string; phone: string | null; pickupTime: string; orderNote: string | null } = { ...order, orderType: "pickup", lineUserId: customer.lineUserId, lineDisplayName: customer.lineDisplayName, phone: customer.phone ?? null, pickupTime: customer.pickupTime, orderNote: customer.orderNote ?? null };
+    const all = orderService.list().map((o) => (o.id === order.id ? enriched : o));
     localStorage.setItem("valora:orders:v1", JSON.stringify(all));
     return enriched;
   },

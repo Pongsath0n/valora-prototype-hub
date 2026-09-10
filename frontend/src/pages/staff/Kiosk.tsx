@@ -4,12 +4,13 @@ import AdminLayout from "@/components/admin/AdminLayout";
 import {
   CartPanel,
   ItemOptionsDialog,
+  KioskIncomingAlert,
   KioskStepIndicator,
   MenuBrowser,
   PaymentPanel,
   SuccessPanel,
 } from "@/components/staff/kiosk";
-import { STEPS, useKioskOrder, formatCurrency } from "@/features/staff/kiosk";
+import { STEPS, useKioskOrder, useKioskIncomingAlert, formatCurrency } from "@/features/staff/kiosk";
 
 /**
  * Staff Kiosk — walk-in order creation.
@@ -20,6 +21,7 @@ import { STEPS, useKioskOrder, formatCurrency } from "@/features/staff/kiosk";
  */
 export default function StaffKioskPage() {
   const kiosk = useKioskOrder();
+  const incomingAlert = useKioskIncomingAlert();
   const cartRef = useRef<HTMLDivElement>(null);
 
   function scrollCartIntoView() {
@@ -32,6 +34,12 @@ export default function StaffKioskPage() {
         <div className="rounded-2xl border bg-card p-4 shadow-sm">
           <KioskStepIndicator steps={STEPS} activeStep={kiosk.activeStep} />
         </div>
+
+        {/* PF-03: Kiosk-side operational VIEW of the canonical Incoming Queue.
+            Persistent indicator + aggregated new-order notice + counter
+            payment reuse. Does NOT duplicate the Incoming Queue engine or
+            copy Self-orders into the Kiosk cart. */}
+        <KioskIncomingAlert alert={incomingAlert} />
 
         {kiosk.activeStep === "menu" ? (
           <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">

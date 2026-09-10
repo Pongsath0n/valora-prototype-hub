@@ -16,11 +16,10 @@ function formatBaht(value: number): string {
 }
 
 export default function MenuDetailPage() {
-  const { id } = useParams();
+  const { productId } = useParams<{ productId: string }>();
   const nav = useNavigate();
   const [menu, setMenu] = useState<CustomerMenuItem | null>(null);
   const [qty, setQty] = useState(1);
-  const [note, setNote] = useState("");
   const [sweetness, setSweetness] = useState<number | undefined>(undefined);
   const [extraShotQty, setExtraShotQty] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -28,27 +27,32 @@ export default function MenuDetailPage() {
   const [feedback, setFeedback] = useState<string | null>(null);
 
   function loadDetail() {
-    if (!id) return;
+    if (!productId) {
+      setLoading(false);
+      setMenu(null);
+      return;
+    }
     setLoading(true);
     setError(null);
     customerApi
-      .getMenuDetail(id)
+      .getMenuDetail(productId)
       .then((m) => setMenu(m))
-      .catch((e: any) => {
-        setError(e?.message || "ไม่สามารถโหลดรายละเอียดเมนูได้");
+      .catch((e: unknown) => {
+        setError(e instanceof Error ? e.message : "ไม่สามารถโหลดรายละเอียดเมนูได้ กรุณาลองใหม่อีกครั้ง");
         setMenu(null);
       })
       .finally(() => setLoading(false));
   }
 
   useEffect(() => {
-    if (!id) {
+    if (!productId) {
       setMenu(null);
+      setLoading(false);
       return;
     }
     loadDetail();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id]);
+  }, [productId]);
 
   useEffect(() => {
     if (!menu) {
@@ -99,7 +103,6 @@ export default function MenuDetailPage() {
     if (!menu) return;
     const safeQty = Math.max(1, Number(qty) || 1);
     const sweetnessValue = menu.allow_sweetness ? sweetness : undefined;
-    const trimmedNote = note.trim();
     const addonSelections = extraShotAddon && extraShotQty > 0
       ? [
           {
@@ -119,9 +122,6 @@ export default function MenuDetailPage() {
       if (addonSelections) {
         payload.addons = addonSelections;
       }
-      if (trimmedNote) {
-        payload.note = trimmedNote;
-      }
       return Object.keys(payload).length > 0 ? payload : undefined;
     })();
     addCartItem({
@@ -129,7 +129,6 @@ export default function MenuDetailPage() {
       name: menu.name,
       price: menu.price,
       quantity: safeQty,
-      note: trimmedNote || undefined,
       ...(options ? { options } : {}),
     });
     setFeedback("เพิ่มสินค้าในตะกร้าแล้ว");
@@ -148,11 +147,20 @@ export default function MenuDetailPage() {
   if (error) {
     return (
       <div className="mx-auto max-w-md space-y-4 px-4 py-6">
-        <div className="bw-card border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
-          <p>{error}</p>
-          <button type="button" className="bw-cta mt-3" onClick={loadDetail}>
-            ลองใหม่อีกครั้ง
-          </button>
+        <div className="bw-card border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive" role="alert">
+          <p>ไม่สามารถโหลดรายละเอียดเมนูได้ กรุณาลองใหม่อีกครั้ง</p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button type="button" className="bw-cta" onClick={loadDetail}>
+              ลองใหม่
+            </button>
+            <button
+              type="button"
+              className="bw-cta bw-cta-secondary"
+              onClick={() => nav("/order")}
+            >
+              กลับไปหน้าเมนู
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -161,7 +169,7 @@ export default function MenuDetailPage() {
     return (
       <div className="mx-auto max-w-md space-y-4 px-4 py-6">
         <div className="bw-card p-6 text-center">
-          <p className="text-base font-semibold">ไม่พบข้อมูลเมนู</p>
+          <p className="text-base font-semibold">ไม่พบเมนูนี้ หรือเมนูอาจไม่พร้อมจำหน่าย</p>
           <button type="button" className="bw-cta mt-4" onClick={() => nav("/order")}>
             กลับไปหน้าเมนู
           </button>
@@ -289,20 +297,6 @@ export default function MenuDetailPage() {
             </div>
           </div>
         ) : null}
-
-        <div className="bw-card space-y-2 p-4">
-          <label className="text-sm font-semibold" htmlFor="item-note">
-            หมายเหตุ (ถ้ามี)
-          </label>
-          <textarea
-            id="item-note"
-            className="bw-input"
-            rows={3}
-            placeholder="เช่น ไม่หวานมาก เพิ่มน้ำแข็ง"
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-          />
-        </div>
 
         {feedback ? <p className="text-sm font-medium text-success">{feedback}</p> : null}
       </div>

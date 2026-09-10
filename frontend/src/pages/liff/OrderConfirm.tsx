@@ -1,14 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 
-import {
-  getCustomerIdentity,
-  getManualIdentityFromForm,
-  shouldSubmitLineUserId,
-  type CustomerIdentity,
-} from "@/features/store/customerIdentity";
 import { customerApi, type CustomerOrderItemOptions } from "@/services/customerApi";
-import { useLineLinkToken } from "@/components/customer/CustomerThemeLayout";
 import OrderFlowNav from "@/components/customer/OrderFlowNav";
 import {
   type CartItem,
@@ -20,22 +13,7 @@ import {
   reconcileCartWithProductIds,
   setLastOrderMetadata,
 } from "@/services/cartStorage";
-
-function toLocalDateInputValue(date: Date): string {
-  const year = date.getFullYear();
-  const month = `${date.getMonth() + 1}`.padStart(2, "0");
-  const day = `${date.getDate()}`.padStart(2, "0");
-  const hours = `${date.getHours()}`.padStart(2, "0");
-  const minutes = `${date.getMinutes()}`.padStart(2, "0");
-  return `${year}-${month}-${day}T${hours}:${minutes}`;
-}
-
-function defaultPickupTime(): string {
-  const next = new Date();
-  next.setMinutes(next.getMinutes() + 30);
-  next.setSeconds(0, 0);
-  return toLocalDateInputValue(next);
-}
+import { mapCustomerOrderError } from "@/lib/customerErrors";
 
 function formatCurrency(value: number): string {
   return new Intl.NumberFormat("th-TH", {
@@ -76,29 +54,13 @@ function buildItemOptionsPayload(item: CartItem): CustomerOrderItemOptions | und
 
 export default function OrderConfirmPage() {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
-  const { lineLinkToken, clearLineLinkToken } = useLineLinkToken();
-  const [identity, setIdentity] = useState<CustomerIdentity | null>(null);
-  const [identityError, setIdentityError] = useState<string | null>(null);
-  const [phone, setPhone] = useState("");
-  const [pickupTime, setPickupTime] = useState(defaultPickupTime);
+  const [customerName, setCustomerName] = useState("");
   const [orderNote, setOrderNote] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [cartItems, setCartItems] = useState<CartItem[]>(() => readCart());
   const [cartNotice, setCartNotice] = useState<string | null>(null);
   const [pdpaAccepted, setPdpaAccepted] = useState(false);
-  const queryLineLinkToken = useMemo(() => {
-    const token = searchParams.get("line_link_token");
-    return token?.trim() || null;
-  }, [searchParams]);
-  const effectiveLineLinkToken = lineLinkToken || queryLineLinkToken;
-
-  useEffect(() => {
-    getCustomerIdentity()
-      .then(setIdentity)
-      .catch(() => setIdentityError("ไม่สามารถโหลดข้อมูลโปรไฟล์ได้"));
-  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -130,8 +92,9 @@ export default function OrderConfirmPage() {
   }, []);
 
   const summary = useMemo(() => buildCartSummary(cartItems), [cartItems]);
+  const trimmedName = customerName.trim();
   const disableSubmit =
-    submitting || !phone.trim() || !pickupTime || cartItems.length === 0 || !pdpaAccepted;
+    submitting || !trimmedName || cartItems.length === 0 || !pdpaAccepted;
 
   async function confirm() {
     if (cartItems.length === 0) {
@@ -139,29 +102,19 @@ export default function OrderConfirmPage() {
       return;
     }
 
+    if (!trimmedName) {
+      setFormError("กรุณาระบุชื่อสำหรับการสั่งซื้อ");
+      return;
+    }
+
+    if (!pdpaAccepted) {
+      setFormError("โปรดยืนยันการใช้ข้อมูลตามนโยบายความเป็นส่วนตัวก่อนส่งคำสั่งซื้อ");
+      return;
+    }
+
     try {
       setSubmitting(true);
       setFormError(null);
-
-      if (!pdpaAccepted) {
-        throw new Error("โปรดยืนยันการใช้ข้อมูลตามนโยบายความเป็นส่วนตัวก่อนส่งคำสั่งซื้อ");
-      }
-
-      if (!phone.trim()) {
-        throw new Error("กรุณากรอกเบอร์โทรศัพท์สำหรับติดต่อ");
-      }
-
-      if (!pickupTime) {
-        throw new Error("กรุณาเลือกเวลารับสินค้า");
-      }
-
-      const pickupDate = new Date(pickupTime);
-      if (Number.isNaN(pickupDate.getTime())) {
-        throw new Error("รูปแบบเวลารับสินค้าไม่ถูกต้อง");
-      }
-      if (pickupDate.getTime() < Date.now()) {
-        throw new Error("กรุณาเลือกเวลารับสินค้าในอนาคต");
-      }
 
       const items = cartItems.map((item) => {
         const payload: {
@@ -179,43 +132,30 @@ export default function OrderConfirmPage() {
         return payload;
       });
 
-      const resolvedIdentity = identity ?? (await getCustomerIdentity());
-      const manualIdentity = getManualIdentityFromForm({
-        name: resolvedIdentity?.displayName || "ลูกค้า LIFF",
-        phone: phone.trim(),
-      });
-      const lineUserId = shouldSubmitLineUserId(resolvedIdentity)
-        ? resolvedIdentity?.lineUserId
-        : undefined;
-
+      // Canonical V1 payload: customer.name required.
+      // No phone, pickup_time, line_user_id, line_link_token, or
+      // price/cost/total/_system/usage_breakdown/ingredient data sent.
       const orderPayload: Parameters<typeof customerApi.createOrder>[0] = {
         customer: {
-          name: manualIdentity.displayName || resolvedIdentity?.displayName || "ลูกค้า LIFF",
-          phone: manualIdentity.phone || phone.trim(),
-          ...(lineUserId ? { line_user_id: lineUserId } : {}),
+          name: trimmedName,
         },
         items,
-        pickup_time: pickupDate.toISOString(),
         note: orderNote.trim() || undefined,
       };
-      if (effectiveLineLinkToken) {
-        orderPayload.line_link_token = effectiveLineLinkToken;
-      }
 
       const order = await customerApi.createOrder(orderPayload);
 
+      // Clear cart ONLY after confirmed successful createOrder response.
       clearCart();
-      if (effectiveLineLinkToken) {
-        clearLineLinkToken();
-      }
       setLastOrderMetadata({
         orderId: order.order_id,
         orderNo: order.order_no ?? order.order_number ?? null,
         publicToken: order.public_token ?? null,
       });
       navigate("/order/success");
-    } catch (error: any) {
-      setFormError(error?.message || "ไม่สามารถส่งคำสั่งซื้อได้");
+    } catch (error) {
+      // Remain on confirmation page; keep cart, name, and note for retry.
+      setFormError(mapCustomerOrderError(error));
     } finally {
       setSubmitting(false);
     }
@@ -258,13 +198,12 @@ export default function OrderConfirmPage() {
         <div className="flex items-center justify-between">
           <div>
             <p className="text-xs text-muted-foreground">ลูกค้า</p>
-            <p className="text-base font-bold">{identity?.displayName || "ลูกค้า LIFF"}</p>
+            <p className="text-base font-bold">{customerName.trim() || "ลูกค้า"}</p>
           </div>
           <Link to="/order/cart" className="text-sm font-semibold text-primary">
             แก้ไขตะกร้า
           </Link>
         </div>
-        {identityError ? <p className="mt-2 text-xs text-destructive">{identityError}</p> : null}
         <div className="mt-4 space-y-3 border-t pt-3">
           {cartItems.map((item, index) => (
             <div key={getCartItemKey(item, index)} className="flex items-start justify-between gap-3">
@@ -297,33 +236,19 @@ export default function OrderConfirmPage() {
       </section>
 
       <section className="bw-card space-y-4 p-4">
+        {/* Canonical V1: customer name is the only required customer field. */}
         <div className="space-y-1.5">
-          <label className="text-sm font-semibold" htmlFor="phone">
-            เบอร์โทรศัพท์ติดต่อ
+          <label className="text-sm font-semibold" htmlFor="customer-name">
+            ชื่อสำหรับการสั่งซื้อ <span className="text-destructive">*</span>
           </label>
           <input
-            id="phone"
-            type="tel"
-            inputMode="tel"
+            id="customer-name"
+            type="text"
             className="bw-input"
-            placeholder="08xxxxxxxx"
-            value={phone}
-            onChange={(event) => setPhone(event.target.value)}
+            placeholder="ชื่อที่พนักงานจะเรียก"
+            value={customerName}
+            onChange={(event) => setCustomerName(event.target.value)}
           />
-        </div>
-
-        <div className="space-y-1.5">
-          <label className="text-sm font-semibold" htmlFor="pickup-time">
-            เวลารับสินค้าโดยประมาณ
-          </label>
-          <input
-            id="pickup-time"
-            type="datetime-local"
-            className="bw-input"
-            value={pickupTime}
-            onChange={(event) => setPickupTime(event.target.value)}
-          />
-          <p className="text-xs text-muted-foreground">แนะนำให้เลือกเวลาอย่างน้อย 30 นาทีจากตอนนี้</p>
         </div>
 
         <div className="space-y-1.5">
@@ -343,7 +268,7 @@ export default function OrderConfirmPage() {
 
       <section className="space-y-3 rounded-2xl border border-primary/25 bg-primary/5 p-4 text-sm text-muted-foreground">
         <p>
-          ร้านจะใช้ข้อมูลที่ระบุ รวมถึงชื่อ เบอร์โทร รายการสั่งซื้อ เวลารับสินค้า และหลักฐานการชำระเงิน เพื่อรับออเดอร์ ตรวจสอบการชำระเงิน แจ้งสถานะ นัดหมายเวลารับ และให้บริการหลังการขายเท่านั้น
+          ร้านจะใช้ข้อมูลที่ระบุ ได้แก่ ชื่อ และรายการสั่งซื้อ เพื่อรับออเดอร์ แจ้งสถานะ และให้บริการหลังการขายเท่านั้น
         </p>
         <label className="flex items-start gap-3 text-sm font-medium text-foreground">
           <input
@@ -353,7 +278,7 @@ export default function OrderConfirmPage() {
             onChange={(event) => setPdpaAccepted(event.target.checked)}
           />
           <span>
-            ข้าพเจ้ารับทราบว่าร้านจะใช้ข้อมูลชื่อ เบอร์โทร รายการสั่งซื้อ เวลารับสินค้า และหลักฐานการชำระเงิน เพื่อดำเนินการรับออเดอร์ ตรวจสอบการชำระเงิน แจ้งสถานะคำสั่งซื้อ และให้บริการหลังการขาย
+            ข้าพเจ้ารับทราบว่าร้านจะใช้ข้อมูลชื่อและรายการสั่งซื้อ เพื่อดำเนินการรับออเดอร์ แจ้งสถานะคำสั่งซื้อ และให้บริการหลังการขาย
           </span>
         </label>
         <p className="text-xs">

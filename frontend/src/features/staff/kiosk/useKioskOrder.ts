@@ -96,8 +96,9 @@ export function useKioskOrder() {
     try {
       const items = await customerApi.listMenu();
       setMenus(items);
-    } catch (error: any) {
-      setMenuError(error?.message || "ไม่สามารถโหลดเมนูได้");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "ไม่สามารถโหลดเมนูได้";
+      setMenuError(message);
     } finally {
       setMenuLoading(false);
     }
@@ -114,8 +115,8 @@ export function useKioskOrder() {
       const response = await storeAdminApi.getPaymentSettings();
       setPaymentSettings(response.settings);
       return response.settings;
-    } catch (error: any) {
-      const message = error?.message || "ไม่สามารถโหลดการตั้งค่าชำระเงินได้";
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "ไม่สามารถโหลดการตั้งค่าชำระเงินได้";
       setPaymentSettingsError(message);
       setPaymentSettings(null);
       return null;
@@ -127,6 +128,20 @@ export function useKioskOrder() {
   useEffect(() => {
     void loadPaymentSettings();
   }, [loadPaymentSettings]);
+
+  // Auto-retry payment settings when entering the payment step if they
+  // failed on first mount (e.g. auth token not yet refreshed on fresh
+  // load). This ensures the QR appears in the SAME session without
+  // requiring a browser refresh. Retry ONLY refetches settings — it must
+  // NOT create order, finalize payment, clear cart, or mutate stock.
+  // Only fires when activeStep transitions to "payment", not on every
+  // error change, to avoid retry loops.
+  useEffect(() => {
+    if (activeStep === "payment" && paymentSettingsError && !paymentSettingsLoading) {
+      void loadPaymentSettings();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeStep]);
 
   // If the cart empties out, never strand the user on the payment step.
   useEffect(() => {
@@ -391,12 +406,13 @@ export function useKioskOrder() {
         title: "บันทึกออเดอร์แล้ว",
         description: response.order_no || response.order_number || "สร้างสำเร็จ",
       });
-    } catch (error: any) {
+    } catch (error) {
       // FIX-D: Check for structured partial-commit error
-      const detail = error?.detail;
+      const err = error as { detail?: { code?: string; order_id?: string; order_no?: string }; message?: string };
+      const detail = err?.detail;
       if (detail && typeof detail === "object" && detail.code === "kiosk_order_stock_sync_failed") {
         setStockSyncFailure({
-          order_id: detail.order_id,
+          order_id: detail.order_id ?? "",
           order_no: detail.order_no,
         });
         setSubmitError(
@@ -408,7 +424,7 @@ export function useKioskOrder() {
           variant: "destructive",
         });
       } else {
-        const message = error?.message || "ไม่สามารถสร้างออเดอร์ได้";
+        const message = err?.message || "ไม่สามารถสร้างออเดอร์ได้";
         setSubmitError(message);
         toast({ title: "เกิดข้อผิดพลาด", description: message, variant: "destructive" });
       }

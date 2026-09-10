@@ -146,7 +146,14 @@ export default function PaymentPanel({
           )}
 
           {paymentMethod === "promptpay" ? (
-            <StoreQrPanel amount={orderTotal} qrImageUrl={qrImageUrl} displayName={promptpayDisplayName} />
+            <StoreQrPanel
+              amount={orderTotal}
+              qrImageUrl={qrImageUrl}
+              displayName={promptpayDisplayName}
+              loading={paymentSettingsLoading}
+              error={paymentSettingsError}
+              onRetry={onReloadPaymentSettings}
+            />
           ) : (
             <div className="rounded-2xl border border-dashed border-primary/40 bg-muted/20 p-5">
               <p className="text-sm text-foreground">เตรียมเงินทอน</p>

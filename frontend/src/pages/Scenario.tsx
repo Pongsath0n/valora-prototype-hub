@@ -7,7 +7,7 @@ import PlanningAssumptionsCard from "@/components/planning/PlanningAssumptionsCa
 import ProductProfitTable from "@/components/planning/ProductProfitTable";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Save, Clock, Info, SlidersHorizontal, Trash2 } from "lucide-react";
-import { shopService, fixedCostService, menuService, scenarioService } from "@/services/mockStorage";
+import { scenarioDraftService } from "@/services/scenarioDraftStorage";
 import { calcScenarioKPIs } from "@/services/calculationEngine";
 import type { SavedScenario, ScenarioKPIs } from "@/services/types";
 import {
@@ -19,7 +19,6 @@ import {
 } from "@/services/storeAdminApi";
 import {
   adaptPlanningBaseline,
-  buildFallbackBaselineFromMenu,
   type PlanningBaselineAdapterResult,
 } from "@/services/planningBaselineAdapter";
 import { useToast } from "@/hooks/use-toast";
@@ -28,7 +27,7 @@ const now = new Date().toLocaleString("th-TH", { dateStyle: "medium", timeStyle:
 const baselineDateFormatter = new Intl.DateTimeFormat("th-TH", { dateStyle: "medium", timeStyle: "short" });
 
 type BaselineLoadState = {
-  status: "loading" | "live" | "fallback" | "error";
+  status: "loading" | "live" | "error";
   data: PlanningBaselineAdapterResult | null;
   error?: string;
 };
@@ -41,7 +40,15 @@ type LoadAssumptionsOptions = {
   strict?: boolean;
 };
 
-const FALLBACK_WARNING = "กำลังใช้ข้อมูลประมาณการจากเครื่องนี้ ไม่ใช่ข้อมูลล่าสุดจากระบบ";
+// Neutral scenario defaults — these are owner-entered "what-if" assumptions,
+// NOT actual business data. They are intentionally zero/neutral so the owner
+// must explicitly enter their scenario values. Actual baseline values come
+// exclusively from the backend planning baseline.
+const SCENARIO_DEFAULT_FIXED_COSTS = 0;
+const SCENARIO_DEFAULT_AVG_PRICE = 0;
+const SCENARIO_DEFAULT_AVG_COST = 0;
+const SCENARIO_DEFAULT_DAYS_OPEN = 26;
+const SCENARIO_DEFAULT_TARGET_PROFIT = 0;
 
 function formatBaselineTimestamp(value?: string | null): string | null {
   if (!value) return null;
@@ -53,33 +60,27 @@ function formatBaselineTimestamp(value?: string | null): string | null {
 function collectWarnings(baseline: PlanningBaselineAdapterResult | null, status: BaselineLoadState["status"]): string[] {
   const alerts = new Set<string>();
   baseline?.derivedWarnings.forEach((warning) => alerts.add(warning));
-  if (status === "fallback") alerts.add(FALLBACK_WARNING);
+  if (status === "error") alerts.add("ไม่สามารถโหลดข้อมูลล่าสุดจากระบบได้ กรุณาลองใหม่");
   return Array.from(alerts);
 }
 
 export default function ScenarioPage() {
-  // Load baseline from service layer
-  const shop = useMemo(() => shopService.get(), []);
-  const fixedCostsTotal = useMemo(() => fixedCostService.total(), []);
-  const menuRows = useMemo(() => menuService.get(), []);
-  const fallbackBaseline = useMemo(() => buildFallbackBaselineFromMenu(menuRows), [menuRows]);
-
+  // Actual baseline comes exclusively from the backend planning baseline.
+  // No mockStorage, no localStorage fallback for actual business data.
   const [baselineState, setBaselineState] = useState<BaselineLoadState>({ status: "loading", data: null });
   const hasSeededBaseline = useRef(false);
 
-  // Scenario state — initialised from real baseline (seeded after baseline arrives)
-  const [fixedCosts, setFixedCosts] = useState(fixedCostsTotal);
-  const [avgPrice, setAvgPrice] = useState(() =>
-    Number.isFinite(fallbackBaseline.averagePrice) ? Number(fallbackBaseline.averagePrice.toFixed(1)) : 0
-  );
-  const [avgCost, setAvgCost] = useState(() =>
-    Number.isFinite(fallbackBaseline.averageCost) ? Number(fallbackBaseline.averageCost.toFixed(1)) : 0
-  );
-  const [daysOpen, setDaysOpen] = useState(shop.daysOpen);
-  const [targetProfit, setTargetProfit] = useState(shop.targetProfit);
+  // Scenario state — owner-entered "what-if" assumptions. Initialized to
+  // neutral defaults, then seeded from the backend baseline when it arrives
+  // (so the owner starts from real numbers, not mock demo data).
+  const [fixedCosts, setFixedCosts] = useState(SCENARIO_DEFAULT_FIXED_COSTS);
+  const [avgPrice, setAvgPrice] = useState(SCENARIO_DEFAULT_AVG_PRICE);
+  const [avgCost, setAvgCost] = useState(SCENARIO_DEFAULT_AVG_COST);
+  const [daysOpen, setDaysOpen] = useState(SCENARIO_DEFAULT_DAYS_OPEN);
+  const [targetProfit, setTargetProfit] = useState(SCENARIO_DEFAULT_TARGET_PROFIT);
   const [scenarioNotes, setScenarioNotes] = useState("");
   const [savedScenarios, setSavedScenarios] = useState<SavedScenario[]>(() =>
-    scenarioService.get()
+    scenarioDraftService.get()
   );
 
   // Overhead expenses + planning assumptions (Owner overhead/hidden-cost loop).
@@ -98,11 +99,11 @@ export default function ScenarioPage() {
     };
   }, []);
 
-  // Reusable baseline loader — also re-run after overhead/assumption edits so the
-  // overview KPIs and per-cup overhead refresh. The one-time seed guard below keeps
-  // the simulator sliders from being reset on these refetches.
+  // Reusable baseline loader — fetches canonical backend planning baseline.
+  // No mock/local fallback: if the backend fails, show an error state.
+  // The owner can retry; polling is not used for profit planning.
   const loadBaseline = useCallback(
-    async ({ allowFallback = true }: LoadBaselineOptions = {}) => {
+    async ({ allowFallback = false }: LoadBaselineOptions = {}) => {
       setBaselineState((prev) => ({ ...prev, status: "loading", error: undefined }));
       try {
         const response = await storeAdminApi.getPlanningBaseline();
@@ -111,23 +112,20 @@ export default function ScenarioPage() {
       } catch (error: unknown) {
         if (!mountedRef.current) return;
         const message = error instanceof Error ? error.message : "planning_baseline_failed";
-        if (allowFallback) {
-          setBaselineState({
-            status: "fallback",
-            data: fallbackBaseline,
-            error: message,
-          });
-          return;
-        }
+        // No mock fallback — show honest error state. Previous data is
+        // retained for UX continuity but is clearly marked as stale/error.
         setBaselineState((prev) => ({
           ...prev,
-          status: prev.data ? prev.status : "error",
+          status: prev.data ? "live" : "error",
           error: message,
         }));
-        throw error;
+        if (!allowFallback) {
+          // Don't throw on explicit refresh — surface via state.
+          return;
+        }
       }
     },
-    [fallbackBaseline],
+    [],
   );
 
   const loadOverheadExpenses = useCallback(async () => {
@@ -238,16 +236,16 @@ export default function ScenarioPage() {
 
   useEffect(() => {
     if (hasSeededBaseline.current) return;
-    const source = baselineState.data ?? (baselineState.status === "fallback" ? fallbackBaseline : null);
+    const source = baselineState.data;
     if (!source) return;
     hasSeededBaseline.current = true;
     const priceSeed = Number.isFinite(source.averagePrice) ? Number(source.averagePrice.toFixed(1)) : 0;
     const costSeed = Number.isFinite(source.averageCost) ? Number(source.averageCost.toFixed(1)) : 0;
     setAvgPrice(priceSeed);
     setAvgCost(costSeed);
-  }, [baselineState, fallbackBaseline]);
+  }, [baselineState]);
 
-  const activeBaseline = baselineState.data ?? fallbackBaseline;
+  const activeBaseline = baselineState.data;
   const overheadSummary = activeBaseline?.overhead ?? null;
   const derivedTargetProfit =
     activeBaseline?.overhead?.target_profit_monthly ?? assumptions?.target_profit_monthly ?? null;
@@ -257,12 +255,23 @@ export default function ScenarioPage() {
     overheadSummary?.operating_days_per_month ?? assumptions?.operating_days_per_month ?? null;
   const monthlyOverhead = overheadSummary?.monthly_overhead ?? null;
 
+  // Actual baseline fixed costs come from the backend overhead summary.
+  // No mockStorage, no localStorage. If the backend hasn't returned overhead,
+  // the baseline KPIs use 0 (which yields break-even at 0 cups — a safe
+  // "no data" signal rather than fake demo numbers).
+  const actualFixedCosts = useMemo(() => {
+    if (monthlyOverhead != null && Number.isFinite(monthlyOverhead)) {
+      return monthlyOverhead;
+    }
+    return 0;
+  }, [monthlyOverhead]);
+
   // Calculations (pure engine)
   const baselineKPIs = useMemo<ScenarioKPIs>(() => {
     const basePrice = activeBaseline?.averagePrice ?? 0;
     const baseCost = activeBaseline?.averageCost ?? 0;
-    return calcScenarioKPIs(fixedCostsTotal, shop.targetProfit, basePrice, baseCost, shop.daysOpen);
-  }, [activeBaseline, fixedCostsTotal, shop.targetProfit, shop.daysOpen]);
+    return calcScenarioKPIs(actualFixedCosts, targetProfitMonthly ?? 0, basePrice, baseCost, operatingDaysPlan ?? 26);
+  }, [activeBaseline, actualFixedCosts, targetProfitMonthly, operatingDaysPlan]);
 
   const scenario = useMemo(
     () => calcScenarioKPIs(fixedCosts, targetProfit, avgPrice, avgCost, daysOpen),
@@ -312,28 +321,25 @@ export default function ScenarioPage() {
     Boolean(overheadSummary && (overheadSummary.expense_count ?? 0) > 0) &&
     baselineItems.some((item) => item.overheadPerUnit != null);
 
-  const dataQualityStatus: "live" | "fallback" | "loading" =
+  const dataQualityStatus: "live" | "error" | "loading" =
     baselineState.status === "live"
       ? "live"
       : baselineState.status === "loading" && !baselineState.data
         ? "loading"
-        : "fallback";
+        : "error";
   const dataQualityLevel = activeBaseline?.dataQualityLevel ?? "estimated";
   const dataQualityTimestamp = dataQualityStatus === "live" ? baselineUpdatedLabel ?? undefined : undefined;
   const baselineStatusMessages: Record<BaselineLoadState["status"], string> = {
     live: baselineUpdatedLabel ? `ข้อมูลสดจากร้าน (อัปเดต ${baselineUpdatedLabel})` : "ข้อมูลสดจากร้าน",
-    fallback: "ไม่ได้เชื่อมต่อระบบ กำลังใช้ข้อมูลประมาณการจากเครื่องนี้",
     loading: "กำลังโหลดข้อมูลตั้งต้นล่าสุดของร้าน...",
-    error: "โหลดข้อมูลตั้งต้นไม่สำเร็จ กำลังใช้ข้อมูลประมาณการ",
+    error: "โหลดข้อมูลตั้งต้นไม่สำเร็จ กรุณาลองใหม่",
   };
-  const baselineStatusTag = baselineStatusMessages[baselineState.status] ?? baselineStatusMessages.fallback;
+  const baselineStatusTag = baselineStatusMessages[baselineState.status] ?? baselineStatusMessages.error;
   const baselineIsLoading = baselineState.status === "loading" && !baselineState.data;
   const baselineRecencyDescriptor =
     dataQualityStatus === "live" && baselineUpdatedLabel
       ? `ข้อมูลตั้งต้น ${baselineUpdatedLabel}`
-      : dataQualityStatus === "fallback"
-        ? "ข้อมูลตั้งต้นจากค่าประมาณการ"
-        : null;
+      : null;
 
   const diff = (a: number, b: number, higherIsGood = false) => {
     if (!isFinite(a) || !isFinite(b)) return { text: "-", cls: "text-muted-foreground" };
@@ -349,8 +355,8 @@ export default function ScenarioPage() {
 
   const saveScenario = () => {
     const newScenario: SavedScenario = {
-      id: scenarioService.nextId(),
-      name: `สถานการณ์ ${scenarioService.nextId()}`,
+      id: scenarioDraftService.nextId(),
+      name: `สถานการณ์ ${scenarioDraftService.nextId()}`,
       timestamp: now,
       fixedCosts,
       avgPrice,
@@ -359,14 +365,14 @@ export default function ScenarioPage() {
       targetProfit,
       notes: scenarioNotes,
     };
-    scenarioService.save(newScenario);
-    setSavedScenarios(scenarioService.get());
+    scenarioDraftService.save(newScenario);
+    setSavedScenarios(scenarioDraftService.get());
     setScenarioNotes("");
   };
 
   const deleteScenario = (id: number) => {
-    scenarioService.delete(id);
-    setSavedScenarios(scenarioService.get());
+    scenarioDraftService.delete(id);
+    setSavedScenarios(scenarioDraftService.get());
   };
 
   const loadScenario = (s: SavedScenario) => {

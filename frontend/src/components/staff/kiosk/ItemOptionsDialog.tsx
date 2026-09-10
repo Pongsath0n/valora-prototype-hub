@@ -2,7 +2,7 @@ import { Minus, Plus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import type { CustomerMenuItem } from "@/services/customerApi";
 import {
   SWEETNESS_LEVELS,
@@ -49,6 +49,7 @@ export default function ItemOptionsDialog({
       <DialogContent className="max-w-xl">
         <DialogHeader>
           <DialogTitle>{product ? `ปรับ ${product.name}` : "ปรับรายการ"}</DialogTitle>
+          <DialogDescription>ปรับจำนวน ระดับความหวาน ตัวเลือกเพิ่มเติม และโน้ตสำหรับรายการนี้</DialogDescription>
         </DialogHeader>
 
         {product && draft ? (

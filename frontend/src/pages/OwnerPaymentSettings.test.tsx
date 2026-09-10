@@ -13,10 +13,10 @@ const mockedToast = vi.fn();
 
 vi.mock("@/services/storeAdminApi", () => ({
   storeAdminApi: {
-    getPaymentSettings: (...args: any[]) => mockedGetPaymentSettings(...args),
-    updatePaymentSettings: (...args: any[]) => mockedUpdatePaymentSettings(...args),
-    uploadPaymentSettingsQr: (...args: any[]) => mockedUploadPaymentSettingsQr(...args),
-    deletePaymentSettingsQr: (...args: any[]) => mockedDeletePaymentSettingsQr(...args),
+    getPaymentSettings: (...args: unknown[]) => mockedGetPaymentSettings(...args),
+    updatePaymentSettings: (...args: unknown[]) => mockedUpdatePaymentSettings(...args),
+    uploadPaymentSettingsQr: (...args: unknown[]) => mockedUploadPaymentSettingsQr(...args),
+    deletePaymentSettingsQr: (...args: unknown[]) => mockedDeletePaymentSettingsQr(...args),
   },
 }));
 
@@ -26,7 +26,7 @@ vi.mock("@/components/AppLayout", () => ({
 }));
 
 vi.mock("@/hooks/use-toast", () => ({
-  toast: (...args: any[]) => mockedToast(...args),
+  toast: (...args: unknown[]) => mockedToast(...args),
 }));
 
 function createSettings(overrides: Partial<ReturnType<typeof baseSettings>> = {}) {

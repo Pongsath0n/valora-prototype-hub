@@ -420,8 +420,8 @@ export default function StoreAdminIngredientsPage() {
     try {
       const res = await storeAdminApi.listIngredients();
       setRows(res.items ?? []);
-    } catch (err: any) {
-      setError(err?.message || "โหลดวัตถุดิบไม่สำเร็จ");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "โหลดวัตถุดิบไม่สำเร็จ");
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -455,8 +455,8 @@ export default function StoreAdminIngredientsPage() {
     try {
       const list = await storeAdminApi.listStockIntakes({ limit: 100 });
       setWasteEligibleLots(list);
-    } catch (err: any) {
-      setWasteEligibleError(err?.message || "โหลดล็อตวัตถุดิบไม่สำเร็จ");
+    } catch (err) {
+      setWasteEligibleError(err instanceof Error ? err.message : "โหลดล็อตวัตถุดิบไม่สำเร็จ");
       setWasteEligibleLots([]);
     } finally {
       setWasteEligibleLoading(false);
@@ -475,8 +475,8 @@ export default function StoreAdminIngredientsPage() {
       setWasteRecords(records);
       setWasteSummary(summary);
       void refreshWasteEligibleLots();
-    } catch (err: any) {
-      setWasteError(err?.message || "โหลดข้อมูลการทิ้งไม่สำเร็จ");
+    } catch (err) {
+      setWasteError(err instanceof Error ? err.message : "โหลดข้อมูลการทิ้งไม่สำเร็จ");
     } finally {
       setWasteLoading(false);
     }
@@ -564,8 +564,8 @@ export default function StoreAdminIngredientsPage() {
       setForm(emptyForm);
       setIngredientModalOpen(false);
       void refresh();
-    } catch (err: any) {
-      const reason = err?.message || "บันทึกไม่สำเร็จ";
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : "บันทึกไม่สำเร็จ";
       if (reason === "unauthorized" || reason === "missing_token") setError("ต้องเข้าสู่ระบบก่อนใช้งาน");
       else setError(reason);
     }
@@ -577,8 +577,8 @@ export default function StoreAdminIngredientsPage() {
       const res = await storeAdminApi.deleteIngredient(id);
       if (res.status === "deactivated") setInfo("ปิดการใช้งานวัตถุดิบที่มีการใช้งานแล้ว");
       else setInfo("ลบวัตถุดิบแล้ว");
-    } catch (err: any) {
-      const msg = err?.message || "ลบไม่สำเร็จ";
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "ลบไม่สำเร็จ";
       if (msg === "ingredient_has_history") setInfo("ไม่สามารถลบได้ มีการใช้งานในสูตร/สต็อก");
       else setError(msg);
     }
@@ -657,8 +657,8 @@ export default function StoreAdminIngredientsPage() {
       resetWasteForm();
       void refreshWasteData();
       void refresh();
-    } catch (err: any) {
-      const reason = err?.message || "บันทึกการทิ้งไม่สำเร็จ";
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : "บันทึกการทิ้งไม่สำเร็จ";
       if (reason === "insufficient_stock_for_waste") {
         setWasteFormError("สต็อกไม่เพียงพอสำหรับจำนวนที่เลือก");
       } else if (reason === "insufficient_lot_stock_for_waste") {
@@ -796,8 +796,8 @@ export default function StoreAdminIngredientsPage() {
       setInfo(receiptUploaded ? "บันทึกซื้อเข้าสต็อกแล้ว" : "บันทึกสต็อกแล้ว แต่แนบใบเสร็จไม่สำเร็จ");
       closeIntakeModal();
       void refresh();
-    } catch (err: any) {
-      const reason = err?.message || "บันทึกสต็อกไม่สำเร็จ";
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : "บันทึกสต็อกไม่สำเร็จ";
       setIntakeError(reason);
     } finally {
       setIntakeSubmitting(false);
@@ -819,8 +819,8 @@ export default function StoreAdminIngredientsPage() {
       await storeAdminApi.uploadStockIntakeReceipt(purchaseId, file, storeId);
       setIntakeForm((prev) => ({ ...prev, receiptFile: null, receiptError: null }));
       return true;
-    } catch (error: any) {
-      setIntakeForm((prev) => ({ ...prev, receiptError: error?.message || "อัปโหลดใบเสร็จไม่สำเร็จ" }));
+    } catch (error) {
+      setIntakeForm((prev) => ({ ...prev, receiptError: error instanceof Error ? error.message : "อัปโหลดใบเสร็จไม่สำเร็จ" }));
       return false;
     } finally {
       setIntakeForm((prev) => ({ ...prev, receiptUploading: false }));

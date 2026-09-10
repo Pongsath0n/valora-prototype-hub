@@ -26,8 +26,8 @@ export default function AdminSalesChannelsPage() {
     try {
       const items = await storeAdminApi.listSalesChannels();
       setChannels(items);
-    } catch (err: any) {
-      setError(err?.message || "โหลดข้อมูลไม่สำเร็จ");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "โหลดข้อมูลไม่สำเร็จ");
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -73,8 +73,8 @@ export default function AdminSalesChannelsPage() {
       resetForm();
       setShowForm(false);
       void refresh();
-    } catch (err: any) {
-      const reason = err?.message || "บันทึกไม่สำเร็จ";
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : "บันทึกไม่สำเร็จ";
       if (reason === "channel_name_exists") {
         setError("มีชื่อช่องทางนี้แล้ว");
       } else if (reason === "unauthorized" || reason === "missing_token") {
@@ -96,8 +96,8 @@ export default function AdminSalesChannelsPage() {
       } else {
         setInfo("ลบช่องทางแล้ว");
       }
-    } catch (err: any) {
-      const msg = err?.message || "ลบไม่สำเร็จ";
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "ลบไม่สำเร็จ";
       if (msg === "channel_has_history") setInfo("ไม่สามารถลบได้ มีประวัติออเดอร์");
       else setError(msg);
     }
@@ -109,8 +109,8 @@ export default function AdminSalesChannelsPage() {
     try {
       await storeAdminApi.updateSalesChannel(id, { is_active: isActive });
       setInfo(isActive ? "เปิดใช้งานช่องทางแล้ว" : "ปิดใช้งานช่องทางแล้ว");
-    } catch (err: any) {
-      setError(err?.message || "อัปเดตไม่สำเร็จ");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "อัปเดตไม่สำเร็จ");
     }
     void refresh();
   };

@@ -244,7 +244,7 @@ export default function OverviewPage() {
 }
 
 // Custom Icons for better look
-function CheckCircle2(props: any) {
+function CheckCircle2(props: React.SVGProps<SVGSVGElement>) {
   return (
     <svg
       {...props}

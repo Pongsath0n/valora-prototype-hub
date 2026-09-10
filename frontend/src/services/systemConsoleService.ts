@@ -23,7 +23,7 @@ async function fetchEndpoint(path: string): Promise<EndpointState> {
   try {
     const res = await fetch(url);
     const data = await res.json().catch(() => ({}));
-    const status = (data as Record<string, any>)?.status ?? (res.ok ? "ok" : "error");
+    const status = (data as Record<string, unknown>)?.status ?? (res.ok ? "ok" : "error");
     return { status, data };
   } catch (error) {
     return { status: "unavailable", error: "fetch_failed" };

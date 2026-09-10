@@ -191,7 +191,7 @@ export default function ChannelPricing() {
                 <tr key={row.id}>
                   <td className="font-semibold">{row.name}</td>
                   {activeChannels.map((ch, idx) => {
-                    const cell = row.prices[idx] as any;
+                    const cell = row.prices[idx] as { price?: { id?: string; price?: number } } | undefined;
                     const priceRow = cell?.price ?? null;
                     return (
                       <td key={ch.id} className="text-center">
