@@ -7521,6 +7521,236 @@ def _map_incoming_queue_item(row: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+# ── BE-ADD-01: Staff Production Queue ──────────────────────────────────
+
+_PRODUCTION_QUEUE_STATUSES: List[str] = ["accepted", "preparing", "ready"]
+_PRODUCTION_QUEUE_SOURCES: List[str] = ["web_order", "kiosk"]
+
+
+def _load_paid_payment_confirmed_at(
+    client: Client,
+    order_ids: List[str],
+    store_id: str,
+) -> Dict[str, str]:
+    """Return a map of order_id -> canonical paid payment confirmed_at.
+
+    Canonical V1 atomic payment path produces one paid payment per order.
+    For deterministic FIFO selection when multiple paid payments exist, the
+    EARLIEST confirmed_at is used (the first time the order was confirmed
+    paid). This is consistent with the canonical FIFO contract.
+
+    Orders with no paid payment row having a non-null confirmed_at are
+    excluded (fail-closed) — the caller must drop them.
+    """
+    if not order_ids:
+        return {}
+
+    select_cols = "id, order_id, status, confirmed_at, created_at"
+    if _payments_supports_store_scope(client):
+        select_cols = "store_id, " + select_cols
+
+    try:
+        query = (
+            client.table("payments")
+            .select(select_cols)
+            .in_("order_id", order_ids)
+            .eq("status", "paid")
+            .not_.is_("confirmed_at", "null")
+            .order("confirmed_at", desc=False)
+        )
+        if _payments_supports_store_scope(client):
+            query = query.eq("store_id", store_id)
+        resp = query.execute()
+    except Exception:
+        # Fallback: some clients may not support .not_.is_ chaining.
+        try:
+            query = (
+                client.table("payments")
+                .select(select_cols)
+                .in_("order_id", order_ids)
+                .eq("status", "paid")
+                .order("confirmed_at", desc=False)
+            )
+            if _payments_supports_store_scope(client):
+                query = query.eq("store_id", store_id)
+            resp = query.execute()
+        except Exception as exc:
+            logger.warning("production_queue_payment_query_failed: %s", str(exc)[:200])
+            return {}
+        err = getattr(resp, "error", None)
+        if err:
+            logger.warning("production_queue_payment_query_error: %s", str(getattr(err, "message", err))[:200])
+            return {}
+    else:
+        err = getattr(resp, "error", None)
+        if err:
+            logger.warning("production_queue_payment_query_error: %s", str(getattr(err, "message", err))[:200])
+            return {}
+
+    confirmed_map: Dict[str, str] = {}
+    for row in getattr(resp, "data", None) or []:
+        oid = row.get("order_id")
+        confirmed_at = row.get("confirmed_at")
+        if not oid or not confirmed_at:
+            continue
+        oid_str = str(oid)
+        # First row in confirmed_at ASC order is the earliest — canonical.
+        if oid_str not in confirmed_map:
+            confirmed_map[oid_str] = str(confirmed_at)
+    return confirmed_map
+
+
+def _map_production_queue_item(row: Dict[str, Any]) -> Dict[str, Any]:
+    """Staff-safe order item serialization for the Production Queue.
+
+    Excludes internal cost/profit data and ``_system`` internals from
+    ``options``. Also strips ``cost_status`` via ``mask_option_costs``.
+    Reuses the same masking principles as the Incoming Queue and
+    ``_mask_order_item_fields``.
+    """
+    product_rel = row.get("products") if isinstance(row, dict) else None
+    product_name = None
+    if isinstance(product_rel, dict):
+        product_name = product_rel.get("name")
+    if not product_name:
+        product_name = row.get("product_name_snapshot")
+
+    # Strip _system from options, then mask cost_status via mask_option_costs.
+    options_value = row.get("options")
+    safe_options = None
+    if isinstance(options_value, dict):
+        safe_options = {k: v for k, v in options_value.items() if k != "_system"}
+    safe_options = mask_option_costs(safe_options)
+
+    item: Dict[str, Any] = {
+        "id": str(row.get("id")) if row.get("id") else None,
+        "product_id": row.get("product_id"),
+        "product_name": product_name,
+        "quantity": int(row.get("quantity") or 0),
+        "unit_price": float(row.get("unit_price") or 0),
+        "line_total": float(row.get("line_total") or row.get("total_price") or 0),
+        "total_price": float(row.get("total_price") or 0),
+        "options": safe_options,
+    }
+    # Strip financial cost/profit fields (staff-safe).
+    for fld in _ORDER_ITEM_FINANCIAL_FIELDS:
+        if fld in item:
+            item[fld] = None
+    for sensitive in (
+        "overhead_per_unit",
+        "net_profit_after_overhead_per_unit",
+        "direct_cost_per_unit",
+        "gross_profit_per_unit",
+    ):
+        item.pop(sensitive, None)
+    return item
+
+
+@router.get("/orders/production")
+def list_production_queue(
+    authorization: Optional[str] = Header(None),
+    store_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """BE-ADD-01: Production Queue — paid operational orders for staff.
+
+    Returns orders from canonical sources (``web_order`` + ``kiosk``) that
+    are ``paid`` and in active production statuses (``accepted``,
+    ``preparing``, ``ready``), ordered by ``payments.confirmed_at`` ASC
+    (oldest paid-ready order first).
+
+    Staff-safe: no slip fields, no financial cost/profit fields, no
+    ``_system`` internals. Exposes ``payment_confirmed_at`` as the
+    canonical FIFO timestamp.
+    """
+    ctx = _get_ctx(authorization)
+    store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
+    _require_staff_or_above(role)
+
+    client = ctx["client"]
+
+    # 1. Fetch eligible production orders in one query.
+    select_cols = _order_select_columns(client)
+    if _orders_has_column(client, "order_source"):
+        select_cols = select_cols + ", order_source"
+
+    order_query = (
+        client.table("orders")
+        .select(select_cols)
+        .eq("store_id", store_id_resolved)
+        .eq("payment_status", "paid")
+        .in_("status", _PRODUCTION_QUEUE_STATUSES)
+    )
+    if _orders_has_column(client, "order_source"):
+        order_query = order_query.in_("order_source", _PRODUCTION_QUEUE_SOURCES)
+
+    order_resp = order_query.execute()
+    if getattr(order_resp, "error", None):
+        raise HTTPException(status_code=500, detail="production_queue_query_failed")
+    order_rows = getattr(order_resp, "data", None) or []
+
+    if not order_rows:
+        return {"orders": [], "store_id": store_id_resolved}
+
+    order_ids = [str(r.get("id")) for r in order_rows if r.get("id")]
+
+    # 2. Batch fetch canonical paid payment confirmed_at (no N+1).
+    confirmed_map = _load_paid_payment_confirmed_at(client, order_ids, store_id_resolved)
+
+    # 3. Exclude orders without a canonical paid confirmed_at (fail-closed).
+    eligible_rows = [
+        r for r in order_rows
+        if str(r.get("id")) in confirmed_map
+    ]
+
+    if not eligible_rows:
+        return {"orders": [], "store_id": store_id_resolved}
+
+    # 4. Batch fetch order_items for all eligible orders (no N+1).
+    eligible_ids = [str(r.get("id")) for r in eligible_rows if r.get("id")]
+    item_map: Dict[str, List[Dict[str, Any]]] = {}
+    if eligible_ids:
+        item_query = (
+            client.table("order_items")
+            .select(order_item_select_clause(client))
+            .in_("order_id", eligible_ids)
+            .order("created_at", desc=False)
+        )
+        if order_items_supports_store_scope(client):
+            item_query = item_query.eq("store_id", store_id_resolved)
+        item_resp = item_query.execute()
+        if getattr(item_resp, "error", None):
+            raise HTTPException(status_code=500, detail="production_queue_items_failed")
+        for item in (getattr(item_resp, "data", None) or []):
+            oid = str(item.get("order_id"))
+            item_map.setdefault(oid, []).append(_map_production_queue_item(item))
+
+    # 5. Build response and sort by payment_confirmed_at ASC (canonical FIFO).
+    orders: List[Dict[str, Any]] = []
+    for row in eligible_rows:
+        oid = str(row.get("id"))
+        order_no = row.get("order_no") or row.get("order_number")
+        customer_name = row.get("customer_name") or CUSTOMER_NAME_FALLBACK
+        orders.append({
+            "id": oid,
+            "order_no": order_no,
+            "order_number": order_no,
+            "order_source": row.get("order_source"),
+            "customer_name": customer_name,
+            "customer_note": row.get("note"),
+            "items": item_map.get(oid, []),
+            "total_amount": float(row.get("total_amount") or 0),
+            "status": row.get("status"),
+            "payment_status": row.get("payment_status"),
+            "payment_confirmed_at": confirmed_map.get(oid),
+        })
+
+    # Sort by payment_confirmed_at ASC (canonical FIFO). Stable sort
+    # preserves created_at order for ties.
+    orders.sort(key=lambda o: o.get("payment_confirmed_at") or "")
+
+    return {"orders": orders, "store_id": store_id_resolved}
+
+
 @router.get("/orders")
 def list_orders(authorization: Optional[str] = Header(None), store_id: Optional[str] = None) -> Dict[str, Any]:
     ctx = _get_ctx(authorization)
