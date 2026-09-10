@@ -1,5 +1,6 @@
 import { storeAdminApi } from "@/services/storeAdminApi";
 import { shopService } from "@/services/mockStorage";
+import { STORE_DISPLAY_NAME } from "@/config/brand";
 
 export type StoreSetup = {
   id?: string;
@@ -11,7 +12,7 @@ export type StoreSetup = {
 };
 
 const DEFAULT: StoreSetup = {
-  name: "Brewway",
+  name: STORE_DISPLAY_NAME,
   daysOpen: 26,
   targetProfit: 30000,
   timezone: "Asia/Bangkok",

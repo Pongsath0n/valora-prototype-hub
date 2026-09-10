@@ -779,6 +779,108 @@ export type OrderCancelPayload = {
   reason?: string;
 };
 
+// ── Canonical V1 Incoming Queue (BE-FIX-04) ─────────────────────────────────
+//
+// GET /api/store-admin/orders/incoming
+// Returns Self-order source orders (order_source = 'web_order') that are
+// pending_payment and unpaid, ordered by created_at ASC (oldest first).
+// Intended for 15-second polling; 15-minute warning is frontend-derived
+// from created_at.
+
+export type IncomingQueueItem = {
+  id: string | null;
+  product_id: string;
+  product_name: string | null;
+  quantity: number;
+  unit_price: number;
+  line_total: number;
+  total_price: number;
+  options: Record<string, unknown> | null;
+};
+
+export type IncomingQueueOrder = {
+  id: string;
+  order_no: string | null;
+  order_number: string | null;
+  customer_name: string;
+  customer_note: string | null;
+  items: IncomingQueueItem[];
+  total_amount: number;
+  created_at: string | null;
+  status: string;
+  payment_status: string;
+  order_source: string | null;
+};
+
+export type IncomingQueueResponse = {
+  orders: IncomingQueueOrder[];
+  store_id: string;
+};
+
+// ── Canonical V1.1 Production Queue (BE-ADD-01) ─────────────────────────────
+//
+// GET /api/store-admin/orders/production
+// Returns paid operational orders from canonical sources (web_order + kiosk)
+// in active production statuses (accepted, preparing, ready), ordered by
+// payments.confirmed_at ASC (oldest paid-ready order first).
+//
+// payment_confirmed_at is the canonical FIFO timestamp — NOT created_at or
+// updated_at. Staff may receive this operational timestamp.
+
+export type ProductionQueueItem = {
+  id: string | null;
+  product_id: string;
+  product_name: string | null;
+  quantity: number;
+  unit_price: number;
+  line_total: number;
+  total_price: number;
+  options: Record<string, unknown> | null;
+};
+
+export type ProductionQueueOrder = {
+  id: string;
+  order_no: string | null;
+  order_number: string | null;
+  order_source: string | null;
+  customer_name: string;
+  customer_note: string | null;
+  items: ProductionQueueItem[];
+  total_amount: number;
+  status: string;
+  payment_status: string;
+  /** Canonical FIFO timestamp from payments.confirmed_at (V1.1). */
+  payment_confirmed_at: string | null;
+};
+
+export type ProductionQueueResponse = {
+  orders: ProductionQueueOrder[];
+  store_id: string;
+};
+
+// ── Canonical V1 Finalize Payment (BE-03) ───────────────────────────────────
+//
+// POST /api/store-admin/orders/{order_id}/finalize-payment
+// Atomically finalizes a pending_payment order as paid+accepted.
+// This is the canonical Self-order counter payment endpoint.
+// Idempotent: returns already_finalized if already accepted+paid.
+
+export type FinalizePaymentMethod = "cash" | "promptpay";
+
+export type FinalizePaymentPayload = {
+  payment_method: FinalizePaymentMethod;
+};
+
+export type FinalizePaymentResponse = {
+  id: string;
+  order_id: string;
+  status: string;
+  payment_status: string;
+  result: string;
+  payment_id: string | null;
+  payment_method: FinalizePaymentMethod;
+};
+
 export type OrderItemPayload = {
   product_id: string;
   quantity: number;
@@ -1001,7 +1103,13 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     if (typeof reason === "string") {
       throw new Error(reason);
     }
-    // Structured error detail (e.g. kiosk_order_stock_sync_failed)
+    // Structured error detail (e.g. kiosk_order_stock_sync_failed).
+    // Preserves backend error codes for later UI mapping:
+    //   owner_role_required, insufficient_stock, idempotency_conflict,
+    //   order_no_generation_exhausted, order_number_generation_failed,
+    //   invalid_status_for_cancellation, etc.
+    // The `code` becomes the Error message; the full `{code, message}`
+    // object is attached as `err.detail` so callers can access both.
     const err = new Error(reason?.code || "request_failed") as any;
     err.detail = reason;
     throw err;
@@ -1430,6 +1538,35 @@ export const storeAdminApi = {
     return request<{ id: string; status: string }>(`/api/store-admin/orders/${id}/cancel`, { method: "POST", body: JSON.stringify(payload) });
   },
 
+  // ── Canonical V1 Incoming Queue (BE-FIX-04) ───────────────────────────────
+  // GET /api/store-admin/orders/incoming
+  // Self-orders waiting for payment (web_order, pending_payment, unpaid).
+  // Intended for 15-second polling. 15-minute warning is frontend-derived.
+  async listIncomingQueue(): Promise<IncomingQueueResponse> {
+    return request<IncomingQueueResponse>("/api/store-admin/orders/incoming");
+  },
+
+  // ── Canonical V1.1 Production Queue (BE-ADD-01) ───────────────────────────
+  // GET /api/store-admin/orders/production
+  // Paid operational orders (web_order + kiosk, accepted/preparing/ready),
+  // ordered by payments.confirmed_at ASC. payment_confirmed_at is the
+  // canonical FIFO timestamp — NOT created_at or updated_at.
+  async listProductionQueue(): Promise<ProductionQueueResponse> {
+    return request<ProductionQueueResponse>("/api/store-admin/orders/production");
+  },
+
+  // ── Canonical V1 Finalize Payment (BE-03) ─────────────────────────────────
+  // POST /api/store-admin/orders/{order_id}/finalize-payment
+  // Atomically finalizes a pending_payment order as paid+accepted.
+  // This is the canonical Self-order counter payment endpoint.
+  // Do NOT create payment/slip rows manually for this flow.
+  async finalizePayment(orderId: string, payload: FinalizePaymentPayload): Promise<FinalizePaymentResponse> {
+    return request<FinalizePaymentResponse>(`/api/store-admin/orders/${orderId}/finalize-payment`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
   async listOrderItems(orderId: string): Promise<{ items: ApiOrderItem[]; order_id: string; store_id: string }> {
     return request(`/api/store-admin/orders/${orderId}/items`);
   },
@@ -1446,39 +1583,52 @@ export const storeAdminApi = {
     return request<{ status: string }>(`/api/store-admin/order-items/${itemId}`, { method: "DELETE" });
   },
 
-  // Payments
+  // ── LEGACY PAYMENTS — OUT OF V1 FRONTEND SCOPE ───────────────────────────
+  // The following methods call backend endpoints that remain available but
+  // are OUT OF V1 Frontend scope. They exist for legacy slip-review UI that
+  // will be removed in FE-03/FE-10. Canonical V1 code MUST NOT use these for
+  // new flows — use `finalizePayment` for counter payment and `cancelOrder`
+  // for cancellation instead.
   async listPayments(): Promise<{ items: ApiPayment[]; payment_queue: ApiPayment[]; store_id: string }> {
     return request("/api/store-admin/payments");
   },
 
+  /** @legacy OUT OF V1 FRONTEND SCOPE — legacy slip-review export. */
   async exportPaymentsCsv(): Promise<CsvDownload> {
     return requestCsv("/api/store-admin/payments/export");
   },
 
+  /** @legacy OUT OF V1 FRONTEND SCOPE — legacy per-order payment listing. */
   async listOrderPayments(orderId: string): Promise<{ items: ApiPayment[]; order_id: string; store_id: string }> {
     return request(`/api/store-admin/orders/${orderId}/payments`);
   },
 
+  /** @legacy OUT OF V1 FRONTEND SCOPE — do not create payment rows manually. */
   async createOrderPayment(orderId: string, payload: PaymentPayload): Promise<{ id: string; status: string }> {
     return request<{ id: string; status: string }>(`/api/store-admin/orders/${orderId}/payments`, { method: "POST", body: JSON.stringify(payload) });
   },
 
+  /** @legacy OUT OF V1 FRONTEND SCOPE — do not update payment rows manually. */
   async updatePayment(paymentId: string, payload: PaymentUpdatePayload): Promise<{ id: string; status: string }> {
     return request<{ id: string; status: string }>(`/api/store-admin/payments/${paymentId}`, { method: "PATCH", body: JSON.stringify(payload) });
   },
 
+  /** @legacy OUT OF V1 FRONTEND SCOPE — legacy slip upload. */
   async submitPaymentSlip(paymentId: string, payload: PaymentSubmitSlipPayload): Promise<{ id: string; status: string }> {
     return request<{ id: string; status: string }>(`/api/store-admin/payments/${paymentId}/submit-slip`, { method: "POST", body: JSON.stringify(payload) });
   },
 
+  /** @legacy OUT OF V1 FRONTEND SCOPE — legacy slip approval. */
   async approvePayment(paymentId: string, payload?: PaymentApprovePayload): Promise<{ id: string; status: string; mock_notification?: string }> {
     return request<{ id: string; status: string; mock_notification?: string }>(`/api/store-admin/payments/${paymentId}/approve`, { method: "POST", body: JSON.stringify(payload || {}) });
   },
 
+  /** @legacy OUT OF V1 FRONTEND SCOPE — legacy slip rejection. */
   async rejectPayment(paymentId: string, payload: PaymentRejectPayload): Promise<{ id: string; status: string; message?: string }> {
     return request<{ id: string; status: string; message?: string }>(`/api/store-admin/payments/${paymentId}/reject`, { method: "POST", body: JSON.stringify(payload) });
   },
 
+  /** @legacy OUT OF V1 FRONTEND SCOPE — legacy slip preview. */
   async getPaymentSlipPreview(paymentId: string): Promise<PaymentSlipPreviewResponse> {
     return request<PaymentSlipPreviewResponse>(`/api/store-admin/payments/${paymentId}/slip-preview`);
   },

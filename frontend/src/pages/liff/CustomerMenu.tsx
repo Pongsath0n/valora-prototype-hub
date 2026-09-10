@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { ChevronRight, ClipboardList, Coffee, ShieldCheck } from "lucide-react";
 
 import { customerApi, type CustomerMenuItem } from "@/services/customerApi";
+import { STORE_DISPLAY_NAME } from "@/config/brand";
 
 const ALL_CATEGORY = "__all__";
 
@@ -18,7 +19,7 @@ function MenuPlaceholder() {
         <span className="flex h-16 w-16 items-center justify-center rounded-full bg-background/60 shadow-inner">
           <Coffee className="h-8 w-8" aria-hidden />
         </span>
-        <span className="text-xs font-semibold tracking-wide text-primary/60">Brewway</span>
+        <span className="text-xs font-semibold tracking-wide text-primary/60">{STORE_DISPLAY_NAME}</span>
       </div>
     </div>
   );
@@ -134,7 +135,7 @@ export default function CustomerMenuPage() {
             {visibleMenus.map((m) => (
               <Link
                 key={m.id}
-                to={`/liff/menu/${m.id}`}
+                to={`/order/${m.id}`}
                 className="bw-card group flex flex-col overflow-hidden p-0 transition-all hover:-translate-y-0.5 hover:shadow-md active:scale-[0.99]"
               >
                 <div className="relative aspect-[4/3] w-full overflow-hidden">

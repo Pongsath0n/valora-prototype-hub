@@ -78,3 +78,18 @@ export function useBusinessGuard() {
 export function useSystemGuard() {
   return useRoleGuard(SYSTEM_CONSOLE_ROLES);
 }
+
+/**
+ * Whether the current user has owner-level store authorization.
+ *
+ * Owner-only store actions (e.g. canonical `POST /orders/{id}/cancel`) MUST
+ * check `currentStoreRole === "owner"`, NOT `profileRole`. The backend
+ * enforces `_require_owner_store_role` using `store_members.role`, not
+ * `profiles.role`.
+ *
+ * Example: profileRole="admin" + currentStoreRole="manager" → false.
+ */
+export function useIsStoreOwner(): boolean {
+  const { currentStoreRole } = useProfileRole();
+  return currentStoreRole === "owner";
+}

@@ -79,7 +79,7 @@ export default function PrivacyNoticePage() {
           กลับไปหน้าเมนูสั่งซื้อ
         </Link>
         <Link
-          to="/liff/confirm"
+          to="/order/confirm"
           className="flex-1 rounded-full bg-primary px-4 py-2 text-center text-sm font-semibold text-primary-foreground"
         >
           ไปยืนยันออเดอร์

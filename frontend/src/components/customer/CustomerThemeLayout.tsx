@@ -3,6 +3,7 @@ import { Link, useLocation } from "react-router-dom";
 import { Coffee, ShoppingBag } from "lucide-react";
 
 import { readCart, getCartItemLineTotal } from "@/services/cartStorage";
+import { STORE_DISPLAY_NAME } from "@/config/brand";
 
 function formatBaht(value: number): string {
   return new Intl.NumberFormat("th-TH", {
@@ -21,7 +22,7 @@ function readCartSummary(): { count: number; total: number } {
 }
 
 /** Menu landing routes use a wider header to match the kiosk-style grid. */
-const WIDE_HEADER_ROUTES = new Set(["/order", "/liff/menu"]);
+const WIDE_HEADER_ROUTES = new Set(["/order"]);
 
 type LineLinkTokenContextValue = {
   lineLinkToken: string | null;
@@ -102,14 +103,14 @@ export default function CustomerThemeLayout({
               <Coffee className="h-5 w-5" aria-hidden />
             </span>
             <span className="leading-tight">
-              <span className="block text-base font-bold tracking-tight">Brewway</span>
+              <span className="block text-base font-bold tracking-tight">{STORE_DISPLAY_NAME}</span>
               <span className="block text-xs text-muted-foreground">{tagline}</span>
             </span>
           </Link>
 
           {showCart ? (
             <Link
-              to="/liff/cart"
+              to="/order/cart"
               aria-label="ดูตะกร้า"
               className="relative inline-flex min-h-[44px] items-center gap-2 rounded-full border border-primary/30 bg-card px-3 py-1.5 text-sm font-semibold text-primary shadow-sm transition-colors hover:bg-secondary"
             >

@@ -75,7 +75,7 @@ export default function CartPage() {
           </span>
           <p className="text-base font-semibold">ยังไม่มีสินค้าในตะกร้า</p>
           <p className="text-sm text-muted-foreground">เลือกเมนูจากหน้าหลักเพื่อเริ่มสั่งได้เลย</p>
-          <Link to="/liff/menu" className="bw-cta mt-2">
+          <Link to="/order" className="bw-cta mt-2">
             กลับไปเลือกเมนู
           </Link>
         </div>
@@ -164,7 +164,7 @@ export default function CartPage() {
         ))}
       </div>
 
-      <Link to="/liff/menu" className="bw-btn-outline text-sm">
+      <Link to="/order" className="bw-btn-outline text-sm">
         เลือกเมนูเพิ่ม
       </Link>
 
@@ -184,7 +184,7 @@ export default function CartPage() {
             <p className="text-[11px] text-muted-foreground">ยอดรวม</p>
             <p className="text-lg font-bold text-primary tabular-nums">{formatCurrency(estimatedTotal)}</p>
           </div>
-          <Link to="/liff/confirm" className="bw-cta flex-1">
+          <Link to="/order/confirm" className="bw-cta flex-1">
             ไปยืนยันคำสั่งซื้อ
             <ArrowRight className="h-4 w-4" aria-hidden />
           </Link>

@@ -98,14 +98,26 @@ type CustomerOrderItemPayload = {
   options?: CustomerOrderItemOptions | null;
 };
 
-type CustomerOrderCreatePayload = {
+/**
+ * Canonical V1 customer order creation payload.
+ *
+ * Per Backend Contract V1 (BE-FIX-01):
+ * - `customer.name` is REQUIRED.
+ * - `customer.phone` is OPTIONAL (Healholic self-order does not require phone).
+ * - `pickup_time` is OPTIONAL (V1 flow = order-now/wait/pay-at-counter).
+ * - `note` is OPTIONAL.
+ *
+ * The frontend MUST NOT send: price, cost, total, _system, usage_breakdown,
+ * or ingredient data. The backend is the sole authority for pricing and snapshots.
+ */
+export type CustomerOrderCreatePayload = {
   customer: {
     name: string;
-    phone: string;
+    phone?: string;
     line_user_id?: string;
   };
   items: CustomerOrderItemPayload[];
-  pickup_time: string;
+  pickup_time?: string;
   note?: string;
   line_link_token?: string;
 };
@@ -235,10 +247,12 @@ export const customerApi = {
     });
   },
 
+  /** @legacy OUT OF V1 FRONTEND SCOPE — legacy bank-transfer payment instructions. */
   async getPaymentInstructions(): Promise<PaymentInstructionsResponse> {
     return request<PaymentInstructionsResponse>("/api/customer/payment-instructions");
   },
 
+  /** @legacy OUT OF V1 FRONTEND SCOPE — legacy customer slip upload. */
   async uploadPaymentSlip(publicToken: string, file: File): Promise<OrderStatusSummary> {
     const formData = new FormData();
     formData.append("public_token", publicToken);

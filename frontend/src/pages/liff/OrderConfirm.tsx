@@ -213,7 +213,7 @@ export default function OrderConfirmPage() {
         orderNo: order.order_no ?? order.order_number ?? null,
         publicToken: order.public_token ?? null,
       });
-      navigate("/liff/success");
+      navigate("/order/success");
     } catch (error: any) {
       setFormError(error?.message || "ไม่สามารถส่งคำสั่งซื้อได้");
     } finally {
@@ -228,7 +228,7 @@ export default function OrderConfirmPage() {
         <div className="bw-card border-dashed p-8 text-center">
           <p className="text-base font-semibold text-muted-foreground">ไม่มีรายการให้ยืนยัน</p>
           <p className="mt-1 text-sm text-muted-foreground">โปรดกลับไปเลือกเมนูและเพิ่มลงตะกร้าก่อน</p>
-          <Link to="/liff/menu" className="bw-cta mt-4">
+          <Link to="/order" className="bw-cta mt-4">
             ไปหน้าเมนู
           </Link>
         </div>
@@ -252,7 +252,7 @@ export default function OrderConfirmPage() {
       {/* Review-step navigation (before submission): go back to the cart, or
           jump to the menu to change items/sweetness/add-ons. The cart draft is
           preserved in localStorage, so neither action loses the order draft. */}
-      <OrderFlowNav backTo="/liff/cart" editItemsTo="/liff/menu" />
+      <OrderFlowNav backTo="/order/cart" editItemsTo="/order" />
 
       <section className="bw-card p-4">
         <div className="flex items-center justify-between">
@@ -260,7 +260,7 @@ export default function OrderConfirmPage() {
             <p className="text-xs text-muted-foreground">ลูกค้า</p>
             <p className="text-base font-bold">{identity?.displayName || "ลูกค้า LIFF"}</p>
           </div>
-          <Link to="/liff/cart" className="text-sm font-semibold text-primary">
+          <Link to="/order/cart" className="text-sm font-semibold text-primary">
             แก้ไขตะกร้า
           </Link>
         </div>

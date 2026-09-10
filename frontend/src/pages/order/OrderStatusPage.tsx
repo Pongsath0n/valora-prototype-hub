@@ -705,7 +705,7 @@ export default function OrderStatusPage() {
 
       {/* 5) Secondary actions */}
       <div className="flex flex-wrap gap-3">
-        <Link to="/liff/menu" className="bw-btn-outline flex-1">
+        <Link to="/order" className="bw-btn-outline flex-1">
           สั่งเพิ่ม
         </Link>
       </div>

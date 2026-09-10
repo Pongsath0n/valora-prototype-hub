@@ -133,7 +133,7 @@ export default function MenuDetailPage() {
       ...(options ? { options } : {}),
     });
     setFeedback("เพิ่มสินค้าในตะกร้าแล้ว");
-    nav("/liff/cart");
+    nav("/order/cart");
   }
 
   if (loading) {
@@ -162,7 +162,7 @@ export default function MenuDetailPage() {
       <div className="mx-auto max-w-md space-y-4 px-4 py-6">
         <div className="bw-card p-6 text-center">
           <p className="text-base font-semibold">ไม่พบข้อมูลเมนู</p>
-          <button type="button" className="bw-cta mt-4" onClick={() => nav("/liff/menu")}>
+          <button type="button" className="bw-cta mt-4" onClick={() => nav("/order")}>
             กลับไปหน้าเมนู
           </button>
         </div>
@@ -174,7 +174,7 @@ export default function MenuDetailPage() {
     <div className="mx-auto max-w-md px-4 py-5 pb-28">
       <button
         type="button"
-        onClick={() => nav("/liff/menu")}
+        onClick={() => nav("/order")}
         className="mb-3 inline-flex items-center gap-1 text-sm font-semibold text-primary"
       >
         <ArrowLeft className="h-4 w-4" aria-hidden />

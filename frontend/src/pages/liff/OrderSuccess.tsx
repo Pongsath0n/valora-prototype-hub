@@ -241,7 +241,7 @@ export default function OrderSuccessPage() {
             โปรดกลับไปเลือกเมนูและทำรายการใหม่อีกครั้ง
           </p>
           <Link
-            to="/liff/menu"
+            to="/order"
             className="mt-4 inline-flex w-full items-center justify-center rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground"
           >
             ไปหน้าเมนู
@@ -470,7 +470,7 @@ export default function OrderSuccessPage() {
           </Link>
         ) : null}
         <Link
-          to="/liff/menu"
+          to="/order"
           className="inline-flex w-full items-center justify-center rounded-full border border-input px-4 py-2 text-sm font-medium text-foreground"
         >
           สั่งเพิ่ม

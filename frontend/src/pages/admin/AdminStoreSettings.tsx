@@ -3,10 +3,11 @@ import { CheckCircle2, Save } from "lucide-react";
 import AdminLayout from "@/components/admin/AdminLayout";
 import { storeSetupService } from "@/features/store/storeService";
 import { useAuth } from "@/contexts/AuthContext";
+import { STORE_DISPLAY_NAME } from "@/config/brand";
 
 export default function AdminStoreSettingsPage() {
   const { user } = useAuth();
-  const [shopName, setShopName] = useState("Brewway");
+  const [shopName, setShopName] = useState(STORE_DISPLAY_NAME);
   const [daysOpen, setDaysOpen] = useState(26);
   const [targetProfit, setTargetProfit] = useState(30000);
   const [loading, setLoading] = useState(true);

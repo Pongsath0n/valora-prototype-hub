@@ -163,6 +163,38 @@ function StaffOrderDetailRedirect() {
   return <Navigate to={`/staff/orders/${id}`} replace />;
 }
 
+/**
+ * Legacy /liff/* → canonical /order/* compatibility redirect.
+ *
+ * Preserves search params and hash so navigation state (public_token,
+ * order_id, line_link_token, etc.) is not lost.
+ *
+ * When `pathParam` is provided, the named path param is appended to the
+ * target pathname (e.g. `/liff/menu/:id` → `/order/:id`). Otherwise the
+ * redirect targets `to` verbatim.
+ */
+function LiffLegacyRedirect({
+  to,
+  pathParam,
+}: {
+  to: string;
+  /** Route path param name to forward into the canonical pathname (e.g. "id"). */
+  pathParam?: string;
+}) {
+  const location = useLocation();
+  const params = useParams();
+
+  const paramValue = pathParam ? params[pathParam] : undefined;
+  const pathname = paramValue ? `${to}/${paramValue}` : to;
+
+  return (
+    <Navigate
+      to={{ pathname, search: location.search, hash: location.hash }}
+      replace
+    />
+  );
+}
+
 export function AppRoutes() {
   return (
     <Routes>
@@ -282,13 +314,22 @@ export function AppRoutes() {
       <Route path="/app/settings" element={<ProtectedRoute><BusinessRoute><Settings /></BusinessRoute></ProtectedRoute>} />
 
       <Route path="/order" element={<CustomerThemeLayout><CustomerMenuPage /></CustomerThemeLayout>} />
+      <Route path="/order/:productId" element={<CustomerThemeLayout><MenuDetailPage /></CustomerThemeLayout>} />
+      <Route path="/order/cart" element={<CustomerThemeLayout><CartPage /></CustomerThemeLayout>} />
+      <Route path="/order/confirm" element={<CustomerThemeLayout showCart={false}><OrderConfirmPage /></CustomerThemeLayout>} />
+      <Route path="/order/success" element={<CustomerThemeLayout showCart={false}><OrderSuccessPage /></CustomerThemeLayout>} />
       <Route path="/order/status" element={<CustomerThemeLayout showCart={false}><OrderStatusPage /></CustomerThemeLayout>} />
       <Route path="/privacy" element={<CustomerThemeLayout showCart={false}><PrivacyNoticePage /></CustomerThemeLayout>} />
-      <Route path="/liff/menu" element={<CustomerThemeLayout><CustomerMenuPage /></CustomerThemeLayout>} />
-      <Route path="/liff/menu/:id" element={<CustomerThemeLayout><MenuDetailPage /></CustomerThemeLayout>} />
-      <Route path="/liff/cart" element={<CustomerThemeLayout><CartPage /></CustomerThemeLayout>} />
-      <Route path="/liff/confirm" element={<CustomerThemeLayout showCart={false}><OrderConfirmPage /></CustomerThemeLayout>} />
-      <Route path="/liff/success" element={<CustomerThemeLayout showCart={false}><OrderSuccessPage /></CustomerThemeLayout>} />
+
+      {/* ── Legacy /liff/* compatibility redirects → canonical /order/* ──
+       * Old bookmarks and LINE LIFF entry points must continue to work. These
+       * redirects preserve search params and hash so navigation state
+       * (public_token, order_id, line_link_token, etc.) is not lost. */}
+      <Route path="/liff/menu" element={<LiffLegacyRedirect to="/order" />} />
+      <Route path="/liff/menu/:id" element={<LiffLegacyRedirect to="/order" pathParam="id" />} />
+      <Route path="/liff/cart" element={<LiffLegacyRedirect to="/order/cart" />} />
+      <Route path="/liff/confirm" element={<LiffLegacyRedirect to="/order/confirm" />} />
+      <Route path="/liff/success" element={<LiffLegacyRedirect to="/order/success" />} />
 
       <Route path="*" element={<NotFound />} />
     </Routes>
