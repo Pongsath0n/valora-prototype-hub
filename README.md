@@ -1,177 +1,480 @@
-# Valora / Brewway — ระบบช่วยวางแผนกำไรสำหรับร้านเล็กและ SMEs
+Healholic — Valora V1 สำหรับระบบหน้าร้านและการวางแผนกำไร
 
-**สถานะปัจจุบัน:** V.1 Closure / พร้อมเข้าสู่ช่วง Soft Launch
+สถานะปัจจุบัน: Frontend V1 Frozen / พร้อม Redeploy สู่ Production และเข้าสู่ช่วง Soft Launch
 
-Valora คือระบบช่วยเจ้าของร้านเล็กวางแผนกำไร เห็นต้นทุนจริง จุดคุ้มทุน และจำนวนยอดขายที่ต้องทำเพื่อให้ถึงเป้ากำไร โดยออกแบบให้เหมาะกับร้านกาแฟ ร้านเครื่องดื่ม ร้านอาหารขนาดเล็ก และ SMEs ที่ต้องการระบบช่วยตัดสินใจโดยไม่ซับซ้อนเหมือน ERP ขนาดใหญ่
+Healholic เป็น implementation ของแพลตฟอร์ม Valora สำหรับร้านขนาดเล็ก โดยรวมการรับออเดอร์ การทำงานหน้าร้าน การจัดการคิว การชำระเงินที่เคาน์เตอร์ และเครื่องมือวางแผนกำไรสำหรับ Owner ไว้ในระบบเดียว
 
----
+Valora มีจุดยืนเป็น decision-support platform สำหรับร้านเล็กและ SMEs ไม่ใช่ ERP หรือระบบบัญชีเต็มรูปแบบ โดยเน้นให้เจ้าของร้านเห็นข้อมูลที่จำเป็นต่อการวางแผนต้นทุน กำไร และการดำเนินงานโดยไม่เพิ่มความซับซ้อนเกินความจำเป็น
 
-## ภาพรวมของโปรเจ็ค
+ภาพรวมของระบบ
 
-Valora / Brewway เป็นระบบช่วยวางแผนกำไรและการดำเนินงานเบื้องต้นสำหรับร้านเล็ก โดยเชื่อมข้อมูลคำสั่งซื้อ ต้นทุนวัตถุดิบ สูตร และค่าใช้จ่ายประจำเข้าด้วยกันในมุมมองเดียว ผู้ใช้เห็นสถานะกำไรจริง เทียบกับจุดคุ้มทุน และจำลองสถานการณ์ได้ก่อนตัดสินใจขยายร้านหรือเพิ่มสินค้าใหม่
+Healholic V1 เชื่อม flow หลักของร้านตั้งแต่ลูกค้าสั่งสินค้าไปจนถึง Staff จัดการคิวและ Owner ใช้ข้อมูลสำหรับวางแผนธุรกิจ
 
----
+ภาพรวมการทำงาน:
 
-## จุดยืนของระบบ
+Customer
+  ↓
+Public Order
+  ↓
+Incoming Queue
+  ↓
+Counter Payment
+  ↓
+Production Queue
+  ↓
+Preparing → Ready → Completed
 
-- **Profit Planning** เป็นหัวใจหลัก ทุกฟังก์ชันอื่น เช่น การรับออเดอร์ ตรวจสลิป รายงาน และการแจ้งเตือน LINE OA ถูกออกแบบเพื่อสนับสนุนความแม่นยำของแผนกำไร
-- ระบบเน้นช่วยผู้ประกอบการขนาดเล็กและ SME ให้ตัดสินใจจากข้อมูลจริง โดยไม่ต้องใช้งาน ERP เต็มรูปแบบ
-- มี Owner dashboard ที่สรุปข้อมูลแผนกำไร 5 ส่วน พร้อมตัวชี้วัดเฉลี่ยต่อแก้วและรายเดือน เพื่อให้เจ้าของร้านเห็นภาพเดียวจบ
+Owner
+  ↓
+Profit Planning
+  ↓
+Planning Baseline
+  ↓
+Planning Assumptions
+  ↓
+Scenario / Projection
 
----
+ระบบถูกออกแบบให้ Kiosk เป็นหน้าปฏิบัติงานหลักของ Staff และให้ /staff/orders เป็นหน้าจัดการ Incoming และ Production Queue แบบเต็ม
 
-## สิ่งที่ Valora V.1 ทำได้
+จุดยืนของระบบ
 
-- วางแผนกำไรสำหรับร้านกาแฟ/SME ด้วยเครื่องยนต์ Profit Planning
-- คำนวณต้นทุนวัตถุดิบ/บรรจุภัณฑ์ตามสูตรเมนู (Recipe / direct cost)
-- จัดการต้นทุนแฝงและค่าใช้จ่ายประจำ พร้อมเฉลี่ยต่อแก้วตามแผน
-- ตั้งสมมติฐานการขายและนำไปผูกกับจุดคุ้มทุนต่อเดือน/ต่อวัน
-- คำนวณจำนวนแก้วที่ต้องขายเพื่อถึงเป้ากำไร และลำดับความสำคัญตามสถานะปัจจุบัน
-- วิเคราะห์กำไรรายสินค้าและดูผลกระทบต่อกำไรรวม
-- จำลองสถานการณ์ (Scenario simulation) เพื่อดูผลแผนใหม่ทันที
-- Owner planning dashboard ตามโครงสร้าง 5 ส่วน
-- รับออเดอร์ลูกค้าผ่านหน้าเว็บสาธารณะ พร้อมติดตามสถานะได้
-- ลูกค้าอัปโหลดสลิปการชำระเงิน และให้ Staff ตรวจสอบได้ในคิวงาน
-- Staff payment review / order queue / customer-safe notification
-- Owner/Staff แยกบทบาทสิทธิ์อย่างชัดเจน ส่วน Customer เห็นเฉพาะ flow สั่งซื้อและสถานะ
-- รองรับ LINE OA notification readiness, LINE link-token binding, และการแจ้งเตือนเหตุการณ์สำคัญ
-- Owner dashboard / reporting และ Landing Page ที่สื่อสาร positioning ของ V.1 แล้ว
+Profit Planning เป็นหนึ่งในความสามารถหลักของ Valora สำหรับ Owner
 
----
+ข้อมูลการขาย สูตรสินค้า ต้นทุนวัตถุดิบ และค่าใช้จ่ายที่เกี่ยวข้องถูกนำมาใช้สนับสนุนการวางแผน
 
-## โครงสร้างหน้า `/app/planning`
+ระบบแยกชัดเจนระหว่าง ข้อมูลที่เกิดขึ้นจริง, สมมติฐานการวางแผน, และ Scenario แบบ What-if
 
-ปัจจุบันใช้โครงสร้าง 5 ส่วนเพื่อให้เจ้าของร้านทบทวนแผนกำไรอย่างเป็นระบบ:
+Customer, Staff, Manager และ Owner มีสิทธิ์และหน้าที่ต่างกันตาม Store Role
 
-1. **ภาพรวมการวางแผนกำไร** – แสดงสรุปยอดขายตามแผน กำไรเฉลี่ยต่อแก้ว และสถานะเทียบเป้ากำไร
-2. **สมมติฐานการวางแผน** – ระบุยอดขายเป้าหมาย จำนวนแก้วต่อวัน ราคาเฉลี่ย ช่องทางขาย และตัวเลขหลักที่ใช้ในแผน
-3. **ต้นทุนแฝง / ค่าใช้จ่ายประจำ** – รวมค่าเช่า ค่าแรง น้ำไฟ และต้นทุนแฝงอื่น ๆ พร้อมคำนวณต้นทุนแฝงเฉลี่ยต่อแก้วตามแผน
-4. **กำไรรายสินค้า** – รายการสินค้า/สูตรพร้อมกำไรขั้นต้นก่อนหักต้นทุนแฝง เพื่อเห็นว่ารายการใดมีน้ำหนักต่อกำไรรวม
-5. **ลองปรับแผน / จำลองสถานการณ์** – ใส่ตัวแปรใหม่แล้วเห็นผลลัพธ์ทันที ทั้งกำไรเฉลี่ย/แก้ว จุดคุ้มทุน และจำนวนแก้วที่ต้องขาย
+ระบบไม่ถือว่า Platform Admin เท่ากับ Store Owner
 
-### ตัวชี้วัดและตรรกะการวางแผน
+V1 เน้นความเรียบง่าย ความปลอดภัย และ workflow ที่เหมาะกับการใช้งานจริงหน้าร้าน
 
-- ต้นทุนวัตถุดิบเฉลี่ยต่อแก้วจากสูตรและราคาวัตถุดิบล่าสุด
-- ต้นทุนแฝงเฉลี่ยต่อแก้วตามแผน (คำนวณจากค่าใช้จ่ายประจำหารด้วยจำนวนแก้วที่ตั้งไว้)
-- กำไรเฉลี่ยต่อแก้วตามแผน (รายได้ต่อแก้ว − ต้นทุนวัตถุดิบ − ต้นทุนแฝงเฉลี่ย)
-- จุดคุ้มทุนต่อเดือน/ต่อวัน
-- เป้ากำไรต่อเดือน/ต่อวัน และจำนวนแก้วที่ต้องขายเพื่อถึงเป้านั้น
-- สถานะเทียบเป้ากำไร (ต่ำกว่า เท่ากับ หรือสูงกว่าแผน)
-- สูตรจำนวนแก้วเพื่อถึงเป้ากำไร: `(ต้นทุนแฝงต่อเดือน + เป้ากำไรต่อเดือน) / กำไรขั้นต้นต่อแก้วก่อนหักต้นทุนแฝง`
+สิ่งที่ Healholic / Valora V1 ทำได้
 
-**จุดคุ้มทุน** หมายถึงยอดขายที่ครอบคลุมต้นทุนแฝง/ต้นทุนคงที่และเริ่มไม่ขาดทุน
+Customer Order
 
-**เป้ากำไร** หมายถึงยอดขายที่ครอบคลุมต้นทุนแฝง/ต้นทุนคงที่และยังได้กำไรตามเป้าที่ตั้งไว้ ซึ่งมีค่าเพิ่มจากจุดคุ้มทุนเสมอ
+ลูกค้าดูเมนูผ่านหน้าเว็บสาธารณะ /order
 
----
+ค้นหาและกรองเมนูตามหมวดหมู่
 
-## อยู่ระหว่างพัฒนา: โมดูล POS หน้าร้าน
+เลือกสินค้า ตัวเลือก และ Add-on ที่ระบบอนุญาต
 
-- โมดูล POS สำหรับหน้าร้าน **อยู่ระหว่างพัฒนา** ไม่ถือเป็นฟีเจอร์ที่เสร็จสมบูรณ์ใน V.1
-- เป้าหมายเพื่อรองรับการขายหน้าร้าน (direct shop sales) และการทำรายการที่เคาน์เตอร์
-- จะออกแบบ workflow POS ให้สอดคล้องกับการทำงานหน้าร้านจริง และส่งข้อมูลยอดขายกลับเข้าสู่ระบบวิเคราะห์กำไร
-- ข้อมูลจาก POS ในอนาคตจะช่วยให้คำนวณรายได้ ต้นทุน และกำไรได้แม่นยำขึ้น แต่ยังไม่เปิดใช้งานในการ Soft Launch รอบนี้
+เพิ่มสินค้าใน Cart และตรวจสอบรายการก่อนส่ง
 
----
+ระบุ ชื่อลูกค้า และ หมายเหตุระดับออเดอร์ เท่านั้น
 
-## สิ่งที่ Valora ยังไม่ใช่
+ส่ง Self-order เข้าสู่ Incoming Queue
 
-- ไม่ใช่ ERP เต็มรูปแบบหรือระบบบัญชีครบวงจร
-- ไม่ใช่ระบบภาษีหรือการยื่นแบบอัตโนมัติ
-- ไม่ใช่ระบบเงินเดือนหรือ Payroll
-- ไม่ใช่ระบบ Inventory Accounting ระดับองค์กร
-- ยังไม่ใช่ Full POS system และยังไม่รองรับ CRM เชิงลึก
+ติดตามสถานะออเดอร์ด้วย Public Token
 
-> Valora V.1 โฟกัสที่การวางแผนกำไรและการช่วยตัดสินใจของธุรกิจขนาดเล็กเท่านั้น
+แสดงเลขออเดอร์รูปแบบ ORD-XXXXX
 
----
+V1 ไม่มี Customer-side flow สำหรับ:
 
-## Tech Stack
+อัปโหลดสลิป
 
-- **Frontend:** React + Vite + TypeScript
-- **Backend:** FastAPI
-- **Database / Auth / Storage:** Supabase
-- **Deployment:** Vercel (Frontend) + Railway (Backend)
-- **Messaging:** LINE OA Messaging API
+เลือก Payment Gateway
 
----
+ชำระเงินออนไลน์
 
-## การรันระบบสำหรับพัฒนา
+LINE identity
 
-เตรียม Node.js v18+, npm, Python 3.10+, และ Supabase credentials ก่อนเริ่ม
+เบอร์โทรศัพท์
 
-### Backend
+Pickup time
 
-```bash
+Email
+
+Staff Kiosk
+
+หน้า /staff/kiosk เป็น operation surface หลักสำหรับ Staff
+
+รองรับ:
+
+เลือกเมนูสำหรับ Walk-in
+
+ปรับตัวเลือกและจำนวนสินค้า
+
+จัดการ Kiosk Cart
+
+เลือกชำระเงินที่เคาน์เตอร์ด้วย:
+
+เงินสด
+
+PromptPay QR แบบ Static ของร้าน
+
+แสดง QR ขนาดเหมาะกับการใช้งานบน iPad
+
+มี image lifecycle และ retry สำหรับ Safari/iPad
+
+แสดง Incoming Self-order ที่รอชำระโดยไม่รบกวน Kiosk operation มากเกินไป
+
+Preview Incoming สูงสุด 3 รายการ
+
+แสดงจำนวนคิวรวมและเวลารอของออเดอร์เก่าสุด
+
+เปิดดูคิวทั้งหมดผ่าน /staff/orders
+
+Self-order ที่เข้ามาจะ ไม่ถูก copy เข้า Kiosk Cart
+
+Incoming Queue
+
+Incoming Queue ใช้สำหรับ Self-order ที่:
+
+status = pending_payment
+payment_status = unpaid
+source = web_order
+
+หลักการสำคัญ:
+
+Backend เป็นผู้กำหนดลำดับ FIFO
+
+Staff เห็นชื่อลูกค้า หมายเหตุ รายการสินค้า ยอดรวม และเวลารอ
+
+ไม่มีขั้นตอน “รับออเดอร์” เพิ่ม เพราะการอยู่ใน Incoming Queue หมายถึงระบบรับรายการแล้ว
+
+Staff เปิด Counter Payment Dialog เพื่อรับชำระที่หน้าร้าน
+
+รองรับเงินสดและ Static PromptPay เท่านั้นใน V1
+
+Production Queue
+
+เมื่อ Staff ยืนยันว่ารับชำระเงินแล้ว ออเดอร์จะเข้าสู่ Production Queue
+
+Flow หลัก:
+
+accepted
+  ↓
+preparing
+  ↓
+ready
+  ↓
+completed
+
+Production Queue ใช้ payment_confirmed_at เป็นลำดับ FIFO และไม่มีการให้ priority ตาม source ของออเดอร์
+
+การยืนยันชำระเงินใช้ Backend atomic flow เพื่อให้การสร้าง/ยืนยันออเดอร์ การบันทึกการชำระ และการตัด Stock ทำงานสอดคล้องกัน
+
+Cancellation
+
+การยกเลิกออเดอร์เป็นสิทธิ์ Store Owner เท่านั้น
+
+Owner สามารถเห็นคำสั่งยกเลิกเฉพาะสถานะ:
+
+pending_payment
+
+accepted
+
+ไม่อนุญาตผ่าน normal cancel flow สำหรับ:
+
+preparing
+
+ready
+
+completed
+
+cancelled
+
+voided
+
+Staff, Manager และ Platform Admin ที่ไม่ได้มี currentStoreRole = owner จะไม่เห็น action ยกเลิก
+
+Profit Planning
+
+หน้า Owner:
+
+/owner/profit-planning
+
+ใช้สำหรับช่วย Owner วางแผนกำไรและประเมินผลของสมมติฐานก่อนตัดสินใจ
+
+ระบบแยกข้อมูลออกเป็น 3 แนวคิดหลัก:
+
+1. Planning Baseline
+
+ข้อมูลฐานจาก Backend ที่ใช้เป็นจุดตั้งต้นในการวางแผน เช่น โครงสร้างสินค้า สูตร และข้อมูลที่เกี่ยวข้องกับการคำนวณ
+
+2. Planning Assumptions
+
+สมมติฐานที่ Owner ใช้วางแผน เช่น:
+
+เป้ากำไรรายเดือน
+
+จำนวนวันที่เปิดร้าน
+
+จำนวนแก้วหรือยอดขายที่คาดหวัง
+
+ค่าใช้จ่ายประจำ
+
+สมมติฐานอื่นที่เกี่ยวข้องกับแผน
+
+ค่ากลุ่มนี้เป็น Planning Assumptions ไม่ใช่ผลกำไรจริงทางบัญชี
+
+3. Scenario / Projection
+
+Owner สามารถทดลองปรับสมมติฐานเพื่อดูผลในรูปแบบ What-if โดยไม่เปลี่ยนความหมายของข้อมูลจริง
+
+ตัวอย่างสิ่งที่ใช้ประกอบการวางแผน:
+
+ต้นทุนวัตถุดิบตามสูตร
+
+Direct cost
+
+ค่าใช้จ่ายประจำ
+
+กำไรขั้นต้นต่อสินค้า
+
+Break-even
+
+เป้ากำไร
+
+จำนวนยอดขายที่ต้องทำเพื่อให้ถึงเป้าหมาย
+
+Profit Planning เป็นเครื่องมือช่วยตัดสินใจ ไม่ใช่งบการเงินหรือระบบบัญชีรับรองผลประกอบการ
+
+บทบาทผู้ใช้งาน
+
+Role
+
+สิทธิ์หลัก
+
+Customer
+
+สั่งสินค้าและติดตามสถานะ
+
+Staff
+
+Kiosk, Incoming Queue, Counter Payment, Production operation
+
+Manager
+
+งาน operation ตามสิทธิ์ร้าน แต่ไม่มี Owner-only cancellation
+
+Owner
+
+Operation + Profit Planning + Owner-only actions
+
+Platform/System Admin
+
+ดูแลระบบระดับแพลตฟอร์ม ไม่ได้รับสิทธิ์ Store Owner โดยอัตโนมัติ
+
+ระบบใช้ Store Role (currentStoreRole) เป็น authority สำหรับ Owner-only features
+
+Route หลัก
+
+Customer
+
+/order
+/order/:productId
+/order/cart
+/order/confirm
+/order/success
+/order/status
+
+Staff
+
+/staff/kiosk
+/staff/orders
+/staff/orders/:id
+
+Owner
+
+/owner/profit-planning
+
+System
+
+/system/*
+
+Legacy /liff/* routes บางส่วนยังคง redirect ไปยัง canonical /order/* routes เพื่อรองรับ compatibility
+
+Realtime
+
+Frontend มี Realtime invalidation mechanism สำหรับ Store Orders แต่ V1 ใช้:
+
+Canonical REST API = Source of Truth
+Polling 15 วินาที = Fallback Refresh
+Realtime = Optional Invalidation Accelerator
+
+Production feature flag ยังคงต้องเป็น:
+
+VITE_ENABLE_STORE_ORDERS_REALTIME=false
+
+จนกว่าจะผ่านการตรวจสอบ RLS และ Supabase Realtime publication infrastructure แยกต่างหาก
+
+สิ่งที่ Healholic / Valora V1 ยังไม่ใช่
+
+ไม่ใช่ ERP เต็มรูปแบบ
+
+ไม่ใช่ระบบบัญชีครบวงจร
+
+ไม่ใช่ระบบภาษีหรือยื่นแบบอัตโนมัติ
+
+ไม่ใช่ Payroll
+
+ไม่ใช่ Inventory Accounting ระดับองค์กร
+
+ไม่ใช่ CRM เชิงลึก
+
+ไม่ใช่ Payment Gateway
+
+ไม่มีระบบตรวจสลิปอัตโนมัติใน V1
+
+ไม่มี Dynamic PromptPay QR
+
+ไม่มีการตรวจสอบการรับเงินจริงอัตโนมัติ
+
+การชำระเงิน V1 ใช้ Staff เป็นผู้ยืนยันการรับเงินจริงที่เคาน์เตอร์
+
+Tech Stack
+
+Frontend: React 18 + Vite + TypeScript
+
+Routing: React Router
+
+Server State / Query: TanStack Query
+
+Backend: FastAPI
+
+Database / Auth / Storage: Supabase
+
+Database: PostgreSQL
+
+Frontend Deployment: Vercel
+
+Backend Deployment: Railway
+
+การรันระบบสำหรับพัฒนา
+
+Backend
+
 cd backend
-uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
-# http://127.0.0.1:8000
-```
+.\.venv\Scripts\Activate.ps1
+python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 
-### Frontend
+Backend local:
 
-```bash
+http://127.0.0.1:8000
+
+Frontend
+
 cd frontend
+npm install
 npm run dev
-# http://localhost:8080/
-```
 
----
+Vite จะแสดง Local URL ที่ใช้งานจริงใน Terminal โดยปกติเริ่มจาก port 5173 และอาจเลือก port ถัดไปหากถูกใช้งานอยู่แล้ว
 
-## คำสั่งทดสอบที่ใช้
+Validation Commands
 
-### Backend
+Frontend
 
-```bash
-cd backend
-python -m compileall app
-python -m pytest app/tests/test_planning_overhead.py app/tests/test_planning_overhead_api.py app/tests/test_cost_engine.py
-```
-
-### Frontend
-
-```bash
 cd frontend
+
+npm test
 npm run build
-npx vitest run src/App.legacy-routes.test.tsx
-```
+npx tsc --noEmit
+npm run lint
 
-### Project Smoke / Security
+Frontend V1 release validation ล่าสุด:
 
-```bash
-npm run e2e:planning-baseline-smoke
-npm run e2e:security-audit
-```
+Tests:       893 passed / 0 failed
+Build:       PASS
+TypeScript:  0 errors
+ESLint:      0 errors / 23 warnings
 
----
+มี known test-stability observation ใน CounterPaymentDialog ที่เคยเกิด timer teardown flake แบบ intermittent แต่ final validation run ผ่านทั้งหมด
 
-## หมายเหตุด้านความปลอดภัยและบทบาทผู้ใช้
+Backend
 
-- **Owner / Admin:** เห็นข้อมูลวางแผนกำไร ต้นทุน สมมติฐาน และรายงานทั้งหมด เพื่อควบคุมแผนและตรวจสอบสถานะระบบ
-- **Staff:** จัดการออเดอร์ ตรวจสลิป ปรับสถานะคำสั่งซื้อ แต่ไม่ควรเข้าถึงข้อมูลต้นทุน กำไร หรือค่าใช้จ่ายแฝง
-- **Customer:** ใช้งานเฉพาะหน้า public order/status flow ไม่เห็นข้อมูลภายในร้านหรือสมมติฐานกำไร
+cd backend
 
----
+python -m pytest
 
-## ข้อควรระวัง
+Backend V1.1 frozen contract ผ่าน regression suite ก่อน freeze และไม่มี Backend source change ใน Frontend V1 release
 
-- ห้าม commit ไฟล์ `.env` หรือข้อมูลลับใด ๆ ลง repository
-- ห้ามเปิดเผย token, Supabase keys หรือ LINE OA secrets ในเอกสารสาธารณะ
-- เพิ่ม LINE OA keys เฉพาะเมื่อพร้อม deploy และอยู่ในขั้นตอน configuration สุดท้ายเท่านั้น
-- ตรวจสอบและผ่านการทดสอบในเครื่องให้ครบก่อนขึ้นระบบจริงหรือทดสอบบน cloud
+Release Snapshot
 
----
+Backend
 
-## สถานะปัจจุบัน
+healholic-backend-v1
+healholic-backend-v1.1
 
-Valora V.1 ปิดงานเรียบร้อย (V.1 Closure) และพร้อมเข้าสู่ช่วง **Soft Launch** แบบควบคุมคุณภาพ เน้นแก้ไขเฉพาะ blocker bug หากมี และเก็บ feedback สำหรับเวอร์ชันถัดไป
+Frontend
 
----
+healholic-frontend-fe01
+healholic-frontend-v1
 
-## Contact
-สำหรับคำถามหรือข้อสงสัย ติดต่อทีมพัฒนา
+Frontend V1 release commit:
+
+2595a528690ca9b23e2e430b858f79a464312fa5
+
+Tag:
+
+healholic-frontend-v1
+
+Production Safety
+
+ห้าม commit .env หรือ secrets ลง repository
+
+Frontend ใช้ Supabase anon/public key เท่านั้น
+
+ห้ามนำ SUPABASE_SERVICE_ROLE_KEY ไปใช้ใน Frontend
+
+ห้าม hardcode Production secrets ใน source code
+
+Production Database เป็นข้อมูลจริงของร้าน ห้ามสร้าง/แก้ไข/ลบข้อมูลเพื่อ QA โดยไม่จำเป็น
+
+การทดสอบ production ควรเน้น read-only smoke test และหยุดก่อน action ที่ทำ mutation เมื่อไม่มีเหตุผลทางธุรกิจจริง
+
+Realtime ต้องคงเป็น false จนกว่า infrastructure gate จะผ่าน
+
+ก่อน Production deployment ต้องตรวจ VITE_BACKEND_URL, Supabase environment และ release commit ให้ถูกต้อง
+
+สถานะปัจจุบัน
+
+Healholic Frontend V1 ผ่าน:
+
+Frontend integration
+
+Automated regression testing
+
+Manual Smoke Test
+
+iPad Safari PromptPay QR verification
+
+Customer UX validation
+
+Staff Kiosk / Incoming Queue validation
+
+Owner RBAC validation
+
+Worktree cleanup
+
+Frontend V1 freeze
+
+Remote branch/tag verification
+
+สถานะปัจจุบัน:
+
+Frontend V1 Frozen — พร้อม Redeploy สู่ Production และเริ่ม Soft Launch แบบควบคุมคุณภาพ
+
+ในช่วง Soft Launch จะเน้น:
+
+เฝ้าระวัง blocker bug
+
+ตรวจสอบ workflow หน้างานจริง
+
+เก็บ feedback จาก Owner และ Staff
+
+หลีกเลี่ยงการเพิ่ม feature ใหม่โดยไม่ผ่านการวางแผน
+
+ใช้ feedback เป็นข้อมูลสำหรับ V1.x / V2
+
+Contact
+
+สำหรับคำถามหรือข้อสงสัยเกี่ยวกับระบบ:
+
 pongsathon.officialwork@gmail.com
 
-## License
+License
 
 Copyright © 2026 Valora Hub. All rights reserved.
