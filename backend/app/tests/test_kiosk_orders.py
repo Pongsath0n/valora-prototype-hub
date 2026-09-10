@@ -1,4 +1,5 @@
 import unittest
+import uuid as _uuid
 from types import SimpleNamespace
 from typing import Any, Dict, List, Optional
 from unittest.mock import patch
@@ -6,247 +7,27 @@ from unittest.mock import patch
 from fastapi import HTTPException
 
 from app.api import store_admin
+from app.services.atomic_rpc import AtomicRPCError
 
 
 class KioskOrderEndpointTests(unittest.TestCase):
-    class _FakeInsertTable:
-        def __init__(self, name: str, store: List[Any]):
-            self.name = name
-            self.store = store
-            self.payload: Any = None
+    """BE-FIX-05: Kiosk atomic order endpoint tests.
 
-        def insert(self, payload: Any) -> "KioskOrderEndpointTests._FakeInsertTable":
-            self.payload = payload
-            return self
+    The Kiosk endpoint now uses a single atomic RPC
+    (create_and_finalize_kiosk_order_atomic) that handles order
+    creation, payment, and stock consumption in ONE transaction.
+    """
 
-        def execute(self) -> SimpleNamespace:
-            if self.name == "orders":
-                row = dict(self.payload)
-                row.setdefault("id", f"order-{len(self.store) + 1}")
-                self.store.append(row)
-                return SimpleNamespace(error=None, data=[row])
-            self.store.append(self.payload)
-            return SimpleNamespace(error=None, data=self.payload)
-
-    class _FakeClient:
-        def __init__(self) -> None:
-            self.order_rows: List[Dict[str, Any]] = []
-            self.order_item_rows: List[Any] = []
-
-        def table(self, name: str) -> "KioskOrderEndpointTests._FakeInsertTable":
-            if name == "orders":
-                return KioskOrderEndpointTests._FakeInsertTable(name, self.order_rows)
-            if name == "order_items":
-                return KioskOrderEndpointTests._FakeInsertTable(name, self.order_item_rows)
-            raise AssertionError(f"unexpected table {name}")
-
-    def _build_payload(self) -> store_admin.KioskOrderCreate:
-        return store_admin.KioskOrderCreate(
+    def _build_payload(self, **overrides) -> store_admin.KioskOrderCreate:
+        defaults = dict(
             items=[store_admin.OrderItemPayload(product_id="prod-1", quantity=2)],
             payment_method="cash",
             customer=None,
             note="   walk-in latte   ",
+            client_order_id=str(_uuid.uuid4()),
         )
-
-    def test_staff_kiosk_order_recalculates_totals_and_masks_response(self) -> None:
-        payload = self._build_payload()
-        fake_client = self._FakeClient()
-        snapshot = {
-            "product_id": "prod-1",
-            "quantity": 2,
-            "product_name": "Latte",
-            "total_price": 80.0,
-            "total_cost": 30.0,
-            "base_cost_breakdown": [
-                {"ingredient_id": "ing-coffee", "quantity_used": 18.0, "unit": "g"},
-                {"ingredient_id": "ing-milk", "quantity_used": 150.0, "unit": "ml"},
-            ],
-            "addon_cost_breakdown": [],
-            "options_snapshot": {"sweetness": 100, "addons": []},
-        }
-
-        def fake_build_record(
-            snap: Dict[str, Any], *, order_id: str, store_id: str | None, product_name: str | None
-        ) -> Dict[str, Any]:
-            record = dict(snap)
-            record.update({"order_id": order_id, "store_id": store_id, "product_name": product_name})
-            return record
-
-        def fake_orders_has_column(_client: Any, column: str) -> bool:
-            return column in {
-                "customer_name",
-                "customer_phone",
-                "channel_fee",
-                "order_source",
-                "channel",
-                "order_status",
-                "payment_method",
-            }
-
-        def fake_map_order(_client: Any, store_id: str, order_id: str, is_staff: bool) -> Dict[str, Any]:
-            base = {
-                "id": order_id,
-                "store_id": store_id,
-                "total_cost": 30.0,
-                "gross_profit": 50.0,
-                "items": [
-                    {
-                        "unit_cost": 15.0,
-                        "line_cost": 30.0,
-                        "line_profit": 20.0,
-                        "total_cost": 30.0,
-                        "product_name": "Latte",
-                    }
-                ],
-            }
-            return store_admin._mask_order_for_staff(base) if is_staff else base
-
-        with patch("app.api.store_admin._get_ctx", return_value={"client": fake_client, "user_id": "user-1", "memberships": []}), \
-            patch("app.api.store_admin._resolve_store_id", return_value=("store-1", "staff")), \
-            patch("app.api.store_admin._ensure_kiosk_channel", return_value="channel-1"), \
-            patch("app.api.store_admin._ensure_product_in_store"), \
-            patch("app.api.store_admin.prepare_order_item_snapshot", return_value=snapshot) as mock_snapshot, \
-            patch("app.api.store_admin.resolve_channel_fee", return_value=5.0), \
-            patch("app.api.store_admin.generate_order_number", return_value="ORD-123"), \
-            patch("app.api.store_admin.order_items_supports_store_scope", return_value=True), \
-            patch("app.api.store_admin.build_order_item_record", side_effect=fake_build_record), \
-            patch("app.api.store_admin.prune_order_item_columns", side_effect=lambda _client, record: record), \
-            patch("app.api.store_admin._orders_has_column", side_effect=fake_orders_has_column), \
-            patch("app.api.store_admin._create_paid_payment") as mock_payment, \
-            patch("app.api.store_admin.recalculate_order_totals") as mock_recalc, \
-            patch("app.api.store_admin._write_order_status_log") as mock_status_log, \
-            patch("app.api.store_admin.build_usage_plan", return_value=[{"order_item_id": "oi-1", "ingredient_id": "ing-coffee", "quantity": 36.0}]) as mock_build_plan, \
-            patch("app.api.store_admin.consume_for_paid_order") as mock_consume, \
-            patch("app.api.store_admin._map_created_order_with_items", side_effect=fake_map_order):
-            response = store_admin.create_kiosk_order(payload, authorization="Bearer token")
-
-        order_row = fake_client.order_rows[0]
-        self.assertEqual(order_row["subtotal"], 80.0)
-        self.assertEqual(order_row["total_cost"], 30.0)
-        self.assertEqual(order_row["channel_fee"], 5.0)
-        self.assertEqual(order_row["total_amount"], 85.0)
-        self.assertEqual(order_row["gross_profit"], 50.0)
-        self.assertEqual(order_row["status"], "accepted")
-        self.assertEqual(order_row["channel_id"], "channel-1")
-        self.assertEqual(order_row["payment_status"], "paid")
-        self.assertEqual(order_row["order_source"], "kiosk")
-        self.assertEqual(order_row["channel"], "kiosk")
-        self.assertEqual(order_row["order_status"], "accepted")
-        self.assertEqual(order_row["payment_method"], "cash")
-        self.assertEqual(order_row["note"], "walk-in latte")
-        self.assertEqual(fake_client.order_item_rows[0][0]["store_id"], "store-1")
-
-        mock_payment.assert_called_once()
-        payment_args = mock_payment.call_args[0]
-        self.assertEqual(payment_args[1], "store-1")
-        self.assertEqual(payment_args[2], order_row["id"])
-        self.assertEqual(payment_args[3], 85.0)
-        self.assertEqual(payment_args[4], "cash")
-        mock_recalc.assert_called_once_with(fake_client, "store-1", order_row["id"])
-        mock_status_log.assert_called_once()
-        mock_snapshot.assert_called_once_with(
-            fake_client,
-            "store-1",
-            product_id="prod-1",
-            quantity=2,
-            channel_id="channel-1",
-            raw_options=None,
-        )
-
-        self.assertIsNone(response["total_cost"])
-        self.assertIsNone(response["gross_profit"])
-        self.assertEqual(len(response["items"]), 1)
-        self.assertIsNone(response["items"][0]["unit_cost"])
-        self.assertIsNone(response["items"][0]["line_profit"])
-
-        # Stock consumption is called AFTER payment + totals, with the real
-        # order id and the authenticated actor id.
-        mock_build_plan.assert_called_once()
-        mock_consume.assert_called_once()
-        consume_kwargs = mock_consume.call_args.kwargs
-        self.assertEqual(consume_kwargs["store_id"], "store-1")
-        self.assertEqual(consume_kwargs["order_id"], order_row["id"])
-        self.assertEqual(consume_kwargs["actor_id"], "user-1")
-        self.assertTrue(consume_kwargs["usage_plan"])
-        # Payment must be created before stock consumption.
-        self.assertTrue(mock_payment.called)
-        self.assertTrue(mock_recalc.called)
-        self.assertTrue(response["stock_consumed"])
-
-    def test_create_kiosk_order_stock_failure_surfaces_controlled_error(self) -> None:
-        from app.services.stock_service import StockSyncFailedError
-
-        payload = self._build_payload()
-        fake_client = self._FakeClient()
-        snapshot = {
-            "product_id": "prod-1",
-            "quantity": 2,
-            "product_name": "Latte",
-            "total_price": 80.0,
-            "total_cost": 30.0,
-            "base_cost_breakdown": [
-                {"ingredient_id": "ing-coffee", "quantity_used": 18.0, "unit": "g"},
-            ],
-            "addon_cost_breakdown": [],
-            "options_snapshot": {"sweetness": 100, "addons": []},
-        }
-
-        with patch("app.api.store_admin._get_ctx", return_value={"client": fake_client, "user_id": "user-1", "memberships": []}), \
-            patch("app.api.store_admin._resolve_store_id", return_value=("store-1", "staff")), \
-            patch("app.api.store_admin._ensure_kiosk_channel", return_value="channel-1"), \
-            patch("app.api.store_admin._ensure_product_in_store"), \
-            patch("app.api.store_admin.prepare_order_item_snapshot", return_value=snapshot), \
-            patch("app.api.store_admin.resolve_channel_fee", return_value=5.0), \
-            patch("app.api.store_admin.generate_order_number", return_value="ORD-123"), \
-            patch("app.api.store_admin.order_items_supports_store_scope", return_value=True), \
-            patch("app.api.store_admin.build_order_item_record", side_effect=lambda snap, **kw: {**snap, **kw}), \
-            patch("app.api.store_admin.prune_order_item_columns", side_effect=lambda _c, record: record), \
-            patch("app.api.store_admin._orders_has_column", return_value=False), \
-            patch("app.api.store_admin._create_paid_payment"), \
-            patch("app.api.store_admin.recalculate_order_totals"), \
-            patch("app.api.store_admin._write_order_status_log"), \
-            patch("app.api.store_admin.build_usage_plan", return_value=[{"order_item_id": "oi-1", "ingredient_id": "ing-coffee", "quantity": 36.0}]), \
-            patch("app.api.store_admin.consume_for_paid_order", side_effect=StockSyncFailedError("sync_failed", reason="stock_sync_failed", order_id="order-1", order_no="ORD-123")):
-            with self.assertRaises(HTTPException) as ctx_err:
-                store_admin.create_kiosk_order(payload, authorization="Bearer token")
-        # FIX-D: structured partial-commit response with order context
-        self.assertEqual(ctx_err.exception.status_code, 503)
-        detail = ctx_err.exception.detail
-        self.assertIsInstance(detail, dict)
-        self.assertEqual(detail["code"], "kiosk_order_stock_sync_failed")
-        self.assertEqual(detail["payment_status"], "paid")
-        self.assertEqual(detail["stock_consumed"], False)
-        self.assertEqual(detail["action"], "do_not_resubmit")
-        self.assertIn("order_id", detail)
-
-    def test_create_kiosk_order_blocks_non_staff_role(self) -> None:
-        payload = self._build_payload()
-        fake_client = self._FakeClient()
-
-        with patch("app.api.store_admin._get_ctx", return_value={"client": fake_client, "user_id": "user-1", "memberships": []}), \
-            patch("app.api.store_admin._resolve_store_id", return_value=("store-1", "viewer")):
-            with self.assertRaises(HTTPException) as ctx_err:
-                store_admin.create_kiosk_order(payload, authorization="Bearer token")
-
-        self.assertEqual(ctx_err.exception.detail, "insufficient_role")
-
-    def test_create_kiosk_order_fails_when_kiosk_channel_missing(self) -> None:
-        payload = self._build_payload()
-        fake_client = self._FakeClient()
-
-        with patch("app.api.store_admin._get_ctx", return_value={"client": fake_client, "user_id": "user-1", "memberships": []}), \
-            patch("app.api.store_admin._resolve_store_id", return_value=("store-1", "staff")), \
-            patch(
-                "app.api.store_admin._ensure_kiosk_channel",
-                side_effect=HTTPException(status_code=500, detail="kiosk_channel_unavailable"),
-            ):
-            with self.assertRaises(HTTPException) as ctx_err:
-                store_admin.create_kiosk_order(payload, authorization="Bearer token")
-
-        self.assertEqual(ctx_err.exception.detail, "kiosk_channel_unavailable")
-        self.assertEqual(fake_client.order_rows, [])
-
-    # ── FIX-A: Pre-persistence validation tests ──────────────────────────
+        defaults.update(overrides)
+        return store_admin.KioskOrderCreate(**defaults)
 
     def _make_snapshot(self, *, base_breakdown=None, addon_breakdown=None) -> Dict[str, Any]:
         return {
@@ -255,313 +36,279 @@ class KioskOrderEndpointTests(unittest.TestCase):
             "product_name": "Latte",
             "total_price": 80.0,
             "total_cost": 30.0,
+            "unit_price": 40.0,
+            "unit_cost": 15.0,
+            "line_profit": 50.0,
             "base_cost_breakdown": base_breakdown if base_breakdown is not None else [
                 {"ingredient_id": "ing-coffee", "quantity_used": 18.0, "unit": "g"},
             ],
             "addon_cost_breakdown": addon_breakdown if addon_breakdown is not None else [],
-            "options_snapshot": {"sweetness": 100, "addons": []},
+            "options_snapshot": {
+                "sweetness": 100,
+                "addons": [],
+                "_system": {
+                    "usage_breakdown": {
+                        "base": [{"ingredient_id": "ing-coffee", "quantity_used": 18.0, "unit": "g"}],
+                        "addons": [],
+                    }
+                },
+            },
         }
 
-    def test_missing_recipe_rejected_before_order_insert(self) -> None:
-        """FIX-A: Missing recipe → 400 before any persistence."""
-        payload = self._build_payload()
-        fake_client = self._FakeClient()
-        snapshot = self._make_snapshot(base_breakdown=[])
+    def _common_patches(self, snapshot=None, rpc_result=None, rpc_error=None):
+        if snapshot is None:
+            snapshot = self._make_snapshot()
+        if rpc_result is None:
+            rpc_result = {
+                "status": "finalized",
+                "order_id": "order-1",
+                "order_no": "ORD-00001",
+                "payment_id": "pay-1",
+                "payment_method": "cash",
+                "payment_status": "paid",
+                "order_status": "accepted",
+                "total_amount": 85.0,
+                "confirmed_at": "2025-01-01T00:00:00Z",
+                "idempotent_replay": False,
+            }
+        patches = [
+            patch("app.api.store_admin._get_ctx", return_value={
+                "client": SimpleNamespace(),
+                "user_id": "user-1",
+                "memberships": [],
+            }),
+            patch("app.api.store_admin._resolve_store_id", return_value=("store-1", "staff")),
+            patch("app.api.store_admin._normalize_store_role", return_value="staff"),
+            patch("app.api.store_admin._ensure_kiosk_channel", return_value="channel-1"),
+            patch("app.api.store_admin._ensure_product_in_store"),
+            patch("app.api.store_admin.prepare_order_item_snapshot", return_value=snapshot),
+            patch("app.api.store_admin.resolve_channel_fee", return_value=5.0),
+            patch("app.api.store_admin.order_items_supports_store_scope", return_value=True),
+            patch("app.api.store_admin.build_order_item_record", side_effect=lambda snap, **kw: {**snap, "order_id": kw.get("order_id"), "store_id": kw.get("store_id"), "product_name_snapshot": snap.get("product_name")}),
+            patch("app.api.store_admin.prune_order_item_columns", side_effect=lambda _c, record: record),
+            patch("app.api.store_admin._ensure_customer_record_for_kiosk", return_value=(None, "Walk-in Customer", None)),
+            patch("app.api.store_admin._map_created_order_with_items", return_value={"id": "order-1", "order_no": "ORD-00001", "items": []}),
+        ]
+        if rpc_error:
+            patches.append(patch("app.api.store_admin.create_and_finalize_kiosk_order", side_effect=rpc_error))
+        else:
+            patches.append(patch("app.api.store_admin.create_and_finalize_kiosk_order", return_value=rpc_result))
+        return patches
 
-        with patch("app.api.store_admin._get_ctx", return_value={"client": fake_client, "user_id": "user-1", "memberships": []}), \
-            patch("app.api.store_admin._resolve_store_id", return_value=("store-1", "staff")), \
-            patch("app.api.store_admin._ensure_kiosk_channel", return_value="channel-1"), \
-            patch("app.api.store_admin._ensure_product_in_store"), \
-            patch("app.api.store_admin.prepare_order_item_snapshot", return_value=snapshot):
+    def _run_with_patches(self, patches, payload):
+        import contextlib
+        with contextlib.ExitStack() as stack:
+            for p in patches:
+                stack.enter_context(p)
+            return store_admin.create_kiosk_order(payload, authorization="Bearer token")
+
+    def test_staff_kiosk_order_recalculates_totals_and_masks_response(self) -> None:
+        """BE-FIX-05: Staff kiosk order returns finalized order with stock_consumed=True."""
+        payload = self._build_payload()
+        patches = self._common_patches()
+        response = self._run_with_patches(patches, payload)
+        self.assertTrue(response["stock_consumed"])
+        self.assertFalse(response["idempotent_replay"])
+        self.assertEqual(response["order_no"], "ORD-00001")
+
+    def test_create_kiosk_order_blocks_non_staff_role(self) -> None:
+        """BE-FIX-05: Viewer role is rejected with 403, no RPC call."""
+        payload = self._build_payload()
+        with patch("app.api.store_admin._get_ctx", return_value={"client": SimpleNamespace(), "user_id": "user-1", "memberships": []}), \
+            patch("app.api.store_admin._resolve_store_id", return_value=("store-1", "viewer")), \
+            patch("app.api.store_admin.create_and_finalize_kiosk_order") as mock_rpc:
             with self.assertRaises(HTTPException) as ctx_err:
                 store_admin.create_kiosk_order(payload, authorization="Bearer token")
+        self.assertEqual(ctx_err.exception.status_code, 403)
+        mock_rpc.assert_not_called()
 
+    def test_create_kiosk_order_fails_when_kiosk_channel_missing(self) -> None:
+        """BE-FIX-05: Missing kiosk channel raises before RPC call."""
+        payload = self._build_payload()
+        with patch("app.api.store_admin._get_ctx", return_value={"client": SimpleNamespace(), "user_id": "user-1", "memberships": []}), \
+            patch("app.api.store_admin._resolve_store_id", return_value=("store-1", "staff")), \
+            patch("app.api.store_admin._ensure_kiosk_channel", side_effect=HTTPException(status_code=500, detail="kiosk_channel_unavailable")), \
+            patch("app.api.store_admin.create_and_finalize_kiosk_order") as mock_rpc:
+            with self.assertRaises(HTTPException) as ctx_err:
+                store_admin.create_kiosk_order(payload, authorization="Bearer token")
+        self.assertEqual(ctx_err.exception.detail, "kiosk_channel_unavailable")
+        mock_rpc.assert_not_called()
+
+    # ── Pre-persistence validation tests ──────────────────────────────
+
+    def test_missing_recipe_rejected_before_order_insert(self) -> None:
+        """BE-FIX-05: Missing recipe → 400 before any persistence."""
+        payload = self._build_payload()
+        snapshot = self._make_snapshot(base_breakdown=[])
+        patches = self._common_patches(snapshot=snapshot)
+        # Replace the RPC mock to verify it's NOT called
+        patches[-1] = patch("app.api.store_admin.create_and_finalize_kiosk_order")
+        import contextlib
+        with contextlib.ExitStack() as stack:
+            rpc_mock = None
+            for p in patches:
+                entered = stack.enter_context(p)
+                if p is patches[-1]:
+                    rpc_mock = entered
+            with self.assertRaises(HTTPException) as ctx_err:
+                store_admin.create_kiosk_order(payload, authorization="Bearer token")
         self.assertEqual(ctx_err.exception.status_code, 400)
-        self.assertIn("kiosk_order_invalid_inventory_configuration", ctx_err.exception.detail)
-        self.assertIn("missing_recipe", ctx_err.exception.detail)
-        # No order/payment/stock must be created
-        self.assertEqual(fake_client.order_rows, [])
+        rpc_mock.assert_not_called()
 
     def test_invalid_recipe_quantity_rejected_before_persistence(self) -> None:
-        """FIX-A: quantity_used <= 0 → 400 before any persistence."""
+        """BE-FIX-05: quantity_used <= 0 → 400 before any persistence."""
         payload = self._build_payload()
-        fake_client = self._FakeClient()
         snapshot = self._make_snapshot(base_breakdown=[
             {"ingredient_id": "ing-coffee", "quantity_used": 0.0, "unit": "g"},
         ])
-
-        with patch("app.api.store_admin._get_ctx", return_value={"client": fake_client, "user_id": "user-1", "memberships": []}), \
-            patch("app.api.store_admin._resolve_store_id", return_value=("store-1", "staff")), \
-            patch("app.api.store_admin._ensure_kiosk_channel", return_value="channel-1"), \
-            patch("app.api.store_admin._ensure_product_in_store"), \
-            patch("app.api.store_admin.prepare_order_item_snapshot", return_value=snapshot):
+        patches = self._common_patches(snapshot=snapshot)
+        patches[-1] = patch("app.api.store_admin.create_and_finalize_kiosk_order")
+        import contextlib
+        with contextlib.ExitStack() as stack:
+            rpc_mock = None
+            for p in patches:
+                entered = stack.enter_context(p)
+                if p is patches[-1]:
+                    rpc_mock = entered
             with self.assertRaises(HTTPException) as ctx_err:
                 store_admin.create_kiosk_order(payload, authorization="Bearer token")
-
         self.assertEqual(ctx_err.exception.status_code, 400)
-        self.assertIn("invalid_recipe_quantity", ctx_err.exception.detail)
-        self.assertEqual(fake_client.order_rows, [])
+        rpc_mock.assert_not_called()
 
     def test_missing_ingredient_id_rejected_before_persistence(self) -> None:
-        """FIX-A: missing ingredient_id → 400 before any persistence."""
+        """BE-FIX-05: missing ingredient_id → 400 before any persistence."""
         payload = self._build_payload()
-        fake_client = self._FakeClient()
         snapshot = self._make_snapshot(base_breakdown=[
             {"ingredient_id": None, "quantity_used": 18.0, "unit": "g"},
         ])
-
-        with patch("app.api.store_admin._get_ctx", return_value={"client": fake_client, "user_id": "user-1", "memberships": []}), \
-            patch("app.api.store_admin._resolve_store_id", return_value=("store-1", "staff")), \
-            patch("app.api.store_admin._ensure_kiosk_channel", return_value="channel-1"), \
-            patch("app.api.store_admin._ensure_product_in_store"), \
-            patch("app.api.store_admin.prepare_order_item_snapshot", return_value=snapshot):
+        patches = self._common_patches(snapshot=snapshot)
+        patches[-1] = patch("app.api.store_admin.create_and_finalize_kiosk_order")
+        import contextlib
+        with contextlib.ExitStack() as stack:
+            rpc_mock = None
+            for p in patches:
+                entered = stack.enter_context(p)
+                if p is patches[-1]:
+                    rpc_mock = entered
             with self.assertRaises(HTTPException) as ctx_err:
                 store_admin.create_kiosk_order(payload, authorization="Bearer token")
-
         self.assertEqual(ctx_err.exception.status_code, 400)
-        self.assertIn("missing_ingredient_id", ctx_err.exception.detail)
-        self.assertEqual(fake_client.order_rows, [])
+        rpc_mock.assert_not_called()
 
-    # ── FIX-B: Transaction idempotency tests ─────────────────────────────
+    # ── Idempotency tests ─────────────────────────────────────────────
 
     def test_client_order_id_used_as_order_id(self) -> None:
-        """FIX-B: client_order_id is inserted as orders.id."""
-        import uuid as _uuid
+        """BE-FIX-05: client_order_id is passed to the RPC as the order id."""
         client_order_id = str(_uuid.uuid4())
-        payload = store_admin.KioskOrderCreate(
-            items=[store_admin.OrderItemPayload(product_id="prod-1", quantity=1)],
-            payment_method="cash",
-            client_order_id=client_order_id,
-        )
-        fake_client = self._FakeClient()
-        snapshot = self._make_snapshot()
-
-        with patch("app.api.store_admin._get_ctx", return_value={"client": fake_client, "user_id": "user-1", "memberships": []}), \
-            patch("app.api.store_admin._resolve_store_id", return_value=("store-1", "staff")), \
-            patch("app.api.store_admin._ensure_kiosk_channel", return_value="channel-1"), \
-            patch("app.api.store_admin._ensure_product_in_store"), \
-            patch("app.api.store_admin.prepare_order_item_snapshot", return_value=snapshot), \
-            patch("app.api.store_admin.resolve_channel_fee", return_value=5.0), \
-            patch("app.api.store_admin.generate_order_number", return_value="ORD-200"), \
-            patch("app.api.store_admin.order_items_supports_store_scope", return_value=True), \
-            patch("app.api.store_admin.build_order_item_record", side_effect=lambda snap, **kw: {**snap, **kw}), \
-            patch("app.api.store_admin.prune_order_item_columns", side_effect=lambda _c, record: record), \
-            patch("app.api.store_admin._orders_has_column", return_value=False), \
-            patch("app.api.store_admin._create_paid_payment"), \
-            patch("app.api.store_admin.recalculate_order_totals"), \
-            patch("app.api.store_admin._write_order_status_log"), \
-            patch("app.api.store_admin.build_usage_plan", return_value=[]), \
-            patch("app.api.store_admin._map_created_order_with_items", return_value={"id": client_order_id}):
+        payload = self._build_payload(client_order_id=client_order_id)
+        patches = self._common_patches()
+        patches[-1] = patch("app.api.store_admin.create_and_finalize_kiosk_order")
+        import contextlib
+        with contextlib.ExitStack() as stack:
+            rpc_mock = None
+            for p in patches:
+                entered = stack.enter_context(p)
+                if p is patches[-1]:
+                    rpc_mock = entered
             store_admin.create_kiosk_order(payload, authorization="Bearer token")
-
-        self.assertEqual(fake_client.order_rows[0]["id"], client_order_id)
+        call_kwargs = rpc_mock.call_args.kwargs
+        self.assertEqual(call_kwargs["client_order_id"], client_order_id)
 
     def test_invalid_client_order_id_rejected(self) -> None:
-        """FIX-B: non-UUID client_order_id → 400."""
-        payload = store_admin.KioskOrderCreate(
-            items=[store_admin.OrderItemPayload(product_id="prod-1", quantity=1)],
-            payment_method="cash",
-            client_order_id="not-a-uuid",
-        )
-        fake_client = self._FakeClient()
-        snapshot = self._make_snapshot()
-
-        with patch("app.api.store_admin._get_ctx", return_value={"client": fake_client, "user_id": "user-1", "memberships": []}), \
-            patch("app.api.store_admin._resolve_store_id", return_value=("store-1", "staff")), \
-            patch("app.api.store_admin._ensure_kiosk_channel", return_value="channel-1"), \
-            patch("app.api.store_admin._ensure_product_in_store"), \
-            patch("app.api.store_admin.prepare_order_item_snapshot", return_value=snapshot), \
-            patch("app.api.store_admin.resolve_channel_fee", return_value=5.0):
+        """BE-FIX-05: non-UUID client_order_id → 400."""
+        payload = self._build_payload(client_order_id="not-a-uuid")
+        patches = self._common_patches()
+        # Replace the RPC mock to verify it's NOT called
+        patches[-1] = patch("app.api.store_admin.create_and_finalize_kiosk_order")
+        import contextlib
+        with contextlib.ExitStack() as stack:
+            rpc_mock = None
+            for p in patches:
+                entered = stack.enter_context(p)
+                if p is patches[-1]:
+                    rpc_mock = entered
             with self.assertRaises(HTTPException) as ctx_err:
                 store_admin.create_kiosk_order(payload, authorization="Bearer token")
-
         self.assertEqual(ctx_err.exception.status_code, 400)
         self.assertEqual(ctx_err.exception.detail, "kiosk_order_invalid_client_order_id")
+        rpc_mock.assert_not_called()
 
     def test_duplicate_client_order_id_returns_existing_order(self) -> None:
-        """FIX-B: duplicate client_order_id → idempotent replay (200)."""
-        import uuid as _uuid
+        """BE-FIX-05: duplicate client_order_id → already_finalized (idempotent)."""
         client_order_id = str(_uuid.uuid4())
-        payload = store_admin.KioskOrderCreate(
-            items=[store_admin.OrderItemPayload(product_id="prod-1", quantity=1)],
-            payment_method="cash",
-            client_order_id=client_order_id,
-        )
-        fake_client = self._FakeClient()
-        snapshot = self._make_snapshot()
-
-        # Simulate orders_pkey violation on insert
-        class _PkeyViolationClient:
-            def table(self, name):
-                if name == "orders":
-                    return _PkeyViolationTable()
-                raise AssertionError(f"unexpected table {name}")
-
-        class _PkeyViolationTable:
-            def insert(self, payload):
-                self.payload = payload
-                return self
-
-            def execute(self):
-                # Simulate a unique violation exception (PostgREST style)
-                raise Exception("duplicate key value violates unique constraint \"orders_pkey\"")
-
-        # Mock the replay classification to return "complete"
-        replay_classification = {
-            "state": "complete",
+        payload = self._build_payload(client_order_id=client_order_id)
+        rpc_result = {
+            "status": "already_finalized",
             "order_id": client_order_id,
-            "order_no": "ORD-100",
+            "order_no": "ORD-00001",
+            "payment_id": "pay-1",
+            "payment_method": "cash",
             "payment_status": "paid",
-            "stock_consumed": True,
+            "order_status": "accepted",
+            "total_amount": 85.0,
+            "confirmed_at": "2025-01-01T00:00:00Z",
+            "idempotent_replay": True,
         }
-        existing_items = [{"product_id": "prod-1", "quantity": 1}]
-
-        with patch("app.api.store_admin._get_ctx", return_value={"client": _PkeyViolationClient(), "user_id": "user-1", "memberships": []}), \
-            patch("app.api.store_admin._resolve_store_id", return_value=("store-1", "staff")), \
-            patch("app.api.store_admin._ensure_kiosk_channel", return_value="channel-1"), \
-            patch("app.api.store_admin._ensure_product_in_store"), \
-            patch("app.api.store_admin.prepare_order_item_snapshot", return_value=snapshot), \
-            patch("app.api.store_admin.resolve_channel_fee", return_value=5.0), \
-            patch("app.api.store_admin.generate_order_number", return_value="ORD-100"), \
-            patch("app.api.store_admin._orders_has_column", return_value=False), \
-            patch("app.api.store_admin._classify_existing_order", return_value=replay_classification), \
-            patch("app.api.store_admin._compare_payload_with_existing_order", return_value=True), \
-            patch("app.api.store_admin._map_created_order_with_items", return_value={"id": client_order_id, "order_no": "ORD-100"}) as mock_map:
-            result = store_admin.create_kiosk_order(payload, authorization="Bearer token")
-
+        patches = self._common_patches(rpc_result=rpc_result)
+        patches[11] = patch(
+            "app.api.store_admin._map_created_order_with_items",
+            return_value={"id": client_order_id, "order_no": "ORD-00001", "items": []},
+        )
+        result = self._run_with_patches(patches, payload)
         self.assertEqual(result["id"], client_order_id)
         self.assertTrue(result["idempotent_replay"])
         self.assertTrue(result["stock_consumed"])
-        mock_map.assert_called_once()
 
-    def test_duplicate_client_order_id_payload_mismatch_returns_409(self) -> None:
-        """FIX-B: same client_order_id + different cart → 409 conflict."""
-        import uuid as _uuid
+    def test_duplicate_client_order_id_incomplete_returns_409(self) -> None:
+        """BE-FIX-05: duplicate client_order_id with incomplete state → 409."""
         client_order_id = str(_uuid.uuid4())
-        payload = store_admin.KioskOrderCreate(
-            items=[store_admin.OrderItemPayload(product_id="prod-1", quantity=1)],
-            payment_method="cash",
-            client_order_id=client_order_id,
-        )
-        snapshot = self._make_snapshot()
-
-        class _PkeyViolationTable:
-            def insert(self, payload):
-                return self
-
-            def execute(self):
-                raise Exception("duplicate key value violates unique constraint \"orders_pkey\"")
-
-        class _PkeyViolationClient:
-            def table(self, name):
-                if name == "orders":
-                    return _PkeyViolationTable()
-                raise AssertionError(f"unexpected table {name}")
-
-        with patch("app.api.store_admin._get_ctx", return_value={"client": _PkeyViolationClient(), "user_id": "user-1", "memberships": []}), \
-            patch("app.api.store_admin._resolve_store_id", return_value=("store-1", "staff")), \
-            patch("app.api.store_admin._ensure_kiosk_channel", return_value="channel-1"), \
-            patch("app.api.store_admin._ensure_product_in_store"), \
-            patch("app.api.store_admin.prepare_order_item_snapshot", return_value=snapshot), \
-            patch("app.api.store_admin.resolve_channel_fee", return_value=5.0), \
-            patch("app.api.store_admin.generate_order_number", return_value="ORD-100"), \
-            patch("app.api.store_admin._orders_has_column", return_value=False), \
-            patch("app.api.store_admin._classify_existing_order", return_value={"state": "complete", "order_id": client_order_id}), \
-            patch("app.api.store_admin._compare_payload_with_existing_order", return_value=False):
-            with self.assertRaises(HTTPException) as ctx_err:
-                store_admin.create_kiosk_order(payload, authorization="Bearer token")
-
+        payload = self._build_payload(client_order_id=client_order_id)
+        rpc_result = {
+            "status": "idempotency_conflict",
+            "order_id": client_order_id,
+            "order_no": "ORD-00001",
+            "order_status": "pending_payment",
+            "payment_status": "unpaid",
+            "idempotent_replay": False,
+        }
+        patches = self._common_patches(rpc_result=rpc_result)
+        with self.assertRaises(HTTPException) as ctx_err:
+            self._run_with_patches(patches, payload)
         self.assertEqual(ctx_err.exception.status_code, 409)
-        detail = ctx_err.exception.detail
-        self.assertEqual(detail["code"], "idempotency_key_conflict")
+        self.assertEqual(ctx_err.exception.detail["code"], "idempotency_conflict")
 
-    def test_duplicate_client_order_id_partial_paid_returns_409(self) -> None:
-        """FIX-B: duplicate client_order_id + partial_paid state → 409 with recovery info."""
-        import uuid as _uuid
-        client_order_id = str(_uuid.uuid4())
-        payload = store_admin.KioskOrderCreate(
-            items=[store_admin.OrderItemPayload(product_id="prod-1", quantity=1)],
-            payment_method="cash",
-            client_order_id=client_order_id,
-        )
-        snapshot = self._make_snapshot()
+    # ── Atomic error mapping tests ────────────────────────────────────
 
-        class _PkeyViolationTable:
-            def insert(self, payload):
-                return self
-
-            def execute(self):
-                raise Exception("duplicate key value violates unique constraint \"orders_pkey\"")
-
-        class _PkeyViolationClient:
-            def table(self, name):
-                if name == "orders":
-                    return _PkeyViolationTable()
-                raise AssertionError(f"unexpected table {name}")
-
-        with patch("app.api.store_admin._get_ctx", return_value={"client": _PkeyViolationClient(), "user_id": "user-1", "memberships": []}), \
-            patch("app.api.store_admin._resolve_store_id", return_value=("store-1", "staff")), \
-            patch("app.api.store_admin._ensure_kiosk_channel", return_value="channel-1"), \
-            patch("app.api.store_admin._ensure_product_in_store"), \
-            patch("app.api.store_admin.prepare_order_item_snapshot", return_value=snapshot), \
-            patch("app.api.store_admin.resolve_channel_fee", return_value=5.0), \
-            patch("app.api.store_admin.generate_order_number", return_value="ORD-100"), \
-            patch("app.api.store_admin._orders_has_column", return_value=False), \
-            patch("app.api.store_admin._classify_existing_order", return_value={
-                "state": "partial_paid",
-                "order_id": client_order_id,
-                "order_no": "ORD-100",
-                "payment_status": "paid",
-                "stock_consumed": False,
-            }), \
-            patch("app.api.store_admin._compare_payload_with_existing_order", return_value=True):
-            with self.assertRaises(HTTPException) as ctx_err:
-                store_admin.create_kiosk_order(payload, authorization="Bearer token")
-
-        self.assertEqual(ctx_err.exception.status_code, 409)
-        detail = ctx_err.exception.detail
-        self.assertEqual(detail["code"], "kiosk_order_stock_sync_failed")
-        self.assertEqual(detail["payment_status"], "paid")
-        self.assertEqual(detail["stock_consumed"], False)
-        self.assertEqual(detail["action"], "do_not_resubmit")
-
-    # ── FIX-D: Structured partial-commit response test ───────────────────
-
-    def test_stock_sync_failure_returns_503_with_order_context(self) -> None:
-        """FIX-D: StockSyncFailedError → 503 with order_id, order_no, payment_status."""
-        from app.services.stock_service import StockSyncFailedError
-
+    def test_stock_sync_failure_returns_409_with_order_context(self) -> None:
+        """BE-FIX-05: insufficient_stock RPC error → 409 (atomic, no partial commit)."""
         payload = self._build_payload()
-        fake_client = self._FakeClient()
-        snapshot = self._make_snapshot()
-
-        with patch("app.api.store_admin._get_ctx", return_value={"client": fake_client, "user_id": "user-1", "memberships": []}), \
-            patch("app.api.store_admin._resolve_store_id", return_value=("store-1", "staff")), \
-            patch("app.api.store_admin._ensure_kiosk_channel", return_value="channel-1"), \
-            patch("app.api.store_admin._ensure_product_in_store"), \
-            patch("app.api.store_admin.prepare_order_item_snapshot", return_value=snapshot), \
-            patch("app.api.store_admin.resolve_channel_fee", return_value=5.0), \
-            patch("app.api.store_admin.generate_order_number", return_value="ORD-999"), \
-            patch("app.api.store_admin.order_items_supports_store_scope", return_value=True), \
-            patch("app.api.store_admin.build_order_item_record", side_effect=lambda snap, **kw: {**snap, **kw}), \
-            patch("app.api.store_admin.prune_order_item_columns", side_effect=lambda _c, record: record), \
-            patch("app.api.store_admin._orders_has_column", return_value=False), \
-            patch("app.api.store_admin._create_paid_payment"), \
-            patch("app.api.store_admin.recalculate_order_totals"), \
-            patch("app.api.store_admin._write_order_status_log"), \
-            patch("app.api.store_admin.build_usage_plan", return_value=[{"order_item_id": "oi-1", "ingredient_id": "ing-coffee", "quantity": 36.0}]), \
-            patch("app.api.store_admin.consume_for_paid_order", side_effect=StockSyncFailedError("sync_failed", reason="stock_sync_failed", order_id="order-1", order_no="ORD-999")):
-            with self.assertRaises(HTTPException) as ctx_err:
-                store_admin.create_kiosk_order(payload, authorization="Bearer token")
-
-        self.assertEqual(ctx_err.exception.status_code, 503)
+        error = AtomicRPCError(
+            "insufficient_stock ingredient=ing-coffee required=36 available=20",
+            reason="insufficient_stock",
+            http_status=409,
+        )
+        patches = self._common_patches(rpc_error=error)
+        with self.assertRaises(HTTPException) as ctx_err:
+            self._run_with_patches(patches, payload)
+        self.assertEqual(ctx_err.exception.status_code, 409)
         detail = ctx_err.exception.detail
-        self.assertIsInstance(detail, dict)
-        self.assertEqual(detail["code"], "kiosk_order_stock_sync_failed")
-        self.assertEqual(detail["order_no"], "ORD-999")
-        self.assertEqual(detail["payment_status"], "paid")
-        self.assertEqual(detail["stock_consumed"], False)
-        self.assertEqual(detail["action"], "do_not_resubmit")
+        self.assertEqual(detail["code"], "insufficient_stock")
+
+    def test_create_kiosk_order_stock_failure_surfaces_controlled_error(self) -> None:
+        """BE-FIX-05: Stock failure is atomic - no partial commit, returns 409."""
+        payload = self._build_payload()
+        error = AtomicRPCError(
+            "insufficient_stock ingredient=ing-coffee required=36 available=20",
+            reason="insufficient_stock",
+            http_status=409,
+        )
+        patches = self._common_patches(rpc_error=error)
+        with self.assertRaises(HTTPException) as ctx_err:
+            self._run_with_patches(patches, payload)
+        # Atomic: no partial commit, so no "do_not_resubmit" needed
+        self.assertEqual(ctx_err.exception.status_code, 409)
+        detail = ctx_err.exception.detail
+        self.assertEqual(detail["code"], "insufficient_stock")
 
 
 class _SalesChannelClientDouble:

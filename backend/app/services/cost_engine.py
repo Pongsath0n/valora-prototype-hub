@@ -169,6 +169,17 @@ def _calculate_recipe_cost(client: Client, store_id: str, product_id: str) -> Tu
             row_issues.append("missing_ingredient")
             ingredient_active = False
 
+        # BE-FIX-02B: Strict same-unit contract. No conversion exists.
+        # Both units MUST be present and MUST match after normalization.
+        recipe_unit = row.get("unit")
+        ingredient_unit = (ingredient or {}).get("unit")
+        unit_mismatch = False
+        ru = str(recipe_unit).strip().lower() if recipe_unit else ""
+        iu = str(ingredient_unit).strip().lower() if ingredient_unit else ""
+        if not ru or not iu or ru != iu:
+            unit_mismatch = True
+            row_issues.append("unit_mismatch")
+
         cost_per_unit = _safe_float((ingredient or {}).get("cost_per_unit")) if ingredient_active else 0.0
         if ingredient_active and cost_per_unit <= 0:
             row_issues.append("missing_ingredient_cost")
@@ -187,12 +198,15 @@ def _calculate_recipe_cost(client: Client, store_id: str, product_id: str) -> Tu
                 "cost_type": (ingredient or {}).get("cost_type"),
                 "cost_source": (ingredient or {}).get("cost_source"),
                 "ingredient_is_active": None if ingredient is None else ingredient.get("is_active"),
+                "unit_mismatch": unit_mismatch,
                 "issues": row_issues,
             }
         )
 
     if "missing_ingredient" in issue_codes:
         status = "missing_ingredient"
+    elif "unit_mismatch" in issue_codes:
+        status = "unit_mismatch"
     elif "zero_quantity" in issue_codes:
         status = "zero_quantity"
     elif "missing_ingredient_cost" in issue_codes:
@@ -273,14 +287,19 @@ def _validate_addon(row: Dict[str, Any], store_id: str, product_id: str, quantit
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="addon_product_mismatch")
     if row.get("is_active") is False:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="addon_not_available")
+    # BE-FIX-02: max_quantity NULL or <= 0 means addon is not available.
+    # Only called with quantity > 0 (zero quantities are skipped upstream).
     max_quantity = row.get("max_quantity")
-    if max_quantity is not None:
-        try:
-            max_quantity_val = int(max_quantity)
-        except (TypeError, ValueError):
-            max_quantity_val = None
-        if max_quantity_val is not None and quantity > max_quantity_val:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="addon_quantity_exceeds_limit")
+    if max_quantity is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="addon_quantity_exceeds_limit")
+    try:
+        max_quantity_val = int(max_quantity)
+    except (TypeError, ValueError):
+        max_quantity_val = None
+    if max_quantity_val is None or max_quantity_val <= 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="addon_quantity_exceeds_limit")
+    if quantity > max_quantity_val:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="addon_quantity_exceeds_limit")
 
 
 def _fetch_addon_recipe_rows(client: Client, store_id: str, addon_id: str) -> List[Dict[str, Any]]:
@@ -305,6 +324,7 @@ def _calculate_addon_unit_cost(client: Client, store_id: str, addon_id: str) -> 
     ingredients_map = _fetch_ingredients_map(client, store_id, ingredient_ids)
     total_cost = 0.0
     breakdown: List[Dict[str, Any]] = []
+    has_unit_mismatch = False
     for row in recipe_rows:
         ingredient_id = str(row.get("ingredient_id")) if row.get("ingredient_id") else None
         ingredient = ingredients_map.get(ingredient_id or "")
@@ -312,15 +332,31 @@ def _calculate_addon_unit_cost(client: Client, store_id: str, addon_id: str) -> 
         cost_per_unit = _safe_float((ingredient or {}).get("cost_per_unit"))
         line_cost = quantity_used * cost_per_unit
         total_cost += line_cost
+
+        # BE-FIX-02B: Strict same-unit contract. No conversion exists.
+        # Both units MUST be present and MUST match after normalization.
+        recipe_unit = row.get("unit")
+        ingredient_unit = (ingredient or {}).get("unit")
+        unit_mismatch = False
+        ru = str(recipe_unit).strip().lower() if recipe_unit else ""
+        iu = str(ingredient_unit).strip().lower() if ingredient_unit else ""
+        if not ru or not iu or ru != iu:
+            unit_mismatch = True
+            has_unit_mismatch = True
+
         breakdown.append(
             {
                 "ingredient_id": ingredient_id,
                 "quantity_used": quantity_used,
+                "unit": row.get("unit") or (ingredient or {}).get("unit"),
                 "cost_per_unit": cost_per_unit,
                 "line_cost": line_cost,
                 "ingredient_name": (ingredient or {}).get("name"),
+                "unit_mismatch": unit_mismatch,
             }
         )
+    if has_unit_mismatch:
+        return total_cost, breakdown, "unit_mismatch"
     return total_cost, breakdown, "complete"
 
 
@@ -361,6 +397,9 @@ def prepare_order_item_snapshot(
     base_price = _safe_float(product.get("base_price"))
     unit_price = _resolve_product_price(client, resolved_store_id, product_id, channel_id, base_price)
     base_cost, base_breakdown, base_cost_status = _calculate_recipe_cost(client, resolved_store_id, product_id)
+    # BE-FIX-02A: Reject base recipe with unit mismatch — no conversion exists.
+    if base_cost_status == "unit_mismatch":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid_recipe_configuration")
 
     requested_sweetness = _extract_requested_sweetness(raw_options)
     sweetness_value = _normalize_sweetness(product, requested_sweetness)
@@ -388,6 +427,13 @@ def prepare_order_item_snapshot(
             addon_price = addon_row.get("unit_price")
         addon_unit_price = _safe_float(addon_price)
         addon_unit_cost, addon_cost_breakdown, addon_cost_status = _calculate_addon_unit_cost(client, resolved_store_id, addon_id)
+        # BE-FIX-02: Reject addons with missing recipes — customer cannot
+        # pay addon price while stock usage is undefined.
+        if addon_cost_status == "missing_addon_recipe":
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="addon_not_available")
+        # BE-FIX-02A: Reject addons with unit mismatch — no conversion exists.
+        if addon_cost_status == "unit_mismatch":
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="addon_not_available")
         addon_total_price = addon_unit_price * addon_qty
         addon_total_cost = addon_unit_cost * addon_qty
         option_total += addon_total_price

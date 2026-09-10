@@ -15,6 +15,19 @@ from app.core.config import settings
 from app.core.supabase import SupabaseConfigurationError, get_supabase_admin_client
 from app.services.cost_engine import build_order_item_record, mask_option_costs, prepare_order_item_snapshot
 from app.services.order_item_columns import order_items_supports_store_scope, prune_order_item_columns
+from app.services.usage_snapshot import (
+    UsageSnapshotError,
+    embed_usage_snapshot,
+    mask_system_from_options,
+    strip_client_system,
+)
+from app.services.readiness import (
+    batch_check_addon_recipe_readiness,
+    batch_check_product_recipe_readiness,
+    check_product_recipe_readiness,
+    is_addon_customer_selectable,
+    is_product_customer_orderable,
+)
 from app.services.line_service import (
     fetch_line_display_name,
     mark_line_link_token_used,
@@ -33,7 +46,10 @@ router = APIRouter(prefix="/api/customer", tags=["customer"])
 
 class CustomerPayload(BaseModel):
     name: str
-    phone: str
+    # BE-FIX-01: phone is optional for Healholic self-order. Legacy LIFF
+    # flows may still provide it; when present it is normalized and used
+    # for customer lookup. When absent, no customer record is created.
+    phone: Optional[str] = None
     line_user_id: Optional[str] = None
 
 
@@ -46,7 +62,10 @@ class CustomerOrderItemPayload(BaseModel):
 class CustomerOrderCreatePayload(BaseModel):
     customer: CustomerPayload
     items: List[CustomerOrderItemPayload]
-    pickup_time: str
+    # BE-FIX-01: pickup_time is optional for Healholic self-order. The
+    # V1 flow is order-now/wait/pay-at-counter, not scheduled pickup.
+    # Legacy LIFF flows may still provide it; when present it is validated.
+    pickup_time: Optional[str] = None
     note: Optional[str] = None
     store_id: Optional[str] = None
     line_link_token: Optional[str] = None
@@ -85,6 +104,35 @@ def _is_unique_violation(error: Any, column: str) -> bool:
     message = str(getattr(error, "message", error) or "")
     lowered = message.lower()
     return "duplicate key value" in lowered and column.lower() in lowered
+
+
+def _classify_unique_violation(error: Any) -> str:
+    """BE-FIX-05A: Classify a unique constraint violation by constraint name.
+
+    Returns one of:
+      - "orders_store_order_no_unique"  order_no collision → regenerate + retry
+      - "orders_pkey"                    PK collision → do NOT retry as order_no
+      - "orders_public_token_key"       public_token collision → regenerate token
+      - "unknown"                       unknown unique violation → re-raise
+      - "not_unique"                    not a unique violation at all
+    """
+    message = str(getattr(error, "message", error) or "")
+    lowered = message.lower()
+    if "duplicate key value" not in lowered:
+        return "not_unique"
+    if "orders_store_order_no_unique" in lowered:
+        return "orders_store_order_no_unique"
+    if "orders_pkey" in lowered:
+        return "orders_pkey"
+    if "orders_public_token_key" in lowered:
+        return "orders_public_token_key"
+    # Fallback: check for column names in message (older PG / PostgREST
+    # may report column name instead of constraint name).
+    if "order_no" in lowered:
+        return "orders_store_order_no_unique"
+    if "public_token" in lowered:
+        return "orders_public_token_key"
+    return "unknown"
 
 
 def _normalize_phone(value: str) -> str:
@@ -196,6 +244,11 @@ def _load_product_addons_map(client: Client, store_id: str, product_ids: List[st
         return {}
 
     rows = getattr(resp, "data", None) or []
+
+    # BE-FIX-02: Batch check addon recipe readiness.
+    addon_ids = [str(row.get("id")) for row in rows if row.get("id")]
+    addon_readiness = batch_check_addon_recipe_readiness(client, store_id, addon_ids)
+
     addons_map: Dict[str, List[Dict[str, Any]]] = {}
     for row in rows:
         product_id = str(row.get("product_id") or "").strip()
@@ -209,6 +262,12 @@ def _load_product_addons_map(client: Client, store_id: str, product_ids: List[st
         if not addon_id:
             continue
 
+        # BE-FIX-02: Only include customer-selectable addons.
+        addon_id_str = str(addon_id)
+        recipe_ready = addon_readiness.get(addon_id_str, False)
+        if not is_addon_customer_selectable(row, recipe_ready):
+            continue
+
         price_value = row.get("price")
         try:
             price = float(price_value or 0.0)
@@ -219,7 +278,7 @@ def _load_product_addons_map(client: Client, store_id: str, product_ids: List[st
         max_quantity = _coerce_int(max_quantity_value)
 
         addon_entry = {
-            "addon_id": str(addon_id),
+            "addon_id": addon_id_str,
             "code": row.get("code"),
             "name": row.get("name"),
             "price": price,
@@ -670,7 +729,10 @@ def _load_order_items(client: Client, order_id: str) -> List[Dict[str, Any]]:
                         "line_total": float(line_total or 0.0),
                         "unit_price": unit_price,
                         "image_url": product_image,
-                        "options": mask_option_costs(row.get("options")),
+                        # BE-05: Mask _system from customer-facing responses.
+                        "options": mask_system_from_options(
+                            mask_option_costs(row.get("options"))
+                        ),
                     }
                 )
             return items
@@ -1144,12 +1206,19 @@ def list_menu(store_id: Optional[str] = Query(default=None)) -> Dict[str, Any]:
     client = _get_client()
     store_id_resolved = _resolve_store_id(client, store_id)
     rows = _try_select_products(client, store_id_resolved)
-    product_ids = [str(r.get("id")) for r in rows if r.get("id")]
-    addons_map = _load_product_addons_map(client, store_id_resolved, product_ids)
+    active_rows = [r for r in rows if bool(r.get("is_active", True))]
+    # BE-FIX-02: Filter out products without ready recipes.
+    product_ids = [str(r.get("id")) for r in active_rows if r.get("id")]
+    recipe_readiness = batch_check_product_recipe_readiness(client, store_id_resolved, product_ids)
+    orderable_rows = [
+        r for r in active_rows
+        if is_product_customer_orderable(r, recipe_readiness.get(str(r.get("id") or ""), False))
+    ]
+    orderable_ids = [str(r.get("id")) for r in orderable_rows if r.get("id")]
+    addons_map = _load_product_addons_map(client, store_id_resolved, orderable_ids)
     items = [
         _map_customer_menu_item(r, addons=addons_map.get(str(r.get("id")) or "", []))
-        for r in rows
-        if bool(r.get("is_active", True))
+        for r in orderable_rows
     ]
     return {"items": items, "store_id": store_id_resolved}
 
@@ -1164,6 +1233,9 @@ def get_menu_item(product_id: str, store_id: Optional[str] = Query(default=None)
     row = rows[0]
     if not bool(row.get("is_active", True)):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="menu_item_not_available")
+    # BE-FIX-02: Reject products without ready recipes.
+    if not check_product_recipe_readiness(client, store_id_resolved, product_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="menu_item_not_available")
     addons_map = _load_product_addons_map(client, store_id_resolved, [str(row.get("id"))])
     return _map_customer_menu_item(row, addons=addons_map.get(str(row.get("id")) or "", []))
 
@@ -1173,20 +1245,25 @@ def create_customer_order(payload: CustomerOrderCreatePayload) -> Dict[str, Any]
     if not payload.items:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="order_items_required")
 
-    pickup_time = str(payload.pickup_time or "").strip()
+    # BE-FIX-01: pickup_time is optional for Healholic self-order.
+    # Validate format only when provided.
+    pickup_time_raw = str(payload.pickup_time or "").strip()
+    if pickup_time_raw:
+        try:
+            datetime.fromisoformat(pickup_time_raw.replace("Z", "+00:00"))
+        except Exception:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="pickup_time_invalid")
+    else:
+        pickup_time_raw = None
+
     customer_name = str(payload.customer.name or "").strip()
-    customer_phone = str(payload.customer.phone or "").strip()
-    normalized_phone = _normalize_phone(customer_phone)
-    if not pickup_time:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="pickup_time_required")
     if not customer_name:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="customer_name_required")
-    if not normalized_phone:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="customer_phone_required")
-    try:
-        datetime.fromisoformat(pickup_time.replace("Z", "+00:00"))
-    except Exception:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="pickup_time_invalid")
+
+    # BE-FIX-01: customer_phone is optional for Healholic self-order.
+    # Normalize only when provided.
+    customer_phone_raw = str(payload.customer.phone or "").strip()
+    normalized_phone = _normalize_phone(customer_phone_raw) if customer_phone_raw else None
 
     client = _get_client()
 
@@ -1199,13 +1276,16 @@ def create_customer_order(payload: CustomerOrderCreatePayload) -> Dict[str, Any]
         if quantity <= 0:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="quantity_positive")
 
+        # BE-01/BE-02: Strip any client-supplied _system before processing.
+        safe_options = strip_client_system(item.options)
+
         snapshot = prepare_order_item_snapshot(
             client,
             resolved_store_id or payload.store_id or "",
             product_id=item.product_id,
             quantity=quantity,
             channel_id=None,
-            raw_options=item.options,
+            raw_options=safe_options,
         )
         snapshot_store_id = str(snapshot.get("store_id") or "").strip()
         if not snapshot_store_id:
@@ -1213,6 +1293,22 @@ def create_customer_order(payload: CustomerOrderCreatePayload) -> Dict[str, Any]
         if resolved_store_id and str(resolved_store_id) != snapshot_store_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="store_mismatch")
         resolved_store_id = snapshot_store_id
+
+        # BE-01: Embed the server-generated usage snapshot into options for
+        # the finalize RPC to read later.  This is the only path that
+        # produces _system.usage_breakdown.
+        try:
+            options_with_usage = embed_usage_snapshot(
+                snapshot.get("options_snapshot") or {},
+                snapshot,
+            )
+        except UsageSnapshotError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="invalid_recipe_configuration",
+            )
+        snapshot["options_snapshot"] = options_with_usage
+
         item_snapshots.append(snapshot)
         prepared_items.append(
             {
@@ -1221,7 +1317,10 @@ def create_customer_order(payload: CustomerOrderCreatePayload) -> Dict[str, Any]
                 "quantity": snapshot.get("quantity"),
                 "unit_price": float(snapshot.get("unit_price") or 0),
                 "line_total": float(snapshot.get("total_price") or 0),
-                "options": mask_option_costs(snapshot.get("options_snapshot")),
+                # BE-05: Mask _system from customer-facing response.
+                "options": mask_system_from_options(
+                    mask_option_costs(snapshot.get("options_snapshot"))
+                ),
             }
         )
 
@@ -1258,7 +1357,8 @@ def create_customer_order(payload: CustomerOrderCreatePayload) -> Dict[str, Any]
         "customer_id": customer_id,
         "order_type": "pickup",
         "pickup_type": "pickup",
-        "pickup_time": pickup_time,
+        # BE-FIX-01: pickup_time may be None for Healholic self-order.
+        "pickup_time": pickup_time_raw,
         "status": "pending_payment",
         "payment_status": "unpaid",
         "subtotal": subtotal,
@@ -1269,24 +1369,49 @@ def create_customer_order(payload: CustomerOrderCreatePayload) -> Dict[str, Any]
         "order_no": generate_order_number(client),
         "public_token": _generate_public_token(),
         "customer_name": customer_name,
+        # BE-FIX-01: customer_phone may be None for Healholic self-order.
         "customer_phone": normalized_phone,
+        # BE-FIX-04A: Explicitly identify self-order source. The DB
+        # default is 'web_order' but explicit assignment is safer and
+        # makes the contract self-documenting. The insert retry loop
+        # below gracefully handles environments without the column.
+        "order_source": "web_order",
     }
-    max_attempts = 5
-    attempts = 0
+    # BE-FIX-05A: Bounded retry for order_no collision with explicit
+    # constraint classification. orders_store_order_no_unique collision
+    # regenerates order_no and retries. orders_pkey collision is NOT
+    # treated as order_no retry. Unknown unique violations are re-raised.
+    max_order_no_attempts = 5
+    order_no_attempts = 0
     while True:
-        attempts += 1
         order_resp = client.table("orders").insert(order_data).execute()
         order_err = getattr(order_resp, "error", None)
         if not order_err:
             break
-        if _is_unique_violation(order_err, "order_no"):
+
+        constraint = _classify_unique_violation(order_err)
+
+        if constraint == "orders_store_order_no_unique":
+            order_no_attempts += 1
+            if order_no_attempts >= max_order_no_attempts:
+                raise HTTPException(
+                    status_code=503,
+                    detail="order_no_generation_exhausted",
+                )
             order_data["order_no"] = generate_order_number(client)
-            if attempts < max_attempts:
-                continue
-        if _is_unique_violation(order_err, "public_token"):
+            continue
+
+        if constraint == "orders_public_token_key":
             order_data["public_token"] = _generate_public_token()
-            if attempts < max_attempts:
-                continue
+            continue
+
+        if constraint == "orders_pkey":
+            # PK collision is NOT an order_no collision.
+            # Do not retry as order_no.
+            raise HTTPException(status_code=500, detail="customer_order_create_failed")
+
+        # Unknown unique violation or non-unique error.
+        # Try missing column recovery, then re-raise.
         missing = _extract_missing_column(order_err)
         if missing and missing in order_data:
             order_data.pop(missing, None)
@@ -1313,12 +1438,11 @@ def create_customer_order(payload: CustomerOrderCreatePayload) -> Dict[str, Any]
     totals = recalculate_order_totals(client, resolved_store_id, order_id)
     if totals:
         order_row.update(totals)
-    _create_initial_payment(
-        client,
-        order_id,
-        customer_id,
-        float(order_row.get("total_amount") or total_amount),
-    )
+    # BE-02: Do NOT create a pending payment row for new Healholic self-orders.
+    # The finalize_paid_order_atomic RPC creates the paid payment row when
+    # staff confirms cash/PromptPay at the counter.  Creating a pending row
+    # here would trigger the legacy sync_payment_to_order trigger and move
+    # the order to waiting_payment_review.
     try:
         _write_order_status_log_customer(
             client,
@@ -1343,7 +1467,8 @@ def create_customer_order(payload: CustomerOrderCreatePayload) -> Dict[str, Any]
         "status": order_row.get("status") or "pending_payment",
         "payment_status": order_row.get("payment_status") or "unpaid",
         "total_amount": float(order_row.get("total_amount") or total_amount),
-        "pickup_time": order_row.get("pickup_time") or pickup_time,
+        # BE-FIX-01: pickup_time may be None for Healholic self-order.
+        "pickup_time": order_row.get("pickup_time") or pickup_time_raw,
         "created_at": order_row.get("created_at"),
         "customer_name": customer_name,
         "items": [

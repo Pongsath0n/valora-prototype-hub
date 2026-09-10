@@ -1,8 +1,6 @@
 import logging
 import re
-from datetime import datetime
 from typing import Any, List, Optional
-from uuid import uuid4
 
 from supabase import Client
 
@@ -52,17 +50,22 @@ def _format_sequence(seq: int) -> str:
     return f"{_ORDER_NUMBER_PREFIX}{padded}"
 
 
-def _fallback_order_number() -> str:
-    timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
-    suffix = uuid4().hex[:4].upper()
-    return f"{_ORDER_NUMBER_PREFIX}{timestamp}-{suffix}"
-
-
 def generate_order_number(client: Client) -> str:
-    """Generate the next customer-facing order number in ORD-00001 format."""
+    """Generate the next customer-facing order number in ORD-00001 format.
+
+    V1 contract: the visible format is ALWAYS ORD-XXXXX (zero-padded to 5).
+    On generator/read failure, this function raises HTTPException(500,
+    order_number_generation_failed) instead of returning a different
+    visible format. This preserves the frozen V1 order_no contract.
+    """
+    from fastapi import HTTPException, status
+
     try:
         next_seq = _determine_next_sequence(client)
         return _format_sequence(next_seq)
-    except Exception as exc:  # pragma: no cover - defensive fallback
-        logger.warning("order_number_sequence_failed: %s", getattr(exc, "message", str(exc)))
-        return _fallback_order_number()
+    except Exception as exc:
+        logger.error("order_number_generation_failed: %s", getattr(exc, "message", str(exc)))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="order_number_generation_failed",
+        ) from exc

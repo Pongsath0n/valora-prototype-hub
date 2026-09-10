@@ -128,10 +128,13 @@ class StaffCancellationRuleTests(unittest.TestCase):
             patch("app.api.store_admin._write_order_status_log") as mock_log:
             with self.assertRaises(HTTPException) as ctx_err:
                 update_order_status(order_id, OrderStatusUpdate(status="cancelled"), authorization="Bearer token")
-            self.assertEqual(ctx_err.exception.detail, "insufficient_role_for_status")
+            # P0-1: Cancellation is owner-only; staff gets owner_role_required.
+            self.assertEqual(ctx_err.exception.status_code, 403)
+            self.assertEqual(ctx_err.exception.detail, "owner_role_required")
             mock_log.assert_not_called()
 
-    def test_update_order_status_allows_staff_cancel_queue_flow(self):
+    def test_update_order_status_denies_staff_cancel_queue_flow(self):
+        """P0-1: Staff can no longer cancel via PATCH /status. Owner-only."""
         order_id = "order-queue"
         fake_ctx, orders_query = self._build_ctx(order_id)
 
@@ -149,15 +152,14 @@ class StaffCancellationRuleTests(unittest.TestCase):
             ), \
             patch("app.api.store_admin._load_latest_payments", return_value={order_id: {"slip_submitted": False}}), \
             patch("app.api.store_admin._write_order_status_log") as mock_log:
-            response = update_order_status(order_id, OrderStatusUpdate(status="cancelled"), authorization="Bearer token")
+            with self.assertRaises(HTTPException) as ctx_err:
+                update_order_status(order_id, OrderStatusUpdate(status="cancelled"), authorization="Bearer token")
+            self.assertEqual(ctx_err.exception.status_code, 403)
+            self.assertEqual(ctx_err.exception.detail, "owner_role_required")
+            mock_log.assert_not_called()
 
-        self.assertEqual(response["status"], "cancelled")
-        update_payload = orders_query.update.call_args[0][0]
-        self.assertEqual(update_payload["status"], "cancelled")
-        self.assertEqual(update_payload["cancelled_reason"], "cancelled_via_status_update")
-        mock_log.assert_called_once()
-
-    def test_update_order_status_allows_staff_cancel_detail_flow(self):
+    def test_update_order_status_denies_staff_cancel_detail_flow(self):
+        """P0-1: Staff can no longer cancel via PATCH /status. Owner-only."""
         order_id = "order-detail"
         fake_ctx, orders_query = self._build_ctx(order_id)
 
@@ -176,12 +178,11 @@ class StaffCancellationRuleTests(unittest.TestCase):
             patch("app.api.store_admin._load_latest_payments", return_value={order_id: {"slip_submitted": False}}), \
             patch("app.api.store_admin._write_order_status_log") as mock_log:
             payload = OrderStatusUpdate(status="cancelled", cancelled_reason="cancelled_by_admin")
-            response = update_order_status(order_id, payload, authorization="Bearer token")
-
-        self.assertEqual(response["status"], "cancelled")
-        update_payload = orders_query.update.call_args[0][0]
-        self.assertEqual(update_payload["cancelled_reason"], "cancelled_by_admin")
-        mock_log.assert_called_once()
+            with self.assertRaises(HTTPException) as ctx_err:
+                update_order_status(order_id, payload, authorization="Bearer token")
+            self.assertEqual(ctx_err.exception.status_code, 403)
+            self.assertEqual(ctx_err.exception.detail, "owner_role_required")
+            mock_log.assert_not_called()
 
     def _build_ctx(self, order_id: str):
         fake_client = MagicMock()

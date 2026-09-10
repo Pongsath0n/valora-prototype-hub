@@ -54,6 +54,17 @@ from app.services.stock_service import (
     build_usage_plan,
     consume_for_paid_order,
 )
+from app.services.atomic_rpc import (
+    AtomicRPCError,
+    cancel_accepted_order,
+    create_and_finalize_kiosk_order,
+    finalize_paid_order,
+)
+from app.services.usage_snapshot import (
+    UsageSnapshotError,
+    embed_usage_snapshot,
+    strip_client_system,
+)
 from app.services.storage import (
     StorageUploadError,
     create_signed_slip_url,
@@ -724,6 +735,18 @@ class OrderStatusUpdate(BaseModel):
 
 
 class OrderCancelPayload(BaseModel):
+    reason: Optional[str] = None
+
+
+# BE-03 / BE-04: Atomic finalization and cancellation payloads.
+FinalizePaymentMethod = Literal["cash", "promptpay"]
+
+
+class FinalizePaymentPayload(BaseModel):
+    payment_method: FinalizePaymentMethod
+
+
+class AtomicCancelPayload(BaseModel):
     reason: Optional[str] = None
 
 
@@ -7381,6 +7404,123 @@ def _notify_order_status_change(
         )
 
 
+@router.get("/orders/incoming")
+def list_incoming_queue(
+    authorization: Optional[str] = Header(None),
+    store_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """BE-FIX-04: Incoming Queue — Self-orders waiting for payment.
+
+    Returns Self-order source orders (``order_source = 'web_order'``)
+    that are ``pending_payment`` and ``unpaid``, ordered by
+    ``created_at`` ASC (oldest first).
+
+    Suitable for 15-second polling and future Realtime refetch.
+    15-minute waiting warning is frontend-derived from ``created_at``.
+    """
+    ctx = _get_ctx(authorization)
+    store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
+    _require_staff_or_above(role)
+
+    client = ctx["client"]
+
+    # 1. Fetch eligible incoming orders in one query.
+    select_cols = _order_select_columns(client)
+    if _orders_has_column(client, "order_source"):
+        select_cols = select_cols + ", order_source"
+
+    order_query = (
+        client.table("orders")
+        .select(select_cols)
+        .eq("store_id", store_id_resolved)
+        .eq("status", "pending_payment")
+        .eq("payment_status", "unpaid")
+        .order("created_at", desc=False)
+    )
+    if _orders_has_column(client, "order_source"):
+        order_query = order_query.eq("order_source", "web_order")
+
+    order_resp = order_query.execute()
+    if getattr(order_resp, "error", None):
+        raise HTTPException(status_code=500, detail="incoming_queue_query_failed")
+    order_rows = getattr(order_resp, "data", None) or []
+
+    if not order_rows:
+        return {"orders": [], "store_id": store_id_resolved}
+
+    # 2. Batch fetch order_items for all eligible orders (no N+1).
+    order_ids = [str(r.get("id")) for r in order_rows if r.get("id")]
+    item_map: Dict[str, List[Dict[str, Any]]] = {}
+    if order_ids:
+        item_query = (
+            client.table("order_items")
+            .select(order_item_select_clause(client))
+            .in_("order_id", order_ids)
+            .order("created_at", desc=False)
+        )
+        if order_items_supports_store_scope(client):
+            item_query = item_query.eq("store_id", store_id_resolved)
+        item_resp = item_query.execute()
+        if getattr(item_resp, "error", None):
+            raise HTTPException(status_code=500, detail="incoming_queue_items_failed")
+        for item in (getattr(item_resp, "data", None) or []):
+            oid = str(item.get("order_id"))
+            item_map.setdefault(oid, []).append(_map_incoming_queue_item(item))
+
+    # 3. Build response.
+    orders: List[Dict[str, Any]] = []
+    for row in order_rows:
+        oid = str(row.get("id"))
+        order_no = row.get("order_no") or row.get("order_number")
+        customer_name = row.get("customer_name") or CUSTOMER_NAME_FALLBACK
+        orders.append({
+            "id": oid,
+            "order_no": order_no,
+            "order_number": order_no,
+            "customer_name": customer_name,
+            "customer_note": row.get("note"),
+            "items": item_map.get(oid, []),
+            "total_amount": float(row.get("total_amount") or 0),
+            "created_at": row.get("created_at"),
+            "status": row.get("status"),
+            "payment_status": row.get("payment_status"),
+            "order_source": row.get("order_source"),
+        })
+
+    return {"orders": orders, "store_id": store_id_resolved}
+
+
+def _map_incoming_queue_item(row: Dict[str, Any]) -> Dict[str, Any]:
+    """Staff-safe order item serialization for the Incoming Queue.
+
+    Excludes internal cost/profit data and ``_system`` internals from
+    ``options``.
+    """
+    product_rel = row.get("products") if isinstance(row, dict) else None
+    product_name = None
+    if isinstance(product_rel, dict):
+        product_name = product_rel.get("name")
+    if not product_name:
+        product_name = row.get("product_name_snapshot")
+
+    # Strip _system from options for customer-safe display.
+    options_value = row.get("options")
+    safe_options = None
+    if isinstance(options_value, dict):
+        safe_options = {k: v for k, v in options_value.items() if k != "_system"}
+
+    return {
+        "id": str(row.get("id")) if row.get("id") else None,
+        "product_id": row.get("product_id"),
+        "product_name": product_name,
+        "quantity": int(row.get("quantity") or 0),
+        "unit_price": float(row.get("unit_price") or 0),
+        "line_total": float(row.get("line_total") or row.get("total_price") or 0),
+        "total_price": float(row.get("total_price") or 0),
+        "options": safe_options,
+    }
+
+
 @router.get("/orders")
 def list_orders(authorization: Optional[str] = Header(None), store_id: Optional[str] = None) -> Dict[str, Any]:
     ctx = _get_ctx(authorization)
@@ -7549,6 +7689,23 @@ def create_order(payload: OrderCreate, authorization: Optional[str] = Header(Non
 
 @router.post("/kiosk/orders", status_code=status.HTTP_201_CREATED)
 def create_kiosk_order(payload: KioskOrderCreate, authorization: Optional[str] = Header(None), store_id: Optional[str] = None) -> Dict[str, Any]:
+    """BE-FIX-05: Atomic Kiosk order creation + payment finalization.
+
+    Replaces the legacy multi-step Kiosk flow (create order -> create
+    payment -> consume stock) with a single atomic database RPC:
+    ``create_and_finalize_kiosk_order_atomic``.
+
+    The RPC creates the order as pending_payment/unpaid, inserts order
+    items with trusted usage snapshots, then reuses
+    ``finalize_paid_order_atomic`` for payment + stock in the SAME
+    transaction. If ANY step fails, the entire transaction rolls back.
+
+    Idempotency: ``client_order_id`` is used as ``orders.id`` (PRIMARY
+    KEY). A duplicate confirm returns ``already_finalized`` without
+    mutating.
+
+    Authorization: Staff, Manager, Owner (operational).
+    """
     ctx = _get_ctx(authorization)
     store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
     _require_staff_or_above(role)
@@ -7556,46 +7713,14 @@ def create_kiosk_order(payload: KioskOrderCreate, authorization: Optional[str] =
     is_staff = normalized_role == "staff"
 
     client = ctx["client"]
-    sanitized_items = _sanitize_kiosk_order_items(payload.items or [])
-    channel_id_value = _ensure_kiosk_channel(client, store_id_resolved)
+    actor_id = ctx.get("user_id")
+    if not actor_id:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid_token")
 
-    item_snapshots: List[Dict[str, Any]] = []
-    for item in sanitized_items:
-        _ensure_product_in_store(client, item["product_id"], store_id_resolved)
-        snapshot = prepare_order_item_snapshot(
-            client,
-            store_id_resolved,
-            product_id=item["product_id"],
-            quantity=item["quantity"],
-            channel_id=channel_id_value,
-            raw_options=item.get("options"),
-        )
-        item_snapshots.append(snapshot)
-
-    # ── FIX-A: Validate sale configuration BEFORE any persistence ────────
-    # Reject missing recipes, invalid quantities, unresolved ingredients
-    # before creating order/payment/stock.  No partial transaction.
-    _validate_sale_configuration(item_snapshots)
-
-    subtotal = sum(float(snapshot.get("total_price") or 0) for snapshot in item_snapshots)
-    total_cost = sum(float(snapshot.get("total_cost") or 0) for snapshot in item_snapshots)
-    channel_fee_value = resolve_channel_fee(client, store_id_resolved, channel_id_value, subtotal)
-    discount_amount = 0.0
-    total_amount = subtotal + channel_fee_value - discount_amount
-    gross_profit = total_amount - total_cost - channel_fee_value
-
-    customer_id, customer_name, customer_phone = _ensure_customer_record_for_kiosk(client, store_id_resolved, payload.customer)
-    note_value = _strip_text(payload.note)
-    order_no = generate_order_number(client)
-
-    # ── FIX-B: Use client_order_id as the order primary key ──────────────
-    # If the client provides a UUID, use it as orders.id.  The PRIMARY KEY
-    # constraint is the durable idempotency primitive — two concurrent
-    # requests with the same client_order_id cannot both insert.
+    # Validate client_order_id (idempotency key)
     client_order_id = None
     if payload.client_order_id:
         client_order_id = str(payload.client_order_id).strip()
-        # Validate UUID format (basic check)
         try:
             import uuid as _uuid
             _uuid.UUID(client_order_id)
@@ -7604,210 +7729,169 @@ def create_kiosk_order(payload: KioskOrderCreate, authorization: Optional[str] =
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="kiosk_order_invalid_client_order_id",
             )
+    if not client_order_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="kiosk_order_invalid_client_order_id",
+        )
 
-    order_payload: Dict[str, Any] = {
-        "store_id": store_id_resolved,
-        "channel_id": channel_id_value,
-        "order_type": "manual",
-        "pickup_type": "walk_in",
-        "status": "accepted",
-        "payment_status": "paid",
-        "subtotal": subtotal,
-        "discount_amount": discount_amount,
-        "total_amount": total_amount,
-        "total_cost": total_cost,
-        "gross_profit": gross_profit,
-        "note": note_value,
-        "order_no": order_no,
-    }
-    if client_order_id:
-        order_payload["id"] = client_order_id
-    if customer_id:
-        order_payload["customer_id"] = customer_id
-    if customer_name and _orders_has_column(client, "customer_name"):
-        order_payload["customer_name"] = customer_name
-    if customer_phone and _orders_has_column(client, "customer_phone"):
-        order_payload["customer_phone"] = customer_phone
-    fee_column = None
-    if _orders_has_column(client, "channel_fee"):
-        fee_column = "channel_fee"
-    elif _orders_has_column(client, "channel_fee_total"):
-        fee_column = "channel_fee_total"
-    if fee_column:
-        order_payload[fee_column] = channel_fee_value
-    if _orders_has_column(client, "order_source"):
-        order_payload["order_source"] = "kiosk"
-    if _orders_has_column(client, "channel"):
-        order_payload["channel"] = "kiosk"
-    if _orders_has_column(client, "order_status"):
-        order_payload["order_status"] = "accepted"
-    if _orders_has_column(client, "payment_method"):
-        order_payload["payment_method"] = payload.payment_method
+    # Sanitize + validate cart items
+    sanitized_items = _sanitize_kiosk_order_items(payload.items or [])
+    channel_id_value = _ensure_kiosk_channel(client, store_id_resolved)
 
-    attempt_data = {key: value for key, value in order_payload.items() if value is not None}
-    order_resp = None
-    max_attempts = len(attempt_data) + 1
-    for _ in range(max_attempts):
+    item_snapshots: List[Dict[str, Any]] = []
+    for item in sanitized_items:
+        _ensure_product_in_store(client, item["product_id"], store_id_resolved)
+        # BE-FIX-05: Strip any client-supplied _system before processing.
+        safe_options = strip_client_system(item.get("options"))
+        snapshot = prepare_order_item_snapshot(
+            client,
+            store_id_resolved,
+            product_id=item["product_id"],
+            quantity=item["quantity"],
+            channel_id=channel_id_value,
+            raw_options=safe_options,
+        )
+        # BE-FIX-05: Embed the server-generated usage snapshot into
+        # options for the finalize RPC to read later. This is the ONLY
+        # path that produces _system.usage_breakdown.
         try:
-            order_resp = client.table("orders").insert(attempt_data).execute()
-            insert_err = getattr(order_resp, "error", None)
-        except Exception as exc:
-            insert_err = exc
-        if not insert_err:
-            break
-        missing_column = _extract_missing_column(insert_err)
-        if missing_column and missing_column in attempt_data:
-            logger.warning("kiosk_order_missing_column column=%s", missing_column)
-            attempt_data.pop(missing_column, None)
-            continue
-        if _is_unique_violation(insert_err, "order_no"):
-            attempt_data["order_no"] = generate_order_number(client)
-            continue
-        # ── FIX-B: Handle orders_pkey duplicate (idempotent replay) ──────
-        if client_order_id and _is_orders_pkey_violation(insert_err):
-            logger.info(
-                "kiosk_order_idempotent_replay store=%s client_order_id=%s",
-                store_id_resolved,
-                client_order_id,
+            options_with_usage = embed_usage_snapshot(
+                snapshot.get("options_snapshot") or {},
+                snapshot,
             )
-            return _handle_idempotent_replay(
-                client,
-                store_id_resolved,
-                client_order_id,
-                sanitized_items,
-                is_staff,
+        except UsageSnapshotError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="invalid_recipe_configuration",
             )
-        raise HTTPException(status_code=500, detail="kiosk_order_create_failed")
-    else:
-        raise HTTPException(status_code=500, detail="kiosk_order_create_failed:max_attempts")
+        snapshot["options_snapshot"] = options_with_usage
+        item_snapshots.append(snapshot)
 
-    order_rows = getattr(order_resp, "data", None) or []
-    if not order_rows:
-        raise HTTPException(status_code=500, detail="kiosk_order_create_missing")
-    order_id = str(order_rows[0].get("id"))
+    # FIX-A: Validate sale configuration BEFORE any persistence
+    _validate_sale_configuration(item_snapshots)
 
+    # Compute trusted totals (advisory; RPC recomputes via triggers)
+    subtotal = sum(float(snapshot.get("total_price") or 0) for snapshot in item_snapshots)
+    channel_fee_value = resolve_channel_fee(client, store_id_resolved, channel_id_value, subtotal)
+
+    # Resolve customer metadata
+    _customer_id, customer_name, customer_phone = _ensure_customer_record_for_kiosk(
+        client, store_id_resolved, payload.customer
+    )
+    note_value = _strip_text(payload.note)
+
+    # Build trusted order item records for the RPC
+    # The RPC inserts these as order_items. Each record includes the
+    # _system.usage_breakdown embedded by embed_usage_snapshot.
     store_scope_supported = order_items_supports_store_scope(client)
-    order_item_records: List[Dict[str, Any]] = []
+    rpc_items: List[Dict[str, Any]] = []
     for snapshot in item_snapshots:
         record = build_order_item_record(
             snapshot,
-            order_id=order_id,
+            order_id=client_order_id,
             store_id=store_id_resolved if store_scope_supported else None,
             product_name=snapshot.get("product_name"),
         )
-        order_item_records.append(prune_order_item_columns(client, record))
+        record = prune_order_item_columns(client, record)
+        # The RPC expects these exact fields:
+        rpc_items.append({
+            "product_id": record.get("product_id"),
+            "quantity": record.get("quantity"),
+            "unit_price": record.get("unit_price"),
+            "unit_cost": record.get("unit_cost"),
+            "total_price": record.get("total_price"),
+            "total_cost": record.get("total_cost"),
+            "line_profit": record.get("line_profit"),
+            "product_name_snapshot": record.get("product_name_snapshot"),
+            "options": record.get("options"),
+            "option_total": record.get("option_total"),
+            "option_cost_total": record.get("option_cost_total"),
+        })
 
-    items_resp = client.table("order_items").insert(order_item_records).execute()
-    if getattr(items_resp, "error", None):
-        raise HTTPException(status_code=500, detail="kiosk_order_items_failed")
-
-    inserted_item_rows = getattr(items_resp, "data", None) or []
-
-    _create_paid_payment(
-        client,
-        store_id_resolved,
-        order_id,
-        total_amount,
-        payload.payment_method,
-        ctx.get("user_id"),
-    )
-
-    recalculate_order_totals(client, store_id_resolved, order_id)
-    _write_order_status_log(client, order_id, None, "accepted", ctx.get("user_id"), note_value)
-
-    # ── Stock consumption (Healholic V1) ─────────────────────────────────
-    # Order, order items, and paid payment now exist. Build the usage plan
-    # from the immutable cost snapshots paired with the real order_item_ids,
-    # then call the frozen SECURITY DEFINER RPC via the service-role client.
-    # The RPC validates paid status and the partial unique index
-    # uq_stock_used_order_item_ingredient is the final idempotency safety net.
-    actor_id = ctx.get("user_id")
-    stock_consumed = False
-    stock_failure_detail: Optional[str] = None
-    if inserted_item_rows and actor_id:
-        # Pair each inserted order item row with its original snapshot by
-        # position (insert order is preserved by PostgREST).
-        usage_entries: List[Dict[str, Any]] = []
-        for index, snapshot in enumerate(item_snapshots):
-            item_row = inserted_item_rows[index] if index < len(inserted_item_rows) else {}
-            usage_entries.append(
-                {
-                    "id": item_row.get("id"),
-                    "quantity": snapshot.get("quantity"),
-                    "snapshot": snapshot,
-                }
-            )
-        try:
-            usage_plan = build_usage_plan(usage_entries)
-            if usage_plan:
-                # FIX-C: consume_for_paid_order now retries transient
-                # failures internally and raises StockSyncFailedError with
-                # order context if all attempts fail.
-                consume_for_paid_order(
-                    client,
-                    store_id=store_id_resolved,
-                    order_id=order_id,
-                    actor_id=actor_id,
-                    usage_plan=usage_plan,
-                    order_no=order_no,
-                )
-                stock_consumed = True
-            else:
-                # No usage produced (e.g. empty cart). Treat as no-op.
-                stock_consumed = True
-        except StockSyncFailedError as exc:
-            # FIX-D: Structured partial-commit response with order context.
-            # The order+payment are persisted but stock sync failed after
-            # all retries.  Return a 503 with order_id so the client can
-            # display a "do not resubmit" warning.
-            logger.error(
-                "kiosk_order_stock_sync_failed store=%s order=%s reason=%s",
-                store_id_resolved,
-                order_id,
-                exc.reason,
-            )
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail={
-                    "code": "kiosk_order_stock_sync_failed",
-                    "order_id": order_id,
-                    "order_no": order_no,
-                    "payment_status": "paid",
-                    "stock_consumed": False,
-                    "retryable": True,
-                    "action": "do_not_resubmit",
-                },
-            )
-        except StockUsageError as exc:
-            # Non-transient stock error (e.g. missing_context).  The
-            # order/payment are already persisted; surface a structured
-            # error with order context.
-            logger.error(
-                "kiosk_order_stock_failed store=%s order=%s reason=%s detail=%s",
-                store_id_resolved,
-                order_id,
-                exc.reason,
-                exc.detail,
-            )
-            stock_failure_detail = exc.detail
-
-    if stock_failure_detail:
+    # Call the atomic RPC.
+    # ONE database write RPC. The RPC:
+    #   1. Generates a race-safe order_no (DB-side, pg_advisory_xact_lock)
+    #   2. INSERTs order (pending_payment / unpaid / order_source=kiosk)
+    #   3. INSERTs order_items (with _system.usage_breakdown)
+    #   4. Calls finalize_paid_order_atomic (SAME transaction):
+    #      - locks order, validates actor/store
+    #      - validates usage snapshots
+    #      - locks ingredients deterministically
+    #      - validates sufficient stock
+    #      - creates paid payment (confirmed_at = DB now())
+    #      - apply_order_stock_usage (stock movements + deduction)
+    #   5. Returns committed result
+    #
+    # If ANY step fails, the entire transaction rolls back:
+    #   - no order persisted
+    #   - no items persisted
+    #   - no payment persisted
+    #   - no stock changed
+    try:
+        rpc_result = create_and_finalize_kiosk_order(
+            client,
+            store_id=store_id_resolved,
+            actor_id=actor_id,
+            payment_method=payload.payment_method,
+            client_order_id=client_order_id,
+            items=rpc_items,
+            customer_name=customer_name,
+            customer_phone=customer_phone,
+            note=note_value,
+            channel_id=channel_id_value,
+            channel_fee=channel_fee_value,
+        )
+    except AtomicRPCError as exc:
         raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            status_code=exc.http_status,
+            detail={"code": exc.reason, "message": exc.detail},
+        )
+
+    # Map the committed result for the response
+    rpc_status = str(rpc_result.get("status") or "")
+    order_id_out = str(rpc_result.get("order_id") or client_order_id)
+    order_no_out = rpc_result.get("order_no")
+    payment_id_out = rpc_result.get("payment_id")
+    confirmed_at = rpc_result.get("confirmed_at")
+    idempotent_replay = bool(rpc_result.get("idempotent_replay"))
+
+    if rpc_status == "already_finalized":
+        # Idempotent replay - return the existing committed order.
+        mapped_order = _map_created_order_with_items(
+            client, store_id_resolved, order_id_out, is_staff
+        )
+        mapped_order["idempotent_replay"] = True
+        mapped_order["stock_consumed"] = True
+        mapped_order["order_no"] = order_no_out or mapped_order.get("order_no")
+        if payment_id_out:
+            mapped_order["payment_id"] = payment_id_out
+        if confirmed_at:
+            mapped_order["confirmed_at"] = confirmed_at
+        return mapped_order
+
+    if rpc_status == "idempotency_conflict":
+        # Existing order in unexpected/incomplete state - safe conflict.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
             detail={
-                "code": "kiosk_order_stock_sync_failed",
-                "order_id": order_id,
-                "order_no": order_no,
-                "payment_status": "paid",
-                "stock_consumed": False,
-                "retryable": True,
-                "action": "do_not_resubmit",
+                "code": "idempotency_conflict",
+                "order_id": order_id_out,
+                "order_no": order_no_out,
             },
         )
 
-    mapped_order = _map_created_order_with_items(client, store_id_resolved, order_id, is_staff)
-    if stock_consumed and not stock_failure_detail:
-        mapped_order["stock_consumed"] = True
+    # Success: finalized
+    mapped_order = _map_created_order_with_items(
+        client, store_id_resolved, order_id_out, is_staff
+    )
+    mapped_order["stock_consumed"] = True
+    mapped_order["order_no"] = order_no_out or mapped_order.get("order_no")
+    if payment_id_out:
+        mapped_order["payment_id"] = payment_id_out
+    if confirmed_at:
+        mapped_order["confirmed_at"] = confirmed_at
+    mapped_order["idempotent_replay"] = False
     return mapped_order
 
 
@@ -7946,6 +8030,11 @@ def update_order(order_id: str, payload: OrderUpdate, authorization: Optional[st
         _ensure_channel_in_store(ctx["client"], data["channel_id"], store_id_resolved)
 
     next_status = data.get("status")
+    # P0-1 (G-audit): Cancellation-equivalent transitions require Owner store role.
+    # Staff and Manager must receive 403 owner_role_required.
+    # Non-cancellation manager functionality is unchanged.
+    if next_status and str(next_status) in CANCELLED_ORDER_STATUSES:
+        _require_owner_store_role(role)
     if next_status and not _valid_order_transition(str(current.get("status") or ""), str(next_status)):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid_status_transition")
 
@@ -7985,7 +8074,9 @@ def update_order(order_id: str, payload: OrderUpdate, authorization: Optional[st
 def delete_order(order_id: str, authorization: Optional[str] = Header(None), store_id: Optional[str] = None) -> Dict[str, Any]:
     ctx = _get_ctx(authorization)
     store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
-    _require_manager(role)
+    # P0-1: DELETE /orders/{id} always results in cancelled or voided,
+    # making it cancellation-equivalent. Require Owner store role.
+    _require_owner_store_role(role)
 
     order_row = _get_order_row(ctx["client"], order_id, store_id_resolved)
     current_status = normalize_order_status(order_row.get("status"))
@@ -8061,28 +8152,19 @@ def update_order_status(order_id: str, payload: OrderStatusUpdate, authorization
 
     current_status_raw = str(current.get("status") or "")
     current_status_normalized = normalize_order_status(current_status_raw)
-    current_payment_status = normalize_payment_status(current.get("payment_status"))
     next_status_value = str(next_status)
+
+    # P0-1: Cancellation-equivalent transitions require Owner store role.
+    # Staff and Manager must receive 403 owner_role_required.
+    # Operational non-cancellation transitions remain Staff+.
+    if next_status_value in CANCELLED_ORDER_STATUSES:
+        _require_owner_store_role(role)
 
     if not _valid_order_transition(current_status_normalized, next_status_value):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid_status_transition")
 
     if normalized_role == "staff":
-        if next_status_value == "cancelled":
-            latest_payment_map = _load_latest_payments(ctx["client"], [str(current.get("id") or order_id)])
-            latest_payment = latest_payment_map.get(str(current.get("id") or order_id))
-            allowed, denial_reason = _staff_can_cancel_operational_order(
-                current_status_normalized,
-                current_payment_status,
-                current.get("cancelled_at"),
-                latest_payment=latest_payment,
-            )
-            if not allowed:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail=denial_reason or "insufficient_role_for_status",
-                )
-        elif next_status_value not in _STAFF_ORDER_STATUS_ALLOWED:
+        if next_status_value not in _STAFF_ORDER_STATUS_ALLOWED:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="insufficient_role_for_status")
 
     status_note = (payload.note or "").strip() or None
@@ -8124,41 +8206,225 @@ def update_order_status(order_id: str, payload: OrderStatusUpdate, authorization
     return {"id": order_id, "status": next_status_value}
 
 
+# BE-FIX-03: Single canonical cancellation business function.
+# Both /cancel and /cancel-atomic delegate to this function so that
+# status-routing logic is defined in exactly one place.
+_BLOCKED_CANCEL_STATUSES: Set[str] = {"preparing", "ready", "ready_for_pickup", "completed"}
+
+
+def _cancel_order_business(
+    client: Client,
+    *,
+    order_id: str,
+    store_id: str,
+    actor_id: str,
+    reason: Optional[str],
+) -> Dict[str, Any]:
+    """Execute cancellation based on the persisted order status.
+
+    - pending_payment → direct cancel (no stock return)
+    - accepted → cancel_accepted_order_atomic RPC (stock return)
+    - cancelled/voided → idempotent already_cancelled
+    - preparing/ready/completed → 409 blocked
+    - other → 400 invalid_status_for_cancellation
+    """
+    order_row = _get_order_row(client, order_id, store_id)
+    current_status = normalize_order_status(order_row.get("status"))
+
+    # Idempotent: already cancelled.
+    if current_status in CANCELLED_ORDER_STATUSES:
+        return {
+            "id": order_id,
+            "status": "cancelled",
+            "result": "already_cancelled",
+        }
+
+    reason_text = (reason or "").strip() or None
+
+    # pending_payment: direct cancel, no stock movement.
+    if current_status == "pending_payment":
+        update_data: Dict[str, Any] = {
+            "status": "cancelled",
+            "cancelled_reason": reason_text or "cancelled_before_payment",
+            "cancelled_at": datetime.utcnow().isoformat(),
+        }
+        if _orders_has_column(client, "order_status"):
+            update_data["order_status"] = "cancelled"
+        resp = (
+            client.table("orders")
+            .update(update_data)
+            .eq("id", order_id)
+            .eq("store_id", store_id)
+            .execute()
+        )
+        if getattr(resp, "error", None):
+            raise HTTPException(status_code=500, detail="order_cancel_failed")
+        _write_order_status_log(
+            client,
+            order_id,
+            str(order_row.get("status") or ""),
+            "cancelled",
+            actor_id,
+            reason_text,
+        )
+        return {
+            "id": order_id,
+            "status": "cancelled",
+            "result": "cancelled_unpaid",
+            "stock_returned": 0,
+        }
+
+    # accepted: atomic stock return via RPC.
+    if current_status == "accepted":
+        try:
+            result = cancel_accepted_order(
+                client,
+                store_id=store_id,
+                order_id=order_id,
+                actor_id=actor_id,
+                reason=reason_text,
+            )
+        except AtomicRPCError as exc:
+            raise HTTPException(
+                status_code=exc.http_status,
+                detail={"code": exc.reason, "message": exc.detail},
+            )
+        return {
+            "id": order_id,
+            "status": "cancelled",
+            "result": result.get("result"),
+            "stock_returned": result.get("returned", 0),
+            "already_returned": result.get("already_returned", 0),
+        }
+
+    # preparing/ready/completed: blocked.
+    if current_status in _BLOCKED_CANCEL_STATUSES:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "invalid_status_for_cancellation", "status": current_status},
+        )
+
+    # Unexpected status.
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail={"code": "invalid_status_for_cancellation", "status": current_status},
+    )
+
+
 @router.post("/orders/{order_id}/cancel")
 def cancel_order(order_id: str, payload: OrderCancelPayload, authorization: Optional[str] = Header(None), store_id: Optional[str] = None) -> Dict[str, Any]:
+    """BE-FIX-03: Canonical business cancellation endpoint.
+
+    Backend decides the cancellation path from the persisted order
+    status — frontend never needs to choose between direct vs atomic
+    cancellation.
+
+    - pending_payment → direct cancel (no stock return)
+    - accepted → cancel_accepted_order_atomic (stock return via RPC)
+    - cancelled → idempotent already_cancelled
+    - preparing/ready/completed → 409 blocked
+    - other → 400 rejected
+    """
     ctx = _get_ctx(authorization)
     store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
-    _require_manager(role)
+    _require_owner_store_role(role)
 
-    current = _get_order_row(ctx["client"], order_id, store_id_resolved)
-    if not _valid_order_transition(str(current.get("status") or ""), "cancelled"):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid_status_transition")
+    actor_id = ctx.get("user_id")
+    if not actor_id:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid_token")
 
-    reason_text = (payload.reason or "").strip() or ORDER_CANCEL_REASON_FALLBACK
-    update_data = {
-        "status": "cancelled",
-        "cancelled_reason": reason_text,
-        "cancelled_at": datetime.utcnow().isoformat(),
+    return _cancel_order_business(
+        ctx["client"],
+        order_id=order_id,
+        store_id=store_id_resolved,
+        actor_id=actor_id,
+        reason=(payload.reason or "").strip() or None,
+    )
+
+
+@router.post("/orders/{order_id}/finalize-payment")
+def finalize_order_payment(
+    order_id: str,
+    payload: FinalizePaymentPayload,
+    authorization: Optional[str] = Header(None),
+    store_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """BE-03: Atomically finalize a pending_payment order as paid+accepted.
+
+    Calls the frozen ``public.finalize_paid_order_atomic`` RPC via the
+    service-role client.  The RPC:
+    - locks the order
+    - verifies actor store membership
+    - validates payment cardinality
+    - verifies the persisted usage snapshot
+    - checks stock availability
+    - creates/updates the payment row as paid
+    - consumes stock via ``apply_order_stock_usage``
+
+    Idempotent: if the order is already accepted+paid, returns
+    ``already_finalized``.
+    """
+    ctx = _get_ctx(authorization)
+    store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
+    _require_staff_or_above(role)
+
+    actor_id = ctx.get("user_id")
+    if not actor_id:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid_token")
+
+    try:
+        result = finalize_paid_order(
+            ctx["client"],
+            store_id=store_id_resolved,
+            order_id=order_id,
+            actor_id=actor_id,
+            payment_method=payload.payment_method,
+        )
+    except AtomicRPCError as exc:
+        raise HTTPException(
+            status_code=exc.http_status,
+            detail={"code": exc.reason, "message": exc.detail},
+        )
+
+    return {
+        "id": order_id,
+        "order_id": order_id,
+        "status": "accepted",
+        "payment_status": "paid",
+        "result": result.get("result"),
+        "payment_id": result.get("payment_id"),
+        "payment_method": result.get("payment_method"),
     }
-    resp = ctx["client"].table("orders").update(update_data).eq("id", order_id).eq("store_id", store_id_resolved).execute()
-    if getattr(resp, "error", None):
-        raise HTTPException(status_code=500, detail="order_cancel_failed")
 
-    _write_order_status_log(
+
+@router.post("/orders/{order_id}/cancel-atomic")
+def cancel_order_atomic(
+    order_id: str,
+    payload: AtomicCancelPayload,
+    authorization: Optional[str] = Header(None),
+    store_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """DEPRECATED — use ``POST /orders/{order_id}/cancel`` instead.
+
+    BE-FIX-03: This route is kept as a compatibility alias and delegates
+    to the same canonical ``_cancel_order_business`` function.  It
+    contains NO separate business logic.  Frontend must use ``/cancel``.
+    """
+    ctx = _get_ctx(authorization)
+    store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
+    _require_owner_store_role(role)
+
+    actor_id = ctx.get("user_id")
+    if not actor_id:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid_token")
+
+    return _cancel_order_business(
         ctx["client"],
-        order_id,
-        str(current.get("status") or ""),
-        "cancelled",
-        ctx.get("user_id"),
-        (payload.reason or "").strip() or None,
+        order_id=order_id,
+        store_id=store_id_resolved,
+        actor_id=actor_id,
+        reason=(payload.reason or "").strip() or None,
     )
-    _notify_order_status_change(
-        ctx["client"],
-        order_id,
-        "cancelled",
-        {"cancelled_reason": reason_text},
-    )
-    return {"id": order_id, "status": "cancelled"}
 
 
 @router.get("/orders/{order_id}/items")

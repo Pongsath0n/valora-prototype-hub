@@ -203,16 +203,17 @@ class PrepareOrderItemSnapshotTests(unittest.TestCase):
     )
     @patch("app.services.cost_engine._calculate_recipe_cost", return_value=(10.0, [], "complete"))
     def test_addon_missing_recipe_status(self, _mock_recipe, _mock_addons, _mock_addon_cost):
+        # BE-FIX-02: Addon with missing recipe must be rejected.
         with self._patch_base_product():
-            snapshot = prepare_order_item_snapshot(
-                self.client,
-                self.store_id,
-                product_id=self.product_id,
-                quantity=1,
-                raw_options={"addons": [{"addon_id": "addon-1", "quantity": 1}]},
-            )
-        self.assertEqual(snapshot["options_snapshot"].get("cost_status", {}).get("addons", {}).get("addon-1"), "missing_addon_recipe")
-        self.assertEqual(snapshot["options_snapshot"]["addons"][0].get("cost_status"), "missing_addon_recipe")
+            with self.assertRaises(HTTPException) as ctx:
+                prepare_order_item_snapshot(
+                    self.client,
+                    self.store_id,
+                    product_id=self.product_id,
+                    quantity=1,
+                    raw_options={"addons": [{"addon_id": "addon-1", "quantity": 1}]},
+                )
+        self.assertEqual(ctx.exception.detail, "addon_not_available")
 
     @patch("app.services.cost_engine._fetch_addon_recipe_rows", return_value=[])
     @patch(
@@ -231,20 +232,17 @@ class PrepareOrderItemSnapshotTests(unittest.TestCase):
     )
     @patch("app.services.cost_engine._calculate_recipe_cost", return_value=(10.0, [], "complete"))
     def test_addon_recipe_rows_missing_preserves_totals(self, _mock_recipe, _mock_addons, _mock_addon_recipes):
+        # BE-FIX-02: Addon with missing recipe rows must be rejected.
         with self._patch_base_product():
-            snapshot = prepare_order_item_snapshot(
-                self.client,
-                self.store_id,
-                product_id=self.product_id,
-                quantity=1,
-                raw_options={"addons": [{"addon_id": "addon-1", "quantity": 1}]},
-            )
-        self.assertEqual(snapshot["option_total"], 7.0)
-        self.assertEqual(snapshot["option_cost_total"], 0.0)
-        addon_snapshot = snapshot["options_snapshot"]["addons"][0]
-        self.assertEqual(addon_snapshot.get("cost_status"), "missing_addon_recipe")
-        addons_status = snapshot["options_snapshot"].get("cost_status", {}).get("addons", {})
-        self.assertEqual(addons_status.get("addon-1"), "missing_addon_recipe")
+            with self.assertRaises(HTTPException) as ctx:
+                prepare_order_item_snapshot(
+                    self.client,
+                    self.store_id,
+                    product_id=self.product_id,
+                    quantity=1,
+                    raw_options={"addons": [{"addon_id": "addon-1", "quantity": 1}]},
+                )
+        self.assertEqual(ctx.exception.detail, "addon_not_available")
 
     @patch("app.services.cost_engine._calculate_addon_unit_cost", return_value=(1.0, [], "complete"))
     @patch(
