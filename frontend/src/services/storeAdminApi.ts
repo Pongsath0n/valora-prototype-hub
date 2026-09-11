@@ -1456,6 +1456,20 @@ export const storeAdminApi = {
     return body as StockIntake;
   },
 
+  async getStockIntakeReceiptUrl(intakeId: string, storeId: string): Promise<{ signed_url: string; expires_in: number }> {
+    const search = new URLSearchParams();
+    if (storeId) search.set("store_id", storeId);
+    const path = `/api/store-admin/stock-intakes/${intakeId}/receipt-url${search.size ? `?${search}` : ""}`;
+    return request<{ signed_url: string; expires_in: number }>(path);
+  },
+
+  async deleteStockIntakeReceipt(intakeId: string, storeId: string): Promise<{ status: string }> {
+    const search = new URLSearchParams();
+    if (storeId) search.set("store_id", storeId);
+    const path = `/api/store-admin/stock-intakes/${intakeId}/receipt${search.size ? `?${search}` : ""}`;
+    return request<{ status: string }>(path, { method: "DELETE" });
+  },
+
   async listIngredientWasteRecords(params?: {
     ingredient_id?: string;
     reason?: IngredientWasteReason;

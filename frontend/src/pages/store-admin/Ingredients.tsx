@@ -293,6 +293,11 @@ export default function StoreAdminIngredientsPage() {
   const [wasteEligibleError, setWasteEligibleError] = useState("");
   const [wasteShowAllIngredients, setWasteShowAllIngredients] = useState(false);
   const [inventoryAlerts, setInventoryAlerts] = useState<InventoryAlertsResponse | null>(null);
+  const [intakeHistory, setIntakeHistory] = useState<StockIntake[]>([]);
+  const [intakeHistoryLoading, setIntakeHistoryLoading] = useState(false);
+  const [receiptActionState, setReceiptActionState] = useState<Record<string, { loading: boolean; error: string | null }>>({});
+  const [receiptDeleteTarget, setReceiptDeleteTarget] = useState<StockIntake | null>(null);
+  const [receiptDeleteSubmitting, setReceiptDeleteSubmitting] = useState(false);
 
   const valid = useMemo(
     () =>
@@ -428,9 +433,82 @@ export default function StoreAdminIngredientsPage() {
     }
   };
 
+  const refreshIntakeHistory = useCallback(async () => {
+    if (!isManagerRole) return;
+    setIntakeHistoryLoading(true);
+    try {
+      const list = await storeAdminApi.listStockIntakes({ limit: 20 });
+      setIntakeHistory(list);
+    } catch {
+      setIntakeHistory([]);
+    } finally {
+      setIntakeHistoryLoading(false);
+    }
+  }, [isManagerRole]);
+
+  const setReceiptAction = (intakeId: string, state: { loading: boolean; error: string | null }) => {
+    setReceiptActionState((prev) => ({ ...prev, [intakeId]: state }));
+  };
+
+  const handleViewReceipt = async (intake: StockIntake) => {
+    if (!intake.store_id) return;
+    setReceiptAction(intake.id, { loading: true, error: null });
+    try {
+      const { signed_url } = await storeAdminApi.getStockIntakeReceiptUrl(intake.id, intake.store_id);
+      if (signed_url) {
+        window.open(signed_url, "_blank", "noopener,noreferrer");
+      }
+      setReceiptAction(intake.id, { loading: false, error: null });
+    } catch (err) {
+      setReceiptAction(intake.id, { loading: false, error: err instanceof Error ? err.message : "เปิดใบเสร็จไม่สำเร็จ" });
+    }
+  };
+
+  const handleReplaceReceipt = async (intake: StockIntake, file: File) => {
+    if (!intake.store_id) return;
+    const allowed = RECEIPT_ALLOWED_TYPES.includes(file.type);
+    if (!allowed) {
+      setReceiptAction(intake.id, { loading: false, error: "ประเภทไฟล์ไม่รองรับ" });
+      return;
+    }
+    if (file.size > RECEIPT_MAX_BYTES) {
+      setReceiptAction(intake.id, { loading: false, error: "ไฟล์ต้องไม่เกิน 5MB" });
+      return;
+    }
+    setReceiptAction(intake.id, { loading: true, error: null });
+    try {
+      await storeAdminApi.uploadStockIntakeReceipt(intake.id, file, intake.store_id);
+      setReceiptAction(intake.id, { loading: false, error: null });
+      void refreshIntakeHistory();
+    } catch (err) {
+      setReceiptAction(intake.id, { loading: false, error: err instanceof Error ? err.message : "อัปโหลดใบเสร็จไม่สำเร็จ" });
+    }
+  };
+
+  const handleDeleteReceipt = async () => {
+    const intake = receiptDeleteTarget;
+    if (!intake || !intake.store_id) return;
+    setReceiptDeleteSubmitting(true);
+    setReceiptAction(intake.id, { loading: true, error: null });
+    try {
+      await storeAdminApi.deleteStockIntakeReceipt(intake.id, intake.store_id);
+      setReceiptDeleteTarget(null);
+      setReceiptAction(intake.id, { loading: false, error: null });
+      void refreshIntakeHistory();
+    } catch (err) {
+      setReceiptAction(intake.id, { loading: false, error: err instanceof Error ? err.message : "ลบใบเสร็จไม่สำเร็จ" });
+    } finally {
+      setReceiptDeleteSubmitting(false);
+    }
+  };
+
   useEffect(() => {
     void refresh();
   }, []);
+
+  useEffect(() => {
+    void refreshIntakeHistory();
+  }, [refreshIntakeHistory]);
 
   useEffect(() => {
     if (!isManagerRole) return;
@@ -1196,6 +1274,136 @@ export default function StoreAdminIngredientsPage() {
           </div>
         </section>
       ) : null}
+
+      {shouldShowWasteSection ? (
+        <section className="mt-10 space-y-4 border-t pt-8">
+          <div className="space-y-1">
+            <h2 className="section-title text-lg">ประวัติการซื้อเข้าสต็อก</h2>
+            <p className="text-sm text-muted-foreground">
+              รายการซื้อเข้าสต็อกล่าสุด สามารถดู/เปลี่ยน/ลบใบเสร็จที่แนบมาได้ (เห็นเฉพาะเจ้าของ/ผู้จัดการ)
+            </p>
+          </div>
+          {intakeHistoryLoading && !intakeHistory.length ? (
+            <p className="text-sm text-muted-foreground">กำลังโหลดประวัติการซื้อ...</p>
+          ) : intakeHistory.length === 0 ? (
+            <p className="text-sm text-muted-foreground">ยังไม่มีรายการซื้อเข้าสต็อก</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-sm">
+                <thead>
+                  <tr className="text-left text-muted-foreground">
+                    <th className="py-2 pr-4">วันเวลา</th>
+                    <th className="py-2 pr-4">วัตถุดิบที่ซื้อ</th>
+                    <th className="py-2 pr-4">ปริมาณ</th>
+                    <th className="py-2 pr-4">ต้นทุนรวม</th>
+                    <th className="py-2 pr-4">ใบเสร็จ</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {intakeHistory.map((intake) => {
+                    const action = receiptActionState[intake.id] ?? { loading: false, error: null };
+                    const hasReceipt = Boolean(intake.receipt_storage_path);
+                    const ingredientName = ingredientLookup[intake.ingredient_id]?.name || intake.ingredient_name || intake.ingredient_id;
+                    const ingredientUnit = ingredientLookup[intake.ingredient_id]?.unit || intake.ingredient_unit || intake.purchase_unit;
+                    return (
+                      <tr key={intake.id} className="border-t">
+                        <td className="py-2 pr-4 whitespace-nowrap">{formatDateTime(intake.created_at)}</td>
+                        <td className="py-2 pr-4">{ingredientName}</td>
+                        <td className="py-2 pr-4">
+                          {Number(intake.quantity).toLocaleString(undefined, { maximumFractionDigits: 2 })} {intake.purchase_unit || ingredientUnit}
+                        </td>
+                        <td className="py-2 pr-4">{currencyFormatter.format(intake.total_cost || 0)}</td>
+                        <td className="py-2 pr-4">
+                          <div className="flex flex-wrap items-center gap-2">
+                            {hasReceipt ? (
+                              <>
+                                <button
+                                  type="button"
+                                  className="inline-flex items-center gap-1 text-xs rounded border px-2 py-1 disabled:opacity-50"
+                                  disabled={action.loading}
+                                  onClick={() => void handleViewReceipt(intake)}
+                                >
+                                  {action.loading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Boxes className="h-3 w-3" />}
+                                  ดูใบเสร็จ
+                                </button>
+                                <label className="inline-flex items-center gap-1 text-xs rounded border px-2 py-1 cursor-pointer disabled:opacity-50">
+                                  {action.loading ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
+                                  เปลี่ยนใบเสร็จ
+                                  <input
+                                    type="file"
+                                    className="hidden"
+                                    accept={RECEIPT_ALLOWED_TYPES.join(",")}
+                                    disabled={action.loading}
+                                    onChange={(e) => {
+                                      const file = e.target.files?.[0];
+                                      if (file) void handleReplaceReceipt(intake, file);
+                                      e.target.value = "";
+                                    }}
+                                  />
+                                </label>
+                                <button
+                                  type="button"
+                                  className="inline-flex items-center gap-1 text-xs rounded border border-destructive/30 text-destructive px-2 py-1 disabled:opacity-50"
+                                  disabled={action.loading}
+                                  onClick={() => setReceiptDeleteTarget(intake)}
+                                >
+                                  <Trash2 className="h-3 w-3" />
+                                  ลบใบเสร็จ
+                                </button>
+                              </>
+                            ) : (
+                              <label className="inline-flex items-center gap-1 text-xs rounded border px-2 py-1 cursor-pointer disabled:opacity-50">
+                                {action.loading ? <Loader2 className="h-3 w-3 animate-spin" /> : <PlusCircle className="h-3 w-3" />}
+                                แนบใบเสร็จ
+                                <input
+                                  type="file"
+                                  className="hidden"
+                                  accept={RECEIPT_ALLOWED_TYPES.join(",")}
+                                  disabled={action.loading}
+                                  onChange={(e) => {
+                                    const file = e.target.files?.[0];
+                                    if (file) void handleReplaceReceipt(intake, file);
+                                    e.target.value = "";
+                                  }}
+                                />
+                              </label>
+                            )}
+                          </div>
+                          {action.error ? <p className="text-xs text-destructive mt-1">{action.error}</p> : null}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      ) : null}
+
+      <Dialog open={receiptDeleteTarget !== null} onOpenChange={(open) => { if (!open && !receiptDeleteSubmitting) setReceiptDeleteTarget(null); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>ลบใบเสร็จ</DialogTitle>
+            <DialogDescription>
+              ลบเฉพาะไฟล์ใบเสร็จหรือหลักฐานการซื้อ ข้อมูลการซื้อและสต็อกจะไม่ถูกลบ
+            </DialogDescription>
+          </DialogHeader>
+          {receiptDeleteTarget ? (
+            <p className="text-sm text-muted-foreground">
+              รายการซื้อเข้าสต็อก ({formatDateTime(receiptDeleteTarget.created_at)}) จะยังคงอยู่ เฉพาะไฟล์ใบเสร็จที่แนบไว้จะถูกลบ
+            </p>
+          ) : null}
+          <DialogFooter className="flex justify-end gap-2">
+            <button type="button" className="px-4 py-2 rounded border" disabled={receiptDeleteSubmitting} onClick={() => setReceiptDeleteTarget(null)}>
+              ยกเลิก
+            </button>
+            <button type="button" className="px-4 py-2 rounded bg-destructive text-destructive-foreground disabled:opacity-50" disabled={receiptDeleteSubmitting} onClick={() => void handleDeleteReceipt()}>
+              {receiptDeleteSubmitting ? "กำลังลบ..." : "ลบใบเสร็จ"}
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={ingredientModalOpen} onOpenChange={(open) => (open ? setIngredientModalOpen(true) : closeIngredientModal())}>
         <DialogContent className="max-w-2xl">

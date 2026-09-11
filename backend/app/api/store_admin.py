@@ -4399,13 +4399,14 @@ def _update_purchase_receipt_fields(
     receipt_url: Optional[str],
     receipt_storage_path: Optional[str],
 ) -> None:
-    payload: Dict[str, Any] = {}
-    if receipt_url is not None:
-        payload["receipt_url"] = receipt_url
-    if receipt_storage_path is not None:
-        payload["receipt_storage_path"] = receipt_storage_path
-    if not payload:
-        return
+    # Always write both fields so that None explicitly clears a stale value
+    # (e.g. a previously persisted signed URL). The durable canonical
+    # reference is receipt_storage_path; receipt_url is a presentation
+    # artifact and must not be treated as durable.
+    payload: Dict[str, Any] = {
+        "receipt_url": receipt_url,
+        "receipt_storage_path": receipt_storage_path,
+    }
     resp = client.table("ingredient_purchases").update(payload).eq("id", purchase_id).eq("store_id", store_id).execute()
     err = getattr(resp, "error", None)
     if err:
@@ -4865,6 +4866,8 @@ async def upload_stock_intake_receipt(
     if len(content) > _purchase_receipt_limit_bytes():
         raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="file_too_large")
 
+    old_receipt_storage_path = purchase_row.get("receipt_storage_path")
+
     storage_path = _build_purchase_receipt_path(store_id_resolved, intake_id, file.filename, mime_type)
     try:
         upload_payment_slip(
@@ -4883,28 +4886,57 @@ async def upload_stock_intake_receipt(
         )
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
 
-    receipt_url = None
+    # Persist the durable storage path only. Signed URLs are generated on
+    # demand via the receipt-url endpoint and must NOT be stored as durable
+    # references (they expire within seconds).
+    db_update_failed = False
     try:
-        signed = create_signed_slip_url(
-            settings.purchase_receipt_bucket,
-            storage_path,
-            expires_in=60,
-            error_prefix="purchase_receipt",
+        _update_purchase_receipt_fields(
+            ctx["client"],
+            intake_id,
+            store_id_resolved,
+            receipt_url=None,
+            receipt_storage_path=storage_path,
         )
-        receipt_url = signed.get("signed_url")
-    except StorageUploadError:
-        receipt_url = None
+    except HTTPException:
+        db_update_failed = True
 
-    _update_purchase_receipt_fields(
-        ctx["client"],
-        intake_id,
-        store_id_resolved,
-        receipt_url=receipt_url,
-        receipt_storage_path=storage_path,
-    )
+    if db_update_failed:
+        # Best-effort cleanup of the newly uploaded object; the previous DB
+        # receipt reference is preserved so any existing receipt stays valid.
+        try:
+            delete_storage_object(
+                settings.purchase_receipt_bucket,
+                storage_path,
+                error_prefix="purchase_receipt",
+            )
+        except Exception:  # pragma: no cover - best effort
+            logger.error(
+                "stock_intake_receipt_upload_cleanup_failed purchase=%s store=%s",
+                _short_identifier(intake_id),
+                _short_identifier(store_id_resolved),
+            )
+        raise HTTPException(status_code=500, detail="purchase_receipt_update_failed")
+
+    # DB now points to the new receipt. Best-effort delete the previous
+    # object; cleanup failure is non-fatal because the new receipt is
+    # already canonical. Do NOT roll back the DB on cleanup failure.
+    if old_receipt_storage_path and old_receipt_storage_path != storage_path:
+        try:
+            delete_storage_object(
+                settings.purchase_receipt_bucket,
+                old_receipt_storage_path,
+                error_prefix="purchase_receipt",
+            )
+        except Exception:  # pragma: no cover - best effort
+            logger.warning(
+                "stock_intake_receipt_old_cleanup_failed purchase=%s store=%s",
+                _short_identifier(intake_id),
+                _short_identifier(store_id_resolved),
+            )
 
     updated_row = dict(purchase_row)
-    updated_row["receipt_url"] = receipt_url
+    updated_row["receipt_url"] = None
     updated_row["receipt_storage_path"] = storage_path
     return _map_stock_intake(updated_row)
 
@@ -4943,6 +4975,68 @@ def generate_stock_intake_receipt_url(
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     return signed
+
+
+@router.delete("/stock-intakes/{intake_id}/receipt")
+def delete_stock_intake_receipt(
+    intake_id: str,
+    authorization: Optional[str] = Header(None),
+    store_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    ctx = _get_ctx(authorization)
+    store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
+    _require_manager(role)
+
+    resp = (
+        ctx["client"]
+        .table("ingredient_purchases")
+        .select("id, store_id, receipt_storage_path, receipt_url")
+        .eq("id", intake_id)
+        .eq("store_id", store_id_resolved)
+        .limit(1)
+        .execute()
+    )
+    err = getattr(resp, "error", None)
+    if err:
+        raise HTTPException(status_code=500, detail="stock_intake_lookup_failed")
+    rows = getattr(resp, "data", None) or []
+    if not rows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="stock_intake_not_found")
+    purchase_row = rows[0]
+    storage_path = purchase_row.get("receipt_storage_path")
+    if not storage_path:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="receipt_not_uploaded")
+
+    # Clear the DB reference first so the intake never points at a deleted
+    # object. Only the receipt evidence columns are touched — the stock
+    # intake, movement, cost snapshot, and payment status are preserved.
+    try:
+        _update_purchase_receipt_fields(
+            ctx["client"],
+            intake_id,
+            store_id_resolved,
+            receipt_url=None,
+            receipt_storage_path=None,
+        )
+    except HTTPException:
+        raise HTTPException(status_code=500, detail="purchase_receipt_update_failed")
+
+    # Best-effort delete the storage object; cleanup failure is non-fatal
+    # because the DB no longer references it (orphaned object only).
+    try:
+        delete_storage_object(
+            settings.purchase_receipt_bucket,
+            storage_path,
+            error_prefix="purchase_receipt",
+        )
+    except Exception:  # pragma: no cover - best effort
+        logger.warning(
+            "stock_intake_receipt_delete_cleanup_failed purchase=%s store=%s",
+            _short_identifier(intake_id),
+            _short_identifier(store_id_resolved),
+        )
+
+    return {"status": "receipt_deleted"}
 
 
 # ─── Recipes ──────────────────────────────────────────────────────────────────
