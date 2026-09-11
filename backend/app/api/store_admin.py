@@ -6431,7 +6431,7 @@ def _fetch_overhead_row(client: Client, store_id: str, expense_id: str) -> Dict[
 def list_overhead_expenses(authorization: Optional[str] = Header(None), store_id: Optional[str] = None) -> Dict[str, Any]:
     ctx = _get_ctx(authorization)
     store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
-    _require_manager(role)
+    _require_owner_store_role(role)
 
     resp = (
         ctx["client"]
@@ -6454,7 +6454,7 @@ def create_overhead_expense(
 ) -> Dict[str, Any]:
     ctx = _get_ctx(authorization)
     store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
-    _require_manager(role)
+    _require_owner_store_role(role)
 
     data = _sanitize_overhead_payload(payload, partial=False)
     data["store_id"] = store_id_resolved
@@ -6481,7 +6481,7 @@ def update_overhead_expense(
 ) -> Dict[str, Any]:
     ctx = _get_ctx(authorization)
     store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
-    _require_manager(role)
+    _require_owner_store_role(role)
 
     _fetch_overhead_row(ctx["client"], store_id_resolved, expense_id)
     data = _sanitize_overhead_payload(payload, partial=True)
@@ -6527,7 +6527,7 @@ def deactivate_overhead_expense(
     """
     ctx = _get_ctx(authorization)
     store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
-    _require_manager(role)
+    _require_owner_store_role(role)
 
     _fetch_overhead_row(ctx["client"], store_id_resolved, expense_id)
 
@@ -6569,7 +6569,7 @@ def get_planning_assumptions_endpoint(
 ) -> Dict[str, Any]:
     ctx = _get_ctx(authorization)
     store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
-    _require_manager(role)
+    _require_owner_store_role(role)
 
     assumptions = _load_planning_assumptions(ctx["client"], store_id_resolved)
     return assumptions
@@ -6581,7 +6581,7 @@ def patch_planning_assumptions(
 ) -> Dict[str, Any]:
     ctx = _get_ctx(authorization)
     store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
-    _require_manager(role)
+    _require_owner_store_role(role)
 
     data = _sanitize_assumption_payload(payload)
     existing = _load_planning_assumptions(ctx["client"], store_id_resolved)
@@ -6606,7 +6606,7 @@ def patch_planning_assumptions(
 def get_planning_baseline(authorization: Optional[str] = Header(None), store_id: Optional[str] = None) -> Dict[str, Any]:
     ctx = _get_ctx(authorization)
     store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
-    _require_manager(role)
+    _require_owner_store_role(role)
 
     try:
         payload = _build_planning_payload(

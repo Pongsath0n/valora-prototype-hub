@@ -210,6 +210,63 @@ class PlanningOverheadApiTests(unittest.TestCase):
                 store_admin.list_overhead_expenses(store_id=self.store_id)
         self.assertEqual(ctx_err.exception.status_code, 403)
 
+    def test_manager_cannot_list_overhead_expenses(self) -> None:
+        client = FakeClient()
+        with self._ctx_patch(self._ctx(client, role="manager")):
+            with self.assertRaises(HTTPException) as ctx_err:
+                store_admin.list_overhead_expenses(store_id=self.store_id)
+        self.assertEqual(ctx_err.exception.status_code, 403)
+
+    def test_manager_cannot_create_overhead_expense(self) -> None:
+        client = FakeClient()
+        payload = {"name": "x", "category": "rent", "amount": 100, "period": "monthly"}
+        with self._ctx_patch(self._ctx(client, role="manager")):
+            with self.assertRaises(HTTPException) as ctx_err:
+                store_admin.create_overhead_expense(payload, store_id=self.store_id)
+        self.assertEqual(ctx_err.exception.status_code, 403)
+
+    def test_manager_cannot_update_overhead_expense(self) -> None:
+        client = FakeClient()
+        with self._ctx_patch(self._ctx(client, role="manager")):
+            with self.assertRaises(HTTPException) as ctx_err:
+                store_admin.update_overhead_expense("exp-1", {"amount": 200}, store_id=self.store_id)
+        self.assertEqual(ctx_err.exception.status_code, 403)
+
+    def test_manager_cannot_deactivate_overhead_expense(self) -> None:
+        client = FakeClient()
+        with self._ctx_patch(self._ctx(client, role="manager")):
+            with self.assertRaises(HTTPException) as ctx_err:
+                store_admin.deactivate_overhead_expense("exp-1", store_id=self.store_id)
+        self.assertEqual(ctx_err.exception.status_code, 403)
+
+    def test_manager_cannot_get_planning_assumptions(self) -> None:
+        client = FakeClient()
+        with self._ctx_patch(self._ctx(client, role="manager")):
+            with self.assertRaises(HTTPException) as ctx_err:
+                store_admin.get_planning_assumptions_endpoint(store_id=self.store_id)
+        self.assertEqual(ctx_err.exception.status_code, 403)
+
+    def test_manager_cannot_patch_planning_assumptions(self) -> None:
+        client = FakeClient()
+        with self._ctx_patch(self._ctx(client, role="manager")):
+            with self.assertRaises(HTTPException) as ctx_err:
+                store_admin.patch_planning_assumptions({}, store_id=self.store_id)
+        self.assertEqual(ctx_err.exception.status_code, 403)
+
+    def test_manager_cannot_get_planning_baseline(self) -> None:
+        client = FakeClient()
+        with self._ctx_patch(self._ctx(client, role="manager")):
+            with self.assertRaises(HTTPException) as ctx_err:
+                store_admin.get_planning_baseline(store_id=self.store_id)
+        self.assertEqual(ctx_err.exception.status_code, 403)
+
+    def test_staff_cannot_get_planning_baseline(self) -> None:
+        client = FakeClient()
+        with self._ctx_patch(self._ctx(client, role="staff")):
+            with self.assertRaises(HTTPException) as ctx_err:
+                store_admin.get_planning_baseline(store_id=self.store_id)
+        self.assertEqual(ctx_err.exception.status_code, 403)
+
     def test_owner_can_create_overhead_expense(self) -> None:
         client = FakeClient()
         payload = {
