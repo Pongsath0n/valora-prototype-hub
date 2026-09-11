@@ -259,14 +259,15 @@ describe("StoreAdminIngredientsPage", () => {
     expect(mockListIngredientWasteRecords).not.toHaveBeenCalled();
   });
 
-  it("filters waste ingredient dropdown to perishable options by default", async () => {
+  it("shows all ingredients in waste dropdown by default", async () => {
     renderPage();
     await waitFor(() => expect(mockListStockIntakes).toHaveBeenCalled());
     const ingredientSelect = getFormFieldControl<HTMLSelectElement>("วัตถุดิบที่จะตัดสต็อก", "select");
     const optionLabels = Array.from(ingredientSelect.options).map((opt) => opt.textContent);
+    // All ingredients should be shown — waste is not gated by expiry
     expect(optionLabels).toContain("Fresh Milk");
     expect(optionLabels).toContain("Matcha Powder");
-    expect(optionLabels).not.toContain("Ice Cubes");
+    expect(optionLabels).toContain("Ice Cubes");
   });
 
   it("selecting a recommended lot sets ingredient and purchase references", async () => {
@@ -286,8 +287,6 @@ describe("StoreAdminIngredientsPage", () => {
   it("submits exact waste quantity entered for any ingredient", async () => {
     renderPage();
     await waitFor(() => expect(mockListIngredientWasteRecords).toHaveBeenCalled());
-    const showAllButton = screen.getByRole("button", { name: "แสดงวัตถุดิบทั้งหมด" });
-    fireEvent.click(showAllButton);
     const ingredientSelect = getFormFieldControl<HTMLSelectElement>("วัตถุดิบที่จะตัดสต็อก", "select");
     fireEvent.change(ingredientSelect, { target: { value: "ing-2" } });
     fireEvent.change(getFormFieldControl<HTMLInputElement>("จำนวน"), { target: { value: "500" } });

@@ -291,7 +291,6 @@ export default function StoreAdminIngredientsPage() {
   const [wasteEligibleLots, setWasteEligibleLots] = useState<StockIntake[]>([]);
   const [wasteEligibleLoading, setWasteEligibleLoading] = useState(false);
   const [wasteEligibleError, setWasteEligibleError] = useState("");
-  const [wasteShowAllIngredients, setWasteShowAllIngredients] = useState(false);
   const [inventoryAlerts, setInventoryAlerts] = useState<InventoryAlertsResponse | null>(null);
   const [intakeHistory, setIntakeHistory] = useState<StockIntake[]>([]);
   const [intakeHistoryLoading, setIntakeHistoryLoading] = useState(false);
@@ -376,7 +375,7 @@ export default function StoreAdminIngredientsPage() {
     });
     return map;
   }, [rows]);
-  const wasteEligiblePurchases = useMemo(() => wasteEligibleLots.filter((lot) => lot.is_perishable || lot.expires_at), [wasteEligibleLots]);
+  const wasteEligiblePurchases = useMemo(() => wasteEligibleLots, [wasteEligibleLots]);
   const wasteEligibleIngredientIds = useMemo(() => {
     const ids = new Set<string>();
     wasteEligiblePurchases.forEach((lot) => {
@@ -412,12 +411,8 @@ export default function StoreAdminIngredientsPage() {
     return Boolean(wasteForm.ingredientId && qty > 0);
   }, [wasteForm.ingredientId, wasteForm.quantity]);
   const filteredWasteIngredients = useMemo(() => {
-    const baseList = !wasteShowAllIngredients && wasteEligibleIngredientIds.size > 0 ? rows.filter((row) => wasteEligibleIngredientIds.has(row.id)) : rows;
-    if (selectedWasteIngredient && !baseList.some((row) => row.id === selectedWasteIngredient.id)) {
-      return [...baseList, selectedWasteIngredient];
-    }
-    return baseList;
-  }, [rows, selectedWasteIngredient, wasteEligibleIngredientIds, wasteShowAllIngredients]);
+    return rows;
+  }, [rows]);
 
   const refresh = async () => {
     setRefreshing(true);
@@ -1121,7 +1116,7 @@ export default function StoreAdminIngredientsPage() {
                 <p className="text-xs text-muted-foreground">เลือกวัตถุดิบและจำนวนที่ต้องทิ้ง ระบบจะตัดออกจากสต็อกให้อัตโนมัติ</p>
               </div>
               <div className="grid gap-3">
-                <FormField label="ล็อตที่แนะนำให้ตัด" hint="แนะนำเฉพาะล็อตที่เป็นของสดหรือมีวันหมดอายุ">
+                <FormField label="ล็อตที่แนะนำให้ตัด" hint="เลือกล็อตที่ต้องการตัดสต็อก (ไม่บังคับ)">
                   <select className="form-input" value={recommendedLotSelection} onChange={(e) => handleRecommendedLotChange(e.target.value)} disabled={!recommendedLotOptions.length && !recommendedLotSelection}>
                     <option value="">เลือกล็อตที่ต้องทิ้ง</option>
                     {recommendedLotOptions.map((option) => (
@@ -1130,19 +1125,15 @@ export default function StoreAdminIngredientsPage() {
                       </option>
                     ))}
                   </select>
-                  {wasteEligibleLoading ? <p className="text-xs text-muted-foreground mt-1">กำลังโหลดล็อตที่มีวันหมดอายุ...</p> : null}
+                  {wasteEligibleLoading ? <p className="text-xs text-muted-foreground mt-1">กำลังโหลดล็อต...</p> : null}
                   {wasteEligibleError ? <p className="text-xs text-destructive mt-1">{wasteEligibleError}</p> : null}
                   {!wasteEligibleLoading && !recommendedLotOptions.length ? (
-                    <p className="text-xs text-muted-foreground mt-1">ยังไม่มีล็อตที่มีวันหมดอายุ ระบบจะแสดงรายชื่อวัตถุดิบทั้งหมดให้เลือกเอง</p>
+                    <p className="text-xs text-muted-foreground mt-1">ยังไม่มีล็อตที่แนะนำ สามารถเลือกวัตถุดิบและระบุจำนวนได้โดยตรง</p>
                   ) : null}
                 </FormField>
                 <FormField
                   label="วัตถุดิบที่จะตัดสต็อก"
-                  hint={
-                    wasteEligibleIngredientIds.size > 0 && !wasteShowAllIngredients
-                      ? "แสดงเฉพาะวัตถุดิบที่เคยบันทึกวันหมดอายุ สามารถแสดงทั้งหมดได้ที่ปุ่มด้านล่าง"
-                      : "กำลังแสดงวัตถุดิบทั้งหมด"
-                  }
+                  hint="เลือกวัตถุดิบที่ต้องการบันทึกการทิ้ง"
                 >
                   <select className="form-input" value={wasteForm.ingredientId} onChange={(e) => handleWasteChange("ingredientId", e.target.value)}>
                     <option value="" disabled hidden>
@@ -1154,15 +1145,6 @@ export default function StoreAdminIngredientsPage() {
                       </option>
                     ))}
                   </select>
-                  {wasteEligibleIngredientIds.size > 0 ? (
-                    <button
-                      type="button"
-                      className="text-xs underline mt-1"
-                      onClick={() => setWasteShowAllIngredients((prev) => !prev)}
-                    >
-                      {wasteShowAllIngredients ? "ซ่อนวัตถุดิบที่ไม่เกี่ยวกับของเสีย" : "แสดงวัตถุดิบทั้งหมด"}
-                    </button>
-                  ) : null}
                 </FormField>
                 {selectedWasteIngredient ? (
                   <p className="text-xs text-muted-foreground">
