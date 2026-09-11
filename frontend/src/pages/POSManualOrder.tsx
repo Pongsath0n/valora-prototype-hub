@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import AppLayout from "@/components/AppLayout";
 import FormField from "@/components/shared/FormField";
 import DataTable from "@/components/shared/DataTable";
+import { FormSelect } from "@/components/ui/form-select";
 import { menuCatalogService, type MenuItem } from "@/features/store/catalogService";
 import { orderService, type OrderItemInput } from "@/features/store/orderService";
 
@@ -39,8 +40,8 @@ export default function POSManualOrder() {
       เครื่องมือต้นแบบ (เฉพาะโหมดพัฒนา) — ข้อมูลถูกเก็บในเครื่องนี้เท่านั้น ไม่ซิงก์เข้าออเดอร์จริง รายงาน หรือการชำระเงิน
     </div>
     <div className="stat-card grid md:grid-cols-4 gap-3">
-      <FormField label="ช่องทาง"><select className="form-input" value={channelId} onChange={(e)=>setChannelId(e.target.value)}>{channels.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></FormField>
-      <FormField label="เมนู"><select className="form-input" value={menuId} onChange={(e)=>setMenuId(e.target.value)}>{menus.map(m=><option key={m.id} value={m.id}>{m.name}</option>)}</select></FormField>
+      <FormField label="ช่องทาง"><FormSelect value={channelId} onValueChange={(value)=>setChannelId(value)} options={channels.map(c=>({value:c.id,label:c.name}))} /></FormField>
+      <FormField label="เมนู"><FormSelect value={menuId} onValueChange={(value)=>setMenuId(value)} options={menus.map(m=>({value:m.id,label:m.name}))} /></FormField>
       <FormField label="จำนวน"><input type="number" className="form-input" value={qty} min={1} onChange={(e)=>setQty(Number(e.target.value))}/></FormField>
       <FormField label="โน้ต"><input className="form-input" value={note} onChange={(e)=>setNote(e.target.value)} placeholder="เช่น less sweet"/></FormField>
       <div className="md:col-span-4 flex gap-2"><button className="px-4 py-2 rounded border" onClick={addItem}>เพิ่มรายการ</button><button className="px-4 py-2 rounded bg-primary text-primary-foreground disabled:opacity-50" onClick={submit} disabled={!items.length}>บันทึกออเดอร์</button></div>

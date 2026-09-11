@@ -23,6 +23,7 @@ import {
   overheadCategoryLabel,
   overheadPeriodLabel,
 } from "./overheadLabels";
+import { FormSelect } from "@/components/ui/form-select";
 
 type Props = {
   expenses: OverheadExpense[];
@@ -372,32 +373,20 @@ export default function OverheadExpensesManager({
             <div className="grid gap-4 sm:grid-cols-2">
               <div>
                 <label className="form-label mb-1.5 block">หมวด</label>
-                <select
+                <FormSelect
                   value={form.category}
-                  onChange={(e) => setForm((p) => ({ ...p, category: e.target.value as OverheadCategory }))}
-                  className="w-full rounded-lg border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                >
-                  {OVERHEAD_CATEGORIES.map((c) => (
-                    <option key={c} value={c}>
-                      {OVERHEAD_CATEGORY_LABELS[c]}
-                    </option>
-                  ))}
-                </select>
+                  onValueChange={(value) => setForm((p) => ({ ...p, category: value as OverheadCategory }))}
+                  options={OVERHEAD_CATEGORIES.map((c) => ({ value: c, label: OVERHEAD_CATEGORY_LABELS[c] }))}
+                />
               </div>
 
               <div>
                 <label className="form-label mb-1.5 block">รอบค่าใช้จ่าย</label>
-                <select
+                <FormSelect
                   value={form.period}
-                  onChange={(e) => setForm((p) => ({ ...p, period: e.target.value as OverheadPeriod }))}
-                  className="w-full rounded-lg border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                >
-                  {OVERHEAD_PERIODS.map((p) => (
-                    <option key={p} value={p}>
-                      {OVERHEAD_PERIOD_LABELS[p]}
-                    </option>
-                  ))}
-                </select>
+                  onValueChange={(value) => setForm((p) => ({ ...p, period: value as OverheadPeriod }))}
+                  options={OVERHEAD_PERIODS.map((p) => ({ value: p, label: OVERHEAD_PERIOD_LABELS[p] }))}
+                />
               </div>
             </div>
 

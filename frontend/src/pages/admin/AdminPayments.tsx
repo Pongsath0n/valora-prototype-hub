@@ -13,6 +13,7 @@ import {
 } from "@/lib/format";
 import { ExternalLink, Filter, Loader2 } from "lucide-react";
 import type { SubmissionStatus } from "@/features/billing/types";
+import { FormSelect } from "@/components/ui/form-select";
 
 export default function AdminPaymentsPage() {
   const { checking } = useAdminGuard();
@@ -45,28 +46,28 @@ export default function AdminPaymentsPage() {
           <Filter className="w-4 h-4 text-muted-foreground flex-shrink-0" />
           <div className="flex items-center gap-2">
             <label className="text-sm font-medium text-foreground">สถานะ:</label>
-            <select
+            <FormSelect
               value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value as SubmissionStatus | "ALL")}
-              className="px-3 py-1.5 rounded-lg border bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-            >
-              <option value="ALL">ทั้งหมด</option>
-              <option value="PAYMENT_SUBMITTED">รอตรวจสอบ</option>
-              <option value="VERIFIED">ยืนยันแล้ว</option>
-              <option value="REJECTED">ปฏิเสธ</option>
-            </select>
+              onValueChange={(value) => setStatusFilter(value as SubmissionStatus | "ALL")}
+              options={[
+                { value: "ALL", label: "ทั้งหมด" },
+                { value: "PAYMENT_SUBMITTED", label: "รอตรวจสอบ" },
+                { value: "VERIFIED", label: "ยืนยันแล้ว" },
+                { value: "REJECTED", label: "ปฏิเสธ" },
+              ]}
+            />
           </div>
           <div className="flex items-center gap-2">
             <label className="text-sm font-medium text-foreground">แผน:</label>
-            <select
+            <FormSelect
               value={planFilter}
-              onChange={(e) => setPlanFilter(e.target.value)}
-              className="px-3 py-1.5 rounded-lg border bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-            >
-              <option value="ALL">ทุกแผน</option>
-              <option value="starter">Starter</option>
-              <option value="pro">Pro</option>
-            </select>
+              onValueChange={(value) => setPlanFilter(value)}
+              options={[
+                { value: "ALL", label: "ทุกแผน" },
+                { value: "starter", label: "Starter" },
+                { value: "pro", label: "Pro" },
+              ]}
+            />
           </div>
           <span className="text-sm text-muted-foreground ml-auto">
             พบ {rows.length} รายการ

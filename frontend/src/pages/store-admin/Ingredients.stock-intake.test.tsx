@@ -203,6 +203,30 @@ describe("StoreAdminIngredientsPage", () => {
     return input as T;
   }
 
+  async function selectRadixOption(label: string, optionText: string) {
+    const element = screen.getByText(label);
+    const container = element.closest("div");
+    if (!container) throw new Error(`missing container for ${label}`);
+    const combobox = container.querySelector('[role="combobox"]') as HTMLElement;
+    if (!combobox) throw new Error(`missing combobox for ${label}`);
+    combobox.focus();
+    fireEvent.keyDown(combobox, { key: "Enter", code: "Enter" });
+    const options = await screen.findAllByRole("option");
+    const option = options.find((opt) => opt.textContent?.includes(optionText));
+    if (!option) throw new Error(`missing option matching "${optionText}" in ${options.map((o) => o.textContent).join(", ")}`);
+    fireEvent.click(option);
+  }
+
+  async function openRadixSelect(label: string) {
+    const element = screen.getByText(label);
+    const container = element.closest("div");
+    if (!container) throw new Error(`missing container for ${label}`);
+    const combobox = container.querySelector('[role="combobox"]') as HTMLElement;
+    if (!combobox) throw new Error(`missing combobox for ${label}`);
+    combobox.focus();
+    fireEvent.keyDown(combobox, { key: "Enter", code: "Enter" });
+  }
+
   it("renders canonical base unit selector with guidance", async () => {
     renderPage();
     // Master ingredient fields now live in a dedicated modal opened from the toolbar.
@@ -211,12 +235,12 @@ describe("StoreAdminIngredientsPage", () => {
     expect(
       screen.getByText("เลือกหน่วยฐานที่ใช้ในสูตร เช่น กาแฟใช้ g, นมหรือน้ำใช้ ml, แก้ว+ฝาใช้ set, หลอดหรือสติ๊กเกอร์ใช้ pcs"),
     ).toBeInTheDocument();
-    const baseUnitField = screen.getByText("หน่วยฐานที่ใช้ในสูตร").closest("div");
-    expect(baseUnitField).toBeTruthy();
-    if (!baseUnitField) throw new Error("base unit field missing");
-    const unitWithin = within(baseUnitField);
+    // Open the base unit select and verify options
+    await openRadixSelect("หน่วยฐานที่ใช้ในสูตร");
+    const options = await screen.findAllByRole("option");
+    const optionTexts = options.map((opt) => opt.textContent);
     ["กรัม (g)", "มิลลิลิตร (ml)", "ชิ้น (pcs)", "ชุด (set)", "ขวด (bottle)"].forEach((label) => {
-      expect(unitWithin.getByText(label)).toBeInTheDocument();
+      expect(optionTexts).toContain(label);
     });
   });
 
@@ -262,8 +286,9 @@ describe("StoreAdminIngredientsPage", () => {
   it("shows all ingredients in waste dropdown by default", async () => {
     renderPage();
     await waitFor(() => expect(mockListStockIntakes).toHaveBeenCalled());
-    const ingredientSelect = getFormFieldControl<HTMLSelectElement>("วัตถุดิบที่จะตัดสต็อก", "select");
-    const optionLabels = Array.from(ingredientSelect.options).map((opt) => opt.textContent);
+    await openRadixSelect("วัตถุดิบที่จะตัดสต็อก");
+    const options = await screen.findAllByRole("option");
+    const optionLabels = options.map((opt) => opt.textContent);
     // All ingredients should be shown — waste is not gated by expiry
     expect(optionLabels).toContain("Fresh Milk");
     expect(optionLabels).toContain("Matcha Powder");
@@ -273,10 +298,8 @@ describe("StoreAdminIngredientsPage", () => {
   it("selecting a recommended lot sets ingredient and purchase references", async () => {
     renderPage();
     await screen.findByText("ล็อตที่แนะนำให้ตัด");
-    const lotSelect = getFormFieldControl<HTMLSelectElement>("ล็อตที่แนะนำให้ตัด", "select");
-    fireEvent.change(lotSelect, { target: { value: "purchase-1" } });
-    const quantityInput = getFormFieldControl<HTMLInputElement>("จำนวน");
-    fireEvent.change(quantityInput, { target: { value: "3" } });
+    await selectRadixOption("ล็อตที่แนะนำให้ตัด", "Fresh Milk");
+    fireEvent.change(getFormFieldControl<HTMLInputElement>("จำนวน"), { target: { value: "3" } });
     fireEvent.click(screen.getByRole("button", { name: "บันทึกการทิ้ง" }));
 
     await waitFor(() => expect(mockCreateIngredientWaste).toHaveBeenCalled());
@@ -287,11 +310,9 @@ describe("StoreAdminIngredientsPage", () => {
   it("submits exact waste quantity entered for any ingredient", async () => {
     renderPage();
     await waitFor(() => expect(mockListIngredientWasteRecords).toHaveBeenCalled());
-    const ingredientSelect = getFormFieldControl<HTMLSelectElement>("วัตถุดิบที่จะตัดสต็อก", "select");
-    fireEvent.change(ingredientSelect, { target: { value: "ing-2" } });
+    await selectRadixOption("วัตถุดิบที่จะตัดสต็อก", "Ice Cubes");
     fireEvent.change(getFormFieldControl<HTMLInputElement>("จำนวน"), { target: { value: "500" } });
-    const reasonSelect = getFormFieldControl<HTMLSelectElement>("เหตุผล", "select");
-    fireEvent.change(reasonSelect, { target: { value: "quality_issue" } });
+    await selectRadixOption("เหตุผล", "คุณภาพไม่ผ่าน");
     fireEvent.click(screen.getByRole("button", { name: "บันทึกการทิ้ง" }));
 
     await waitFor(() => expect(mockCreateIngredientWaste).toHaveBeenCalled());
@@ -302,11 +323,9 @@ describe("StoreAdminIngredientsPage", () => {
   it("maps waste reason labels to backend values", async () => {
     renderPage();
     await waitFor(() => expect(mockListIngredientWasteRecords).toHaveBeenCalled());
-    const ingredientSelect = getFormFieldControl<HTMLSelectElement>("วัตถุดิบที่จะตัดสต็อก", "select");
-    fireEvent.change(ingredientSelect, { target: { value: "ing-1" } });
+    await selectRadixOption("วัตถุดิบที่จะตัดสต็อก", "Fresh Milk");
     fireEvent.change(getFormFieldControl<HTMLInputElement>("จำนวน"), { target: { value: "3" } });
-    const reasonSelect = getFormFieldControl<HTMLSelectElement>("เหตุผล", "select");
-    fireEvent.change(reasonSelect, { target: { value: "spill" satisfies IngredientWasteReason } });
+    await selectRadixOption("เหตุผล", "หกหล่น");
     fireEvent.click(screen.getByRole("button", { name: "บันทึกการทิ้ง" }));
 
     await waitFor(() => expect(mockCreateIngredientWaste).toHaveBeenCalled());
@@ -319,8 +338,7 @@ describe("StoreAdminIngredientsPage", () => {
     mockCreateIngredientWaste.mockRejectedValueOnce(new Error("insufficient_stock_for_waste"));
     renderPage();
     await waitFor(() => expect(mockListIngredientWasteRecords).toHaveBeenCalled());
-    const ingredientSelect = getFormFieldControl<HTMLSelectElement>("วัตถุดิบที่จะตัดสต็อก", "select");
-    fireEvent.change(ingredientSelect, { target: { value: "ing-1" } });
+    await selectRadixOption("วัตถุดิบที่จะตัดสต็อก", "Fresh Milk");
     fireEvent.change(getFormFieldControl<HTMLInputElement>("จำนวน"), { target: { value: "999" } });
     fireEvent.click(screen.getByRole("button", { name: "บันทึกการทิ้ง" }));
 
@@ -332,10 +350,9 @@ describe("StoreAdminIngredientsPage", () => {
     mockCreateIngredientWaste.mockRejectedValueOnce(new Error("insufficient_lot_stock_for_waste"));
     renderPage();
     await waitFor(() => expect(mockListIngredientWasteRecords).toHaveBeenCalled());
-    const ingredientSelect = getFormFieldControl<HTMLSelectElement>("วัตถุดิบที่จะตัดสต็อก", "select");
-    fireEvent.change(ingredientSelect, { target: { value: "ing-1" } });
+    await selectRadixOption("วัตถุดิบที่จะตัดสต็อก", "Fresh Milk");
     fireEvent.change(getFormFieldControl<HTMLInputElement>("จำนวน"), { target: { value: "500" } });
-    fireEvent.change(getFormFieldControl<HTMLSelectElement>("อ้างอิงรายการซื้อ (ถ้ามี)", "select"), { target: { value: "purchase-1" } });
+    await selectRadixOption("อ้างอิงรายการซื้อ (ถ้ามี)", "LOT-LOCAL");
     fireEvent.click(screen.getByRole("button", { name: "บันทึกการทิ้ง" }));
 
     await waitFor(() => expect(mockCreateIngredientWaste).toHaveBeenCalled());
@@ -347,8 +364,7 @@ describe("StoreAdminIngredientsPage", () => {
     mockCreateIngredientWaste.mockRejectedValueOnce(new Error("Failed to fetch"));
     renderPage();
     await waitFor(() => expect(mockListIngredientWasteRecords).toHaveBeenCalled());
-    const ingredientSelect = getFormFieldControl<HTMLSelectElement>("วัตถุดิบที่จะตัดสต็อก", "select");
-    fireEvent.change(ingredientSelect, { target: { value: "ing-1" } });
+    await selectRadixOption("วัตถุดิบที่จะตัดสต็อก", "Fresh Milk");
     fireEvent.change(getFormFieldControl<HTMLInputElement>("จำนวน"), { target: { value: "2" } });
     fireEvent.click(screen.getByRole("button", { name: "บันทึกการทิ้ง" }));
 

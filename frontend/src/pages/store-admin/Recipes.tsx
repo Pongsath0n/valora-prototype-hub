@@ -6,6 +6,7 @@ import EmptyState from "@/components/shared/EmptyState";
 import FormField from "@/components/shared/FormField";
 import LoadingState from "@/components/shared/LoadingState";
 import StatusBadge, { type BadgeTone } from "@/components/shared/StatusBadge";
+import { FormSelect } from "@/components/ui/form-select";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { storeAdminApi, type ApiIngredient, type ApiProduct, type ApiRecipe, type RecipePayload } from "@/services/storeAdminApi";
 
@@ -501,22 +502,15 @@ export default function StoreAdminRecipesPage() {
                 </div>
                 <div className="grid md:grid-cols-3 gap-3">
                   <FormField label="วัตถุดิบ">
-                    <select
-                      className="form-input"
+                    <FormSelect
                       value={form.ingredientId}
-                      onChange={(event) => {
-                        const ingredientId = event.target.value;
+                      onValueChange={(ingredientId) => {
                         const ingredient = ingredients.find((item) => item.id === ingredientId);
                         setForm({ ...form, ingredientId, unit: ingredient?.unit ?? form.unit });
                       }}
-                    >
-                      <option value="">-- เลือกวัตถุดิบ --</option>
-                      {ingredients.map((ingredient) => (
-                        <option key={ingredient.id} value={ingredient.id}>
-                          {ingredient.name}
-                        </option>
-                      ))}
-                    </select>
+                      placeholder="-- เลือกวัตถุดิบ --"
+                      options={ingredients.map((ingredient) => ({ value: ingredient.id, label: ingredient.name }))}
+                    />
                   </FormField>
                   <FormField label="ปริมาณที่ใช้">
                     <input

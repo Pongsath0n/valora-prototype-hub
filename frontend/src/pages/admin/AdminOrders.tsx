@@ -26,6 +26,7 @@ import {
   formatTHB,
   formatDateTime,
 } from "@/lib/format";
+import { FormSelect } from "@/components/ui/form-select";
 
 /**
  * The manual "create pickup order" form only collects pickup_time + note —
@@ -479,22 +480,19 @@ export default function AdminOrdersPage() {
                 const options = nextStatusByCurrent[r.status] || [];
                 if (options.length === 0) return <span className="text-muted-foreground">-</span>;
                 return (
-                  <select
-                    className="border rounded px-2 py-1 text-sm"
-                    defaultValue=""
-                    aria-label="เลือกการดำเนินการถัดไป"
-                    onChange={(e) => {
-                      const value = e.target.value;
+                  <FormSelect
+                    value=""
+                    placeholder="เลือกการดำเนินการ"
+                    ariaLabel="เลือกการดำเนินการถัดไป"
+                    onValueChange={(value) => {
                       if (!value) return;
-                      e.currentTarget.value = "";
                       void handleStatusChange(r, value);
                     }}
-                  >
-                    <option value="">เลือกการดำเนินการ</option>
-                    {options.map((s) => (
-                      <option key={s} value={s}>{formatNextStatusAction(s)}</option>
-                    ))}
-                  </select>
+                    options={options.map((s) => ({
+                      value: s,
+                      label: formatNextStatusAction(s),
+                    }))}
+                  />
                 );
               },
             },

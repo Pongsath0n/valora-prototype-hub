@@ -9,6 +9,7 @@ import { storeAdminApi, type SalesReportOrderRow, type SalesReportProductRow } f
 import { saveBlobAsFile } from "@/lib/download";
 import { useProfileRole } from "@/contexts/RoleContext";
 import { Download, TrendingDown, TrendingUp, Trophy } from "lucide-react";
+import { FormSelect } from "@/components/ui/form-select";
 
 const currency = new Intl.NumberFormat("th-TH", { style: "currency", currency: "THB" });
 const quantityFormatter = new Intl.NumberFormat("th-TH");
@@ -275,26 +276,18 @@ export default function ReportsPage() {
             min={filters.start_date}
             onChange={(e) => setFilters((prev) => ({ ...prev, end_date: e.target.value }))}
           />
-          <select
-            className="form-input"
+          <FormSelect
             value={filters.channel_id || ""}
-            onChange={(e) => setFilters((prev) => ({ ...prev, channel_id: e.target.value }))}
-          >
-            <option value="">ทุกช่องทาง</option>
-            {channelOptions.map((channel) => (
-              <option key={channel.id} value={channel.id}>{channel.name}</option>
-            ))}
-          </select>
-          <select
-            className="form-input"
+            onValueChange={(value) => setFilters((prev) => ({ ...prev, channel_id: value }))}
+            placeholder="ทุกช่องทาง"
+            options={channelOptions.map((channel) => ({ value: channel.id, label: channel.name }))}
+          />
+          <FormSelect
             value={filters.product_id || ""}
-            onChange={(e) => setFilters((prev) => ({ ...prev, product_id: e.target.value }))}
-          >
-            <option value="">ทุกเมนู</option>
-            {productOptions.map((product) => (
-              <option key={product.id} value={product.id}>{product.name}</option>
-            ))}
-          </select>
+            onValueChange={(value) => setFilters((prev) => ({ ...prev, product_id: value }))}
+            placeholder="ทุกเมนู"
+            options={productOptions.map((product) => ({ value: product.id, label: product.name }))}
+          />
           <div className="flex flex-col items-end justify-center gap-1 text-xs text-muted-foreground">
             <span>เขตเวลาแสดงผล: {BANGKOK_TZ}</span>
             <span>ข้อมูล backend: {data?.range.timezone ?? "ไม่ระบุ"}</span>

@@ -5,6 +5,7 @@ import DataTable from "@/components/shared/DataTable";
 import EmptyState from "@/components/shared/EmptyState";
 import LoadingState from "@/components/shared/LoadingState";
 import FormField from "@/components/shared/FormField";
+import { FormSelect } from "@/components/ui/form-select";
 import StatusBadge from "@/components/shared/StatusBadge";
 import {
   storeAdminApi,
@@ -606,18 +607,12 @@ export default function AdminProductsPage() {
         {ingredientsLoading ? <p className="text-xs text-muted-foreground">กำลังโหลดรายการวัตถุดิบ...</p> : null}
         <div className="grid gap-3 md:grid-cols-3">
           <FormField label="วัตถุดิบ">
-            <select
-              className="form-input"
+            <FormSelect
               value={recipeForm.ingredientId}
-              onChange={(e) => setRecipeForm((prev) => (prev ? { ...prev, ingredientId: e.target.value } : prev))}
-            >
-              <option value="">เลือกวัตถุดิบ</option>
-              {ingredients.map((ingredient) => (
-                <option key={ingredient.id} value={ingredient.id}>
-                  {ingredient.name}
-                </option>
-              ))}
-            </select>
+              onValueChange={(value) => setRecipeForm((prev) => (prev ? { ...prev, ingredientId: value } : prev))}
+              placeholder="เลือกวัตถุดิบ"
+              options={ingredients.map((ingredient) => ({ value: ingredient.id, label: ingredient.name }))}
+            />
           </FormField>
           <FormField label="ปริมาณที่ใช้">
             <input
@@ -753,15 +748,11 @@ export default function AdminProductsPage() {
             <input className="form-input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
           </FormField>
           <FormField label="หมวดหมู่ (เลือก)">
-            <select
-              className="form-input"
+            <FormSelect
               value={form.categoryId}
-              onChange={(e) => setForm({ ...form, categoryId: e.target.value, categoryName: "" })}
-            >
-              {categoryOptions.map((c) => (
-                <option key={c.id || "none"} value={c.id}>{c.name}</option>
-              ))}
-            </select>
+              onValueChange={(value) => setForm({ ...form, categoryId: value, categoryName: "" })}
+              options={categoryOptions.map((c) => ({ value: c.id, label: c.name }))}
+            />
           </FormField>
           <FormField label="หรือสร้างหมวดใหม่">
             <input
@@ -781,24 +772,24 @@ export default function AdminProductsPage() {
             />
           </FormField>
           <FormField label="สถานะ">
-            <select
-              className="form-input"
+            <FormSelect
               value={form.isActive ? "active" : "inactive"}
-              onChange={(e) => setForm({ ...form, isActive: e.target.value === "active" })}
-            >
-              <option value="active">เปิดใช้งาน</option>
-              <option value="inactive">ปิดใช้งาน</option>
-            </select>
+              onValueChange={(value) => setForm({ ...form, isActive: value === "active" })}
+              options={[
+                { value: "active", label: "เปิดใช้งาน" },
+                { value: "inactive", label: "ปิดใช้งาน" },
+              ]}
+            />
           </FormField>
           <FormField label="เมนูแนะนำ">
-            <select
-              className="form-input"
+            <FormSelect
               value={form.isSpecial ? "yes" : "no"}
-              onChange={(e) => setForm({ ...form, isSpecial: e.target.value === "yes" })}
-            >
-              <option value="no">ไม่ระบุ</option>
-              <option value="yes">แนะนำ</option>
-            </select>
+              onValueChange={(value) => setForm({ ...form, isSpecial: value === "yes" })}
+              options={[
+                { value: "no", label: "ไม่ระบุ" },
+                { value: "yes", label: "แนะนำ" },
+              ]}
+            />
           </FormField>
           <FormField label="อัปโหลดรูปเมนู">
             <div className="space-y-2">

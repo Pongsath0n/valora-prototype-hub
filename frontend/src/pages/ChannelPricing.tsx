@@ -5,6 +5,7 @@ import FormField from "@/components/shared/FormField";
 import { ingredientService, menuCatalogService, recipeService, type IngredientItem, type MenuItem } from "@/features/store/catalogService";
 import { orderService, type ChannelPrice, type SalesChannel } from "@/features/store/orderService";
 import { calculateChannelFeeAndProfit } from "@/features/store/profitCalculator";
+import { FormSelect } from "@/components/ui/form-select";
 
 type PriceForm = { id?: string; menuId: string; channelId: string; price: string; isActive: boolean };
 const emptyForm: PriceForm = { menuId: "", channelId: "", price: "0", isActive: true };
@@ -112,28 +113,20 @@ export default function ChannelPricing() {
             </div>
             <div className="grid md:grid-cols-4 gap-3">
               <FormField label="เมนู">
-                <select
-                  className="form-input"
+                <FormSelect
                   value={form.menuId}
-                  onChange={(e) => setForm({ ...form, menuId: e.target.value })}
-                >
-                  <option value="">-- เลือกเมนู --</option>
-                  {activeMenus.map((m) => (
-                    <option key={m.id} value={m.id}>{m.name}</option>
-                  ))}
-                </select>
+                  onValueChange={(value) => setForm({ ...form, menuId: value })}
+                  placeholder="-- เลือกเมนู --"
+                  options={activeMenus.map((m) => ({ value: m.id, label: m.name }))}
+                />
               </FormField>
               <FormField label="ช่องทาง">
-                <select
-                  className="form-input"
+                <FormSelect
                   value={form.channelId}
-                  onChange={(e) => setForm({ ...form, channelId: e.target.value })}
-                >
-                  <option value="">-- เลือกช่องทาง --</option>
-                  {activeChannels.map((c) => (
-                    <option key={c.id} value={c.id}>{c.name}</option>
-                  ))}
-                </select>
+                  onValueChange={(value) => setForm({ ...form, channelId: value })}
+                  placeholder="-- เลือกช่องทาง --"
+                  options={activeChannels.map((c) => ({ value: c.id, label: c.name }))}
+                />
               </FormField>
               <FormField label="ราคา (฿)">
                 <input
@@ -145,14 +138,14 @@ export default function ChannelPricing() {
                 />
               </FormField>
               <FormField label="สถานะ">
-                <select
-                  className="form-input"
+                <FormSelect
                   value={form.isActive ? "active" : "inactive"}
-                  onChange={(e) => setForm({ ...form, isActive: e.target.value === "active" })}
-                >
-                  <option value="active">เปิดใช้งาน</option>
-                  <option value="inactive">ปิดใช้งาน</option>
-                </select>
+                  onValueChange={(value) => setForm({ ...form, isActive: value === "active" })}
+                  options={[
+                    { value: "active", label: "เปิดใช้งาน" },
+                    { value: "inactive", label: "ปิดใช้งาน" },
+                  ]}
+                />
               </FormField>
             </div>
             {error ? <p className="text-sm text-destructive">{error}</p> : null}

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Edit3, Plus, Trash2 } from "lucide-react";
 import AdminLayout from "@/components/admin/AdminLayout";
 import FormField from "@/components/shared/FormField";
+import { FormSelect } from "@/components/ui/form-select";
 import { storeAdminApi, type ApiChannelPrice, type ApiSalesChannel, type ChannelPricingPayload, type ProductSummary } from "@/services/storeAdminApi";
 
 type PriceForm = { id?: string; productId: string; channelId: string; price: string };
@@ -131,28 +132,20 @@ export default function StoreAdminChannelPricingPage() {
           </div>
           <div className="grid md:grid-cols-3 gap-3">
             <FormField label="เมนู">
-              <select
-                className="form-input"
+              <FormSelect
                 value={form.productId}
-                onChange={(e) => setForm({ ...form, productId: e.target.value })}
-              >
-                <option value="">-- เลือกเมนู --</option>
-                {activeProducts.map((p) => (
-                  <option key={p.id} value={p.id}>{p.name}</option>
-                ))}
-              </select>
+                onValueChange={(value) => setForm({ ...form, productId: value })}
+                placeholder="-- เลือกเมนู --"
+                options={activeProducts.map((p) => ({ value: p.id, label: p.name }))}
+              />
             </FormField>
             <FormField label="ช่องทาง">
-              <select
-                className="form-input"
+              <FormSelect
                 value={form.channelId}
-                onChange={(e) => setForm({ ...form, channelId: e.target.value })}
-              >
-                <option value="">-- เลือกช่องทาง --</option>
-                {activeChannels.map((c) => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
-                ))}
-              </select>
+                onValueChange={(value) => setForm({ ...form, channelId: value })}
+                placeholder="-- เลือกช่องทาง --"
+                options={activeChannels.map((c) => ({ value: c.id, label: c.name }))}
+              />
             </FormField>
             <FormField label="ราคา (฿)">
               <input

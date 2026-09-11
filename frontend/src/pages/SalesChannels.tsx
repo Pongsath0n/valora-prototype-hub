@@ -5,6 +5,7 @@ import DataTable from "@/components/shared/DataTable";
 import FormField from "@/components/shared/FormField";
 import StatusBadge from "@/components/shared/StatusBadge";
 import { orderService, type FeeType, type SalesChannel } from "@/features/store/orderService";
+import { FormSelect } from "@/components/ui/form-select";
 
 type FormState = { id?: string; name: string; feeType: FeeType; feeValue: string; isActive: boolean };
 const emptyForm: FormState = { name: "", feeType: "none", feeValue: "0", isActive: true };
@@ -50,20 +51,20 @@ export default function SalesChannels() {
             <div className="grid md:grid-cols-3 gap-3">
               <FormField label="ชื่อช่องทาง"><input className="form-input" value={form.name} onChange={(e)=>setForm({ ...form, name: e.target.value })} /></FormField>
               <FormField label="ประเภทค่าธรรมเนียม">
-                <select className="form-input" value={form.feeType} onChange={(e)=>setForm({ ...form, feeType: e.target.value as FeeType })}>
-                  <option value="none">ไม่มีค่าธรรมเนียม</option>
-                  <option value="fixed">ค่าตายตัว (฿)</option>
-                  <option value="percent">เปอร์เซ็นต์ (%)</option>
-                </select>
+                <FormSelect value={form.feeType} onValueChange={(value) => setForm({ ...form, feeType: value as FeeType })} options={[
+                  { value: "none", label: "ไม่มีค่าธรรมเนียม" },
+                  { value: "fixed", label: "ค่าตายตัว (฿)" },
+                  { value: "percent", label: "เปอร์เซ็นต์ (%)" },
+                ]} />
               </FormField>
               <FormField label="ค่า">
                 <input type="number" className="form-input" value={form.feeValue} min={0} max={form.feeType === "percent" ? 100 : undefined} onChange={(e)=>setForm({ ...form, feeValue: e.target.value })} disabled={form.feeType === "none"} />
               </FormField>
               <FormField label="สถานะ">
-                <select className="form-input" value={form.isActive ? "active" : "inactive"} onChange={(e)=>setForm({ ...form, isActive: e.target.value === "active" })}>
-                  <option value="active">เปิดใช้งาน</option>
-                  <option value="inactive">ปิดใช้งาน</option>
-                </select>
+                <FormSelect value={form.isActive ? "active" : "inactive"} onValueChange={(value) => setForm({ ...form, isActive: value === "active" })} options={[
+                  { value: "active", label: "เปิดใช้งาน" },
+                  { value: "inactive", label: "ปิดใช้งาน" },
+                ]} />
               </FormField>
             </div>
             {error ? <p className="text-sm text-destructive">{error}</p> : null}

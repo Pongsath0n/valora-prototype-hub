@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Plus, Trash2, Edit3, Power } from "lucide-react";
 import AdminLayout from "@/components/admin/AdminLayout";
 import FormField from "@/components/shared/FormField";
+import { FormSelect } from "@/components/ui/form-select";
 import DataTable from "@/components/shared/DataTable";
 import StatusBadge from "@/components/shared/StatusBadge";
 import { storeAdminApi, type FeeType, type ChannelType, type ApiSalesChannel, type SalesChannelPayload } from "@/services/storeAdminApi";
@@ -173,26 +174,18 @@ export default function AdminSalesChannelsPage() {
               />
             </FormField>
             <FormField label="ประเภทช่องทาง">
-              <select
-                className="form-input"
+              <FormSelect
                 value={form.type}
-                onChange={(e) => setForm({ ...form, type: e.target.value as ChannelType })}
-              >
-                {channelTypeOptions.map((opt) => (
-                  <option key={opt.value} value={opt.value}>{opt.label}</option>
-                ))}
-              </select>
+                onValueChange={(value) => setForm({ ...form, type: value as ChannelType })}
+                options={channelTypeOptions}
+              />
             </FormField>
             <FormField label="ประเภทค่าธรรมเนียม">
-              <select
-                className="form-input"
+              <FormSelect
                 value={form.feeType}
-                onChange={(e) => setForm({ ...form, feeType: e.target.value as FeeType })}
-              >
-                {feeTypeOptions.map((opt) => (
-                  <option key={opt.value} value={opt.value}>{opt.label}</option>
-                ))}
-              </select>
+                onValueChange={(value) => setForm({ ...form, feeType: value as FeeType })}
+                options={feeTypeOptions}
+              />
             </FormField>
             <FormField label="ค่า (฿ หรือ %)">
               <input
@@ -206,14 +199,14 @@ export default function AdminSalesChannelsPage() {
               />
             </FormField>
             <FormField label="สถานะ">
-              <select
-                className="form-input"
+              <FormSelect
                 value={form.isActive ? "active" : "inactive"}
-                onChange={(e) => setForm({ ...form, isActive: e.target.value === "active" })}
-              >
-                <option value="active">เปิดใช้งาน</option>
-                <option value="inactive">ปิดใช้งาน</option>
-              </select>
+                onValueChange={(value) => setForm({ ...form, isActive: value === "active" })}
+                options={[
+                  { value: "active", label: "เปิดใช้งาน" },
+                  { value: "inactive", label: "ปิดใช้งาน" },
+                ]}
+              />
             </FormField>
           </div>
           {error ? <p className="text-sm text-destructive">{error}</p> : null}

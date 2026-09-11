@@ -24,6 +24,7 @@ import StatusBadge from "@/components/shared/StatusBadge";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { FileUploadField } from "@/components/ui/file-upload";
+import { FormSelect, type FormSelectOption } from "@/components/ui/form-select";
 import { useProfileRole } from "@/contexts/RoleContext";
 import { STORE_MANAGER_ROLES } from "@/lib/guards";
 import {
@@ -1117,14 +1118,13 @@ export default function StoreAdminIngredientsPage() {
               </div>
               <div className="grid gap-3">
                 <FormField label="ล็อตที่แนะนำให้ตัด" hint="เลือกล็อตที่ต้องการตัดสต็อก (ไม่บังคับ)">
-                  <select className="form-input" value={recommendedLotSelection} onChange={(e) => handleRecommendedLotChange(e.target.value)} disabled={!recommendedLotOptions.length && !recommendedLotSelection}>
-                    <option value="">เลือกล็อตที่ต้องทิ้ง</option>
-                    {recommendedLotOptions.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
+                  <FormSelect
+                    value={recommendedLotSelection}
+                    onValueChange={handleRecommendedLotChange}
+                    placeholder="เลือกล็อตที่ต้องทิ้ง"
+                    disabled={!recommendedLotOptions.length && !recommendedLotSelection}
+                    options={recommendedLotOptions.map((option) => ({ value: option.value, label: option.label }))}
+                  />
                   {wasteEligibleLoading ? <p className="text-xs text-muted-foreground mt-1">กำลังโหลดล็อต...</p> : null}
                   {wasteEligibleError ? <p className="text-xs text-destructive mt-1">{wasteEligibleError}</p> : null}
                   {!wasteEligibleLoading && !recommendedLotOptions.length ? (
@@ -1135,16 +1135,12 @@ export default function StoreAdminIngredientsPage() {
                   label="วัตถุดิบที่จะตัดสต็อก"
                   hint="เลือกวัตถุดิบที่ต้องการบันทึกการทิ้ง"
                 >
-                  <select className="form-input" value={wasteForm.ingredientId} onChange={(e) => handleWasteChange("ingredientId", e.target.value)}>
-                    <option value="" disabled hidden>
-                      เลือกวัตถุดิบ
-                    </option>
-                    {filteredWasteIngredients.map((row) => (
-                      <option key={row.id} value={row.id}>
-                        {row.name}
-                      </option>
-                    ))}
-                  </select>
+                  <FormSelect
+                    value={wasteForm.ingredientId}
+                    onValueChange={(value) => handleWasteChange("ingredientId", value)}
+                    placeholder="เลือกวัตถุดิบ"
+                    options={filteredWasteIngredients.map((row) => ({ value: row.id, label: row.name }))}
+                  />
                 </FormField>
                 {selectedWasteIngredient ? (
                   <p className="text-xs text-muted-foreground">
@@ -1155,28 +1151,23 @@ export default function StoreAdminIngredientsPage() {
                   <input className="form-input" type="number" min={0} step="0.1" value={wasteForm.quantity} onChange={(e) => handleWasteChange("quantity", e.target.value)} />
                 </FormField>
                 <FormField label="เหตุผล" hint="เลือกสาเหตุที่ต้องทิ้ง จะได้สรุปของเสียได้ตรงขึ้น">
-                  <select
-                    className="form-input"
+                  <FormSelect
                     value={wasteForm.reason}
-                    onChange={(e) => handleWasteChange("reason", e.target.value as IngredientWasteReason)}
-                  >
-                    {WASTE_REASON_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
+                    onValueChange={(value) => handleWasteChange("reason", value as IngredientWasteReason)}
+                    options={WASTE_REASON_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
+                  />
                 </FormField>
                 <FormField label="อ้างอิงรายการซื้อ (ถ้ามี)" hint="ช่วยคำนวณต้นทุนล็อตนั้น">
-                  <select className="form-input" value={wasteForm.purchaseId} onChange={(e) => handleWasteChange("purchaseId", e.target.value)}>
-                    <option value="">ไม่ระบุ</option>
-                    {recentIntakes.map((intake) => (
-                      <option key={intake.id} value={intake.id}>
-                        {formatDateTime(intake.created_at)} • {intake.lot_code ? `Lot ${intake.lot_code}` : `${Number(intake.quantity).toLocaleString()} ${intake.purchase_unit}`}
-                        {intake.expires_at ? ` • หมดอายุ ${formatDateOnly(intake.expires_at)}` : ""}
-                      </option>
-                    ))}
-                  </select>
+                  <FormSelect
+                    value={wasteForm.purchaseId}
+                    onValueChange={(value) => handleWasteChange("purchaseId", value)}
+                    placeholder="ไม่ระบุ"
+                    emptyMessage="ไม่ระบุ"
+                    options={recentIntakes.map((intake) => ({
+                      value: intake.id,
+                      label: `${formatDateTime(intake.created_at)} • ${intake.lot_code ? `Lot ${intake.lot_code}` : `${Number(intake.quantity).toLocaleString()} ${intake.purchase_unit}`}${intake.expires_at ? ` • หมดอายุ ${formatDateOnly(intake.expires_at)}` : ""}`,
+                    }))}
+                  />
                   {recentIntakesLoading ? <p className="text-xs text-muted-foreground mt-1">กำลังโหลดประวัติการซื้อ...</p> : null}
                 </FormField>
                 <FormField label="วันที่ตัดสต็อก">
@@ -1400,51 +1391,39 @@ export default function StoreAdminIngredientsPage() {
                   <input className="form-input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
                 </FormField>
                 <FormField label="หน่วยฐานที่ใช้ในสูตร" hint={UNIT_HELPER_TEXT}>
-                  <select
-                    className="form-input"
+                  <FormSelect
                     value={form.unit}
-                    onChange={(e) => {
-                      const nextValue = e.target.value;
-                      setForm((prev) => ({ ...prev, unit: isIngredientBaseUnit(nextValue) ? nextValue : "" }));
+                    onValueChange={(value) => {
+                      setForm((prev) => ({ ...prev, unit: isIngredientBaseUnit(value) ? value : "" }));
                     }}
-                  >
-                    <option value="" disabled>
-                      เลือกหน่วยฐาน
-                    </option>
-                    {BASE_UNIT_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
+                    placeholder="เลือกหน่วยฐาน"
+                    options={BASE_UNIT_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
+                  />
                 </FormField>
                 <FormField label="ผู้จัดจำหน่าย (ถ้ามี)">
                   <input className="form-input" value={form.supplierName} onChange={(e) => setForm({ ...form, supplierName: e.target.value })} />
                 </FormField>
                 <FormField label="สถานะ">
-                  <select className="form-input" value={form.isActive ? "active" : "inactive"} onChange={(e) => setForm({ ...form, isActive: e.target.value === "active" })}>
-                    <option value="active">เปิดใช้งาน</option>
-                    <option value="inactive">ปิดใช้งาน</option>
-                  </select>
+                  <FormSelect
+                    value={form.isActive ? "active" : "inactive"}
+                    onValueChange={(value) => setForm({ ...form, isActive: value === "active" })}
+                    options={[
+                      { value: "active", label: "เปิดใช้งาน" },
+                      { value: "inactive", label: "ปิดใช้งาน" },
+                    ]}
+                  />
                 </FormField>
                 <FormField label="ประเภทต้นทุน" hint={COST_TYPE_HELPER_TEXT}>
-                  <select
-                    className="form-input"
+                  <FormSelect
                     value={form.costType}
-                    onChange={(e) => {
-                      const nextValue = e.target.value;
+                    onValueChange={(value) => {
                       setForm((prev) => ({
                         ...prev,
-                        costType: isIngredientCostType(nextValue) ? nextValue : DEFAULT_INGREDIENT_COST_TYPE,
+                        costType: isIngredientCostType(value) ? value : DEFAULT_INGREDIENT_COST_TYPE,
                       }));
                     }}
-                  >
-                    {COST_TYPE_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
+                    options={COST_TYPE_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
+                  />
                 </FormField>
               </div>
             </div>
@@ -1496,42 +1475,30 @@ export default function StoreAdminIngredientsPage() {
             <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">ข้อมูลการซื้อ</p>
             <div className="grid md:grid-cols-2 gap-3">
               <FormField label="วัตถุดิบ">
-                <select className="form-input" value={intakeForm.ingredientId} onChange={(e) => handleIntakeChange("ingredientId", e.target.value)}>
-                  <option value="" disabled hidden>
-                    เลือกวัตถุดิบ
-                  </option>
-                  {rows.map((row) => (
-                    <option key={row.id} value={row.id}>
-                      {row.name}
-                    </option>
-                  ))}
-                </select>
+                <FormSelect
+                  value={intakeForm.ingredientId}
+                  onValueChange={(value) => handleIntakeChange("ingredientId", value)}
+                  placeholder="เลือกวัตถุดิบ"
+                  options={rows.map((row) => ({ value: row.id, label: row.name }))}
+                />
               </FormField>
               <FormField label="จำนวนที่ซื้อ">
                 <input type="number" min={0} step="0.01" className="form-input" value={intakeForm.quantity} onChange={(e) => handleIntakeChange("quantity", e.target.value)} />
               </FormField>
               <FormField label="หน่วยที่ซื้อ">
-                <select
-                  className="form-input"
+                <FormSelect
                   value={intakeForm.purchaseUnit}
-                  onChange={(e) => {
-                    const option = unitOptions.find((opt) => opt.unit === e.target.value);
+                  onValueChange={(value) => {
+                    const option = unitOptions.find((opt) => opt.unit === value);
                     setIntakeForm((prev) => ({
                       ...prev,
-                      purchaseUnit: e.target.value,
+                      purchaseUnit: value,
                       conversionFactor: option?.requiresCount ? "" : String(option?.factor ?? prev.conversionFactor),
                     }));
                   }}
-                >
-                  <option value="" disabled hidden>
-                    เลือกหน่วยซื้อ
-                  </option>
-                  {unitOptions.map((opt) => (
-                    <option key={opt.unit} value={opt.unit}>
-                      {opt.label}
-                    </option>
-                  ))}
-                </select>
+                  placeholder="เลือกหน่วยซื้อ"
+                  options={unitOptions.map((opt) => ({ value: opt.unit, label: opt.label }))}
+                />
               </FormField>
               {requiresPackCount ? (
                 <FormField label={`1 แพ็กมีกี่${selectedIntakeIngredient?.unit || "หน่วย"}?`}>

@@ -1,6 +1,7 @@
 import AppLayout from "@/components/AppLayout";
 import { useState } from "react";
 import { Info, Calendar, Tag, Plus, X, Trash2, CheckCircle2 } from "lucide-react";
+import { FormSelect } from "@/components/ui/form-select";
 
 interface PromoRow {
   id: number;
@@ -149,27 +150,27 @@ export default function PromoPage() {
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="text-sm font-medium text-foreground block mb-1">ประเภท</label>
-                    <select
+                    <FormSelect
                       value={form.type}
-                      onChange={(e) => f("type", e.target.value)}
-                      className="w-full px-3 py-2 rounded-lg border bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-                    >
-                      <option>ส่วนลด</option>
-                      <option>แถมฟรี</option>
-                      <option>ซื้อครบแถม</option>
-                    </select>
+                      onValueChange={(value) => f("type", value)}
+                      options={[
+                        { value: "ส่วนลด", label: "ส่วนลด" },
+                        { value: "แถมฟรี", label: "แถมฟรี" },
+                        { value: "ซื้อครบแถม", label: "ซื้อครบแถม" },
+                      ]}
+                    />
                   </div>
                   <div>
                     <label className="text-sm font-medium text-foreground block mb-1">สถานะ</label>
-                    <select
+                    <FormSelect
                       value={form.status}
-                      onChange={(e) => f("status", e.target.value)}
-                      className="w-full px-3 py-2 rounded-lg border bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-                    >
-                      <option>กำลังจะเริ่ม</option>
-                      <option>กำลังดำเนินการ</option>
-                      <option>สิ้นสุดแล้ว</option>
-                    </select>
+                      onValueChange={(value) => f("status", value)}
+                      options={[
+                        { value: "กำลังจะเริ่ม", label: "กำลังจะเริ่ม" },
+                        { value: "กำลังดำเนินการ", label: "กำลังดำเนินการ" },
+                        { value: "สิ้นสุดแล้ว", label: "สิ้นสุดแล้ว" },
+                      ]}
+                    />
                   </div>
                 </div>
 

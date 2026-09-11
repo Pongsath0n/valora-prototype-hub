@@ -3,6 +3,7 @@ import AppLayout from "@/components/AppLayout";
 import DataTable from "@/components/shared/DataTable";
 import FormField from "@/components/shared/FormField";
 import { ingredientService, menuCatalogService, recipeService, type IngredientItem, type MenuItem, type RecipeRow } from "@/features/store/catalogService";
+import { FormSelect } from "@/components/ui/form-select";
 
 type RecipeCostRow = RecipeRow & {
   ingredient: string;
@@ -50,8 +51,8 @@ export default function RecipeCosting() {
 
   return <AppLayout><div className="space-y-4"><h1 className="page-title">สูตรและต้นทุนเมนู</h1>
     <div className="stat-card grid md:grid-cols-4 gap-3">
-      <FormField label="เลือกเมนู"><select className="form-input" value={selectedMenu} onChange={(e)=>setSelectedMenu(e.target.value)}>{menus.map((m)=><option key={m.id} value={m.id}>{m.name}</option>)}</select></FormField>
-      <FormField label="วัตถุดิบ"><select className="form-input" value={ingredientId} onChange={(e)=>setIngredientId(e.target.value)}><option value="">เลือกวัตถุดิบ</option>{ingredients.map((i)=><option key={i.id} value={i.id}>{i.name}</option>)}</select></FormField>
+      <FormField label="เลือกเมนู"><FormSelect value={selectedMenu} onValueChange={setSelectedMenu} placeholder="เลือกเมนู" options={menus.map((m) => ({ value: m.id, label: m.name }))} /></FormField>
+      <FormField label="วัตถุดิบ"><FormSelect value={ingredientId} onValueChange={setIngredientId} placeholder="เลือกวัตถุดิบ" options={ingredients.map((i) => ({ value: i.id, label: i.name }))} /></FormField>
       <FormField label="ปริมาณที่ใช้"><input className="form-input" type="number" value={qty} onChange={(e)=>setQty(e.target.value)} /></FormField>
       <div className="flex items-end"><button className="bg-primary text-primary-foreground px-4 py-2 rounded" onClick={addRow}>เพิ่ม/อัปเดตสูตร</button></div>
     </div>

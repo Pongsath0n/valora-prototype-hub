@@ -5,6 +5,7 @@ import DataTable, { type Column } from "@/components/shared/DataTable";
 import StatusBadge from "@/components/shared/StatusBadge";
 import { orderService, type OrderStatus } from "@/features/store/orderService";
 import { formatOrderStatus, orderStatusTone, formatTHB } from "@/lib/format";
+import { FormSelect } from "@/components/ui/form-select";
 
 type OrderRow = ReturnType<typeof orderService.list>[number];
 
@@ -55,21 +56,18 @@ export default function OrdersPage() {
       key: "next",
       header: "อัปเดต",
       render: (r) => (
-        <select
-          className="border rounded px-2 py-1"
+        <FormSelect
           value={r.status}
-          onChange={(e) =>
+          onValueChange={(value) =>
             orderService
-              .updateStatus(r.id, e.target.value as OrderStatus)
+              .updateStatus(r.id, value as OrderStatus)
               .then(refresh)
           }
-        >
-          {statuses.map((s) => (
-            <option key={s} value={s}>
-              {formatOrderStatus(s)}
-            </option>
-          ))}
-        </select>
+          options={statuses.map((s) => ({
+            value: s,
+            label: formatOrderStatus(s),
+          }))}
+        />
       ),
     },
   ];

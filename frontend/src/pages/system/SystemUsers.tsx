@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import SystemLayout from "@/components/system/SystemLayout";
+import { FormSelect } from "@/components/ui/form-select";
 import LoadingState from "@/components/shared/LoadingState";
 import EmptyState from "@/components/shared/EmptyState";
 import StatusBadge from "@/components/shared/StatusBadge";
@@ -195,20 +196,14 @@ export default function SystemUsersPage() {
           <div className="text-xs text-muted-foreground">บทบาทปัจจุบัน: {member.role ?? "ไม่ระบุ"}</div>
         </div>
         <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
-          <select
-            className="flex-1 rounded-md border bg-background px-2 py-1 text-sm"
+          <FormSelect
             value={draftRole}
             disabled={isSaving || isDeleting}
-            onChange={(event) =>
-              setMembershipRoleDrafts((prev) => ({ ...prev, [member.id]: event.target.value as SystemRoleId }))
+            onValueChange={(value) =>
+              setMembershipRoleDrafts((prev) => ({ ...prev, [member.id]: value as SystemRoleId }))
             }
-          >
-            {ROLE_OPTIONS.map((option) => (
-              <option key={option.id} value={option.id}>
-                {option.label}
-              </option>
-            ))}
-          </select>
+            options={ROLE_OPTIONS.map((option) => ({ value: option.id, label: option.label }))}
+          />
           <div className="flex gap-2 text-sm">
             <button
               type="button"
@@ -244,44 +239,32 @@ export default function SystemUsersPage() {
         <div className="mt-3 grid gap-2 md:grid-cols-3">
           <label className="text-xs font-medium text-muted-foreground md:col-span-2">
             ร้าน
-            <select
-              className="mt-1 w-full rounded-md border bg-background px-2 py-1 text-sm"
+            <FormSelect
               value={draft.storeId}
               disabled={!availableStores.length || creatingForUserId === user.id}
-              onChange={(event) =>
+              onValueChange={(value) =>
                 setMembershipDrafts((prev) => ({
                   ...prev,
-                  [user.id]: { ...draft, storeId: event.target.value },
+                  [user.id]: { ...draft, storeId: value },
                 }))
               }
-            >
-              <option value="">เลือกสาขา</option>
-              {availableStores.map((store) => (
-                <option key={store.id} value={store.id}>
-                  {store.name ?? "ร้านไม่ระบุชื่อ"}
-                </option>
-              ))}
-            </select>
+              placeholder="เลือกสาขา"
+              options={availableStores.map((store) => ({ value: store.id, label: store.name ?? "ร้านไม่ระบุชื่อ" }))}
+            />
           </label>
           <label className="text-xs font-medium text-muted-foreground">
             สิทธิ์
-            <select
-              className="mt-1 w-full rounded-md border bg-background px-2 py-1 text-sm"
+            <FormSelect
               value={draft.role}
               disabled={creatingForUserId === user.id}
-              onChange={(event) =>
+              onValueChange={(value) =>
                 setMembershipDrafts((prev) => ({
                   ...prev,
-                  [user.id]: { ...draft, role: event.target.value as SystemRoleId },
+                  [user.id]: { ...draft, role: value as SystemRoleId },
                 }))
               }
-            >
-              {ROLE_OPTIONS.map((option) => (
-                <option key={option.id} value={option.id}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
+              options={ROLE_OPTIONS.map((option) => ({ value: option.id, label: option.label }))}
+            />
           </label>
         </div>
         <button
@@ -341,23 +324,17 @@ export default function SystemUsersPage() {
                     <div>
                       <p className="text-xs font-medium text-muted-foreground">System Role</p>
                       <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center">
-                        <select
-                          className="flex-1 rounded-md border bg-background px-2 py-1 text-sm"
+                        <FormSelect
                           value={draftRole}
                           disabled={savingProfileId === user.id}
-                          onChange={(event) =>
+                          onValueChange={(value) =>
                             setProfileRoleDrafts((prev) => ({
                               ...prev,
-                              [user.id]: event.target.value as SystemRoleId,
+                              [user.id]: value as SystemRoleId,
                             }))
                           }
-                        >
-                          {ROLE_OPTIONS.map((option) => (
-                            <option key={option.id} value={option.id}>
-                              {option.label}
-                            </option>
-                          ))}
-                        </select>
+                          options={ROLE_OPTIONS.map((option) => ({ value: option.id, label: option.label }))}
+                        />
                         <button
                           type="button"
                           className="rounded-md bg-primary px-3 py-1 text-sm font-semibold text-primary-foreground disabled:opacity-50"
