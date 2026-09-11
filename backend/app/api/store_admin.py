@@ -7309,6 +7309,88 @@ def _build_dashboard_revenue_kpi(
     }
 
 
+def _build_procurement_waste_summary(
+    client: Client,
+    store_id: str,
+    tzinfo,
+    range_ctx: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Build procurement & waste analytics for the Owner Dashboard.
+
+    Aggregates server-side from ingredient_purchases and ingredient_waste_records.
+    Uses created_at (NOT paid_at) as the purchase transaction date so a
+    transaction purchased today but paid later still belongs to its intake date.
+
+    Returns:
+        purchase_total_cost: SUM(total_cost) for all purchases in range
+        purchase_paid_cost: SUM(total_cost) where payment_status = "paid"
+        purchase_unpaid_cost: SUM(total_cost) where payment_status = "unpaid"
+        waste_total_cost: SUM(total_cost) from canonical waste records
+        waste_rate: (waste_total_cost / purchase_total_cost) * 100, or 0
+    """
+    all_time = bool(range_ctx.get("all_time"))
+    start_dt: Optional[datetime] = range_ctx.get("start")
+    end_dt: Optional[datetime] = range_ctx.get("end")
+
+    # ── Purchase aggregation (uses created_at as transaction date) ──────────
+    purchase_query = (
+        client.table("ingredient_purchases")
+        .select("total_cost, payment_status, created_at")
+        .eq("store_id", store_id)
+    )
+    if not all_time and start_dt and end_dt:
+        purchase_query = purchase_query.gte("created_at", start_dt.isoformat()).lt("created_at", end_dt.isoformat())
+
+    purchase_resp = purchase_query.execute()
+    purchase_err = getattr(purchase_resp, "error", None)
+    if purchase_err:
+        raise HTTPException(status_code=500, detail="procurement_summary_failed")
+    purchase_rows = getattr(purchase_resp, "data", None) or []
+
+    purchase_total_cost = 0.0
+    purchase_paid_cost = 0.0
+    purchase_unpaid_cost = 0.0
+    for row in purchase_rows:
+        cost = _safe_float(row.get("total_cost"))
+        purchase_total_cost += cost
+        status_val = (row.get("payment_status") or "").strip().lower()
+        if status_val == "paid":
+            purchase_paid_cost += cost
+        elif status_val == "unpaid":
+            purchase_unpaid_cost += cost
+
+    # ── Waste aggregation (canonical waste records, uses wasted_at) ────────
+    waste_query = (
+        client.table("ingredient_waste_records")
+        .select("total_cost, wasted_at")
+        .eq("store_id", store_id)
+    )
+    if not all_time and start_dt and end_dt:
+        waste_query = waste_query.gte("wasted_at", start_dt.isoformat()).lt("wasted_at", end_dt.isoformat())
+
+    waste_resp = waste_query.execute()
+    waste_err = getattr(waste_resp, "error", None)
+    if waste_err:
+        raise HTTPException(status_code=500, detail="waste_summary_failed")
+    waste_rows = getattr(waste_resp, "data", None) or []
+
+    waste_total_cost = sum(_safe_float(row.get("total_cost")) for row in waste_rows)
+
+    # ── Waste rate (safe against divide-by-zero) ────────────────────────────
+    if purchase_total_cost > 0:
+        waste_rate = (waste_total_cost / purchase_total_cost) * 100
+    else:
+        waste_rate = 0.0
+
+    return {
+        "purchase_total_cost": round(purchase_total_cost, 2),
+        "purchase_paid_cost": round(purchase_paid_cost, 2),
+        "purchase_unpaid_cost": round(purchase_unpaid_cost, 2),
+        "waste_total_cost": round(waste_total_cost, 2),
+        "waste_rate": round(waste_rate, 2),
+    }
+
+
 @router.get("/dashboard-summary")
 def get_dashboard_summary(
     authorization: Optional[str] = Header(None),
@@ -7344,6 +7426,19 @@ def get_dashboard_summary(
         "dashboard_revenue_kpi": revenue_kpi,
         **summary,
     }
+
+    # ── Procurement & Waste analytics (additive, read-only) ─────────────────
+    # Uses the SAME revenue_range_ctx so the dashboard period selector drives
+    # both sales and procurement/waste analytics. Purchase transaction date
+    # uses created_at (NOT paid_at). Waste cost reuses canonical waste records.
+    procurement_waste = _build_procurement_waste_summary(
+        ctx["client"],
+        store_id_resolved,
+        tzinfo,
+        range_ctx=revenue_range_ctx,
+    )
+    response["procurement_waste"] = procurement_waste
+
     return response
 
 

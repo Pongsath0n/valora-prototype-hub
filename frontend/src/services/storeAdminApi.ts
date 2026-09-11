@@ -479,6 +479,16 @@ export type DashboardSummaryResponse = {
   recent_orders: DashboardRecentOrder[];
   seven_day_trend: DashboardTrendPoint[];
   dashboard_revenue_kpi?: DashboardRevenueKpi;
+  procurement_waste?: ProcurementWasteSummary;
+};
+
+// ─── Procurement & Waste Analytics (Owner Dashboard) ────────────────────────
+export type ProcurementWasteSummary = {
+  purchase_total_cost: number;
+  purchase_paid_cost: number;
+  purchase_unpaid_cost: number;
+  waste_total_cost: number;
+  waste_rate: number;
 };
 
 // ─── Inventory Alerts (read-only) ──────────────────────────────────────────

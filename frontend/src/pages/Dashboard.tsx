@@ -16,6 +16,7 @@ import {
   type DashboardRevenueRange,
   type DashboardRevenueKpi,
   type InventoryAlertsResponse,
+  type ProcurementWasteSummary,
 } from "@/services/storeAdminApi";
 
 const DASHBOARD_ALLOWED_ROLES: AppRole[] = ["owner", "admin", "manager"];
@@ -489,18 +490,7 @@ export default function DashboardPage() {
             The backend still returns pending_payment_review_count/value; only
             the UI presentation is hidden. Re-enable by restoring the Panel. */}
         <div className="grid gap-4 lg:grid-cols-2">
-          <Panel title="ภาพรวมสถานะออเดอร์">
-            <ul className="space-y-3">
-              {queueRows.map((row) => (
-                <li key={row.key} className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-foreground">{row.label}</p>
-                  </div>
-                  <span className="text-lg font-semibold text-foreground">{row.count}</span>
-                </li>
-              ))}
-            </ul>
-          </Panel>
+          <ProcurementWastePanel data={summary.procurement_waste} loading={state.loading} />
 
           <RevenuePanel
             kpi={summary.dashboard_revenue_kpi}
@@ -702,6 +692,60 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
       <h2 className="text-lg font-semibold text-foreground">{title}</h2>
       <div className="mt-4">{children}</div>
     </div>
+  );
+}
+
+type ProcurementWastePanelProps = {
+  data?: ProcurementWasteSummary;
+  loading: boolean;
+};
+
+function ProcurementWastePanel({ data, loading }: ProcurementWastePanelProps) {
+  if (loading && !data) {
+    return (
+      <Panel title="ต้นทุนจัดซื้อและความสูญเสีย">
+        <div className="space-y-3">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="h-6 animate-pulse rounded-lg bg-muted/60" />
+          ))}
+        </div>
+      </Panel>
+    );
+  }
+
+  if (!data) {
+    return (
+      <Panel title="ต้นทุนจัดซื้อและความสูญเสีย">
+        <p className="text-sm text-destructive">ไม่สามารถโหลดข้อมูลต้นทุนจัดซื้อได้</p>
+      </Panel>
+    );
+  }
+
+  return (
+    <Panel title="ต้นทุนจัดซื้อและความสูญเสีย">
+      <ul className="space-y-3">
+        <li className="flex items-center justify-between">
+          <p className="text-sm font-medium text-foreground">มูลค่าซื้อเข้าสต็อก</p>
+          <span className="text-lg font-semibold text-foreground">{currencyFormatter.format(data.purchase_total_cost)}</span>
+        </li>
+        <li className="flex items-center justify-between">
+          <p className="text-sm font-medium text-foreground">ชำระแล้ว</p>
+          <span className="text-lg font-semibold text-foreground">{currencyFormatter.format(data.purchase_paid_cost)}</span>
+        </li>
+        <li className="flex items-center justify-between">
+          <p className="text-sm font-medium text-foreground">ค้างชำระ</p>
+          <span className="text-lg font-semibold text-foreground">{currencyFormatter.format(data.purchase_unpaid_cost)}</span>
+        </li>
+        <li className="flex items-center justify-between border-t pt-3">
+          <p className="text-sm font-medium text-foreground">ต้นทุนสูญเสีย</p>
+          <span className="text-lg font-semibold text-foreground">{currencyFormatter.format(data.waste_total_cost)}</span>
+        </li>
+        <li className="flex items-center justify-between">
+          <p className="text-sm font-medium text-foreground">อัตราความสูญเสีย</p>
+          <span className="text-lg font-semibold text-foreground">{data.waste_rate.toFixed(2)}%</span>
+        </li>
+      </ul>
+    </Panel>
   );
 }
 
