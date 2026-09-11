@@ -3888,9 +3888,11 @@ def _sanitize_stock_intake_payload(payload: StockIntakeCreate) -> Dict[str, Any]
     normalized_quantity = quantity * conversion_factor
     if normalized_quantity <= 0:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="normalized_quantity_required")
-    payment_status = (data.get("payment_status") or "paid").strip().lower()
-    if payment_status not in _STOCK_INTAKE_PAYMENT_STATUSES:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="payment_status_invalid")
+    # Healholic V1: Stock Intakes default to paid. The client-supplied
+    # payment_status is ignored — all new intakes are considered paid with
+    # a server-authoritative paid_at timestamp. Historical unpaid rows
+    # are NOT modified. Future payable workflow may return in V1.1/V2.
+    payment_status = "paid"
 
     supplier_name = (data.get("supplier_name") or "").strip() or None
     note = (data.get("note") or "").strip() or None
@@ -3910,7 +3912,7 @@ def _sanitize_stock_intake_payload(payload: StockIntakeCreate) -> Dict[str, Any]
         "normalized_quantity": normalized_quantity,
         "payment_status": payment_status,
         "supplier_name": supplier_name,
-        "paid_at": _normalize_optional_datetime_string(data.get("paid_at"), field="paid_at"),
+        "paid_at": datetime.now(timezone.utc).isoformat(),
         "due_date": _normalize_optional_date_string(data.get("due_date"), field="due_date"),
         "note": note,
         "receipt_url": receipt_url,

@@ -827,14 +827,6 @@ export default function StoreAdminIngredientsPage() {
     setIntakeForm((prev) => ({ ...prev, [field]: value }));
   };
 
-  const handlePaymentStatusChange = (value: "paid" | "unpaid") => {
-    setIntakeForm((prev) => ({
-      ...prev,
-      paymentStatus: value,
-      dueDate: value === "paid" ? "" : prev.dueDate || formatDateOnly(new Date()),
-    }));
-  };
-
   const submitIntake = async () => {
     if (!intakeValid) {
       setIntakeError("กรุณากรอกจำนวน หน่วยซื้อ ต้นทุน และแปลงหน่วยให้ถูกต้อง");
@@ -846,13 +838,11 @@ export default function StoreAdminIngredientsPage() {
       purchase_unit: intakeForm.purchaseUnit.trim(),
       conversion_factor: Number(intakeForm.conversionFactor),
       total_cost: Number(intakeForm.totalCost),
-      payment_status: intakeForm.paymentStatus,
+      payment_status: "paid",
       is_perishable: intakeForm.isPerishable,
     };
     if (intakeForm.supplierName.trim()) payload.supplier_name = intakeForm.supplierName.trim();
     if (intakeForm.note.trim()) payload.note = intakeForm.note.trim();
-    if (intakeForm.paidAt) payload.paid_at = new Date(intakeForm.paidAt).toISOString();
-    if (intakeForm.dueDate) payload.due_date = intakeForm.dueDate;
     if (intakeForm.lotCode.trim()) payload.lot_code = intakeForm.lotCode.trim();
     if (intakeForm.expiryNote.trim()) payload.expiry_note = intakeForm.expiryNote.trim();
     if (intakeForm.expiresAt) {
@@ -1675,20 +1665,6 @@ export default function StoreAdminIngredientsPage() {
                       <FormField label="ผู้จัดจำหน่าย">
                         <input className="form-input" value={intakeForm.supplierName} onChange={(e) => handleIntakeChange("supplierName", e.target.value)} />
                       </FormField>
-                      <FormField label="สถานะการชำระ">
-                        <select className="form-input" value={intakeForm.paymentStatus} onChange={(e) => handlePaymentStatusChange(e.target.value as "paid" | "unpaid")}>
-                          <option value="paid">ชำระแล้ว</option>
-                          <option value="unpaid">ยังไม่ชำระ</option>
-                        </select>
-                      </FormField>
-                      <FormField label="วันที่ชำระ">
-                        <input type="datetime-local" className="form-input" value={intakeForm.paidAt} onChange={(e) => handleIntakeChange("paidAt", e.target.value)} />
-                      </FormField>
-                      {intakeForm.paymentStatus === "unpaid" ? (
-                        <FormField label="กำหนดชำระ">
-                          <input type="date" className="form-input" value={intakeForm.dueDate} onChange={(e) => handleIntakeChange("dueDate", e.target.value)} />
-                        </FormField>
-                      ) : null}
                       <div className="md:col-span-2">
                         <FormField label="บันทึกเพิ่มเติม">
                           <textarea className="form-input" rows={3} value={intakeForm.note} onChange={(e) => handleIntakeChange("note", e.target.value)} />
