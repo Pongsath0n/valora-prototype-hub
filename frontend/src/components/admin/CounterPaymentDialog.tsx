@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { X, AlertTriangle, CheckCircle2, Loader2 } from "lucide-react";
 import {
   storeAdminApi,
@@ -118,6 +118,25 @@ export default function CounterPaymentDialog({
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
 
+  // Track pending success/reconcile timeouts so they can be cancelled
+  // when the dialog unmounts or closes. Without this, a timeout scheduled
+  // by handleConfirm could fire after unmount, calling onSuccess/onReconcile
+  // and triggering a stale parent refetch.
+  const pendingTimeoutsRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
+
+  const scheduleCallback = (cb: () => void, delay: number) => {
+    const id = setTimeout(() => {
+      pendingTimeoutsRef.current.delete(id);
+      cb();
+    }, delay);
+    pendingTimeoutsRef.current.add(id);
+  };
+
+  const clearPendingTimeouts = () => {
+    pendingTimeoutsRef.current.forEach((id) => clearTimeout(id));
+    pendingTimeoutsRef.current.clear();
+  };
+
   // Reset state when dialog opens for a new order.
   useEffect(() => {
     if (open) {
@@ -127,6 +146,11 @@ export default function CounterPaymentDialog({
       setSuccess(false);
     }
   }, [open, order.id]);
+
+  // Clear any pending timeouts on unmount.
+  useEffect(() => {
+    return () => clearPendingTimeouts();
+  }, []);
 
   // Close on Escape key (when not submitting).
   useEffect(() => {
@@ -157,7 +181,7 @@ export default function CounterPaymentDialog({
         // Do NOT issue a second payment for already_finalized.
         setSuccess(true);
         // Notify parent to refetch Incoming Queue after a brief success UX.
-        setTimeout(() => {
+        scheduleCallback(() => {
           onSuccess();
         }, 800);
       } else {
@@ -166,7 +190,7 @@ export default function CounterPaymentDialog({
         // reconciliation refetch so the canonical Backend snapshot reconciles.
         setError("ไม่สามารถยืนยันผลการชำระเงินได้ กรุณาตรวจสอบคิวอีกครั้ง");
         if (onReconcile) {
-          setTimeout(() => {
+          scheduleCallback(() => {
             onReconcile();
           }, 200);
         }
@@ -177,7 +201,7 @@ export default function CounterPaymentDialog({
       // Concurrent/stale-order errors trigger a read-only reconciliation
       // refetch (NOT a payment success, NOT an auto-retry).
       if (isConcurrentStateError(raw) && onReconcile) {
-        setTimeout(() => {
+        scheduleCallback(() => {
           onReconcile();
         }, 200);
       }

@@ -101,6 +101,15 @@ export default function IncomingOrdersQueue() {
   const dirtyRef = useRef(false);
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const clockTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Prevents state updates / follow-up fetches after unmount.
+  const isMountedRef = useRef(true);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   const fetchQueue = useCallback(async (isInitial: boolean) => {
     if (inFlightRef.current) {
@@ -113,6 +122,7 @@ export default function IncomingOrdersQueue() {
     setError(null);
     try {
       const response = await storeAdminApi.listIncomingQueue();
+      if (!isMountedRef.current) return;
       // Deduplicate by order.id; preserve backend FIFO order.
       const seen = new Set<string>();
       const deduped: IncomingQueueOrder[] = [];
@@ -124,6 +134,7 @@ export default function IncomingOrdersQueue() {
       setOrders(deduped);
       setRefreshError(null);
     } catch (err) {
+      if (!isMountedRef.current) return;
       const raw = err instanceof Error ? err.message : String(err ?? "");
       if (isInitial) {
         setOrders([]);
@@ -134,10 +145,10 @@ export default function IncomingOrdersQueue() {
       }
     } finally {
       inFlightRef.current = false;
-      if (isInitial) setLoading(false);
+      if (isInitial && isMountedRef.current) setLoading(false);
       // If a Realtime invalidation arrived during this fetch, schedule
       // exactly one follow-up canonical refetch.
-      if (dirtyRef.current) {
+      if (dirtyRef.current && isMountedRef.current) {
         dirtyRef.current = false;
         void fetchQueue(false);
       }
