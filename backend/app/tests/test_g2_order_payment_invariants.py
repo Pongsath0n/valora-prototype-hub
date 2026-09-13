@@ -319,9 +319,15 @@ class HHL007FinalizedOrderItemImmutabilityTests(unittest.TestCase):
 
     def _common_patches(self, order_status: str, role: str = "manager"):
         fake_ctx = _build_fake_ctx(role)
+        # Derive a consistent payment_status for the order state:
+        # pending_payment → unpaid; finalized/accepted → paid.
+        if order_status == "pending_payment":
+            payment_status = "unpaid"
+        else:
+            payment_status = "paid"
         order_row = {
             "id": "ord-1", "status": order_status,
-            "payment_status": "paid", "channel_id": None,
+            "payment_status": payment_status, "channel_id": None,
         }
         return fake_ctx, order_row
 
@@ -554,6 +560,95 @@ class HHL004FinalizePaymentCanonicalTests(unittest.TestCase):
                     authorization="Bearer token",
                 )
         self.assertEqual(ctx_err.exception.status_code, 400)
+
+
+# =====================================================================
+# HHL-007 (extended): Paid accepted orders are financially finalized
+# =====================================================================
+
+
+class HHL007PaidAcceptedFinalizedTests(unittest.TestCase):
+    """A paid but not completed order (status=accepted, payment_status=paid)
+    is financially finalized — stock has been consumed and payment recorded.
+
+    Item create/update/delete must be rejected for this state.
+    """
+
+    def _common_patches(self, role: str = "manager"):
+        fake_ctx = _build_fake_ctx(role)
+        order_row = {
+            "id": "ord-1", "status": "accepted",
+            "payment_status": "paid", "channel_id": None,
+        }
+        return fake_ctx, order_row
+
+    def test_create_item_on_accepted_paid_order_rejected(self):
+        """POST /orders/{id}/items on accepted+paid → 409 order_finalized."""
+        fake_ctx, order_row = self._common_patches()
+        with patch("app.api.store_admin._get_ctx", return_value=fake_ctx), \
+            patch("app.api.store_admin._resolve_store_id", return_value=("store-1", "manager")), \
+            patch("app.api.store_admin._require_manager"), \
+            patch("app.api.store_admin._get_order_row", return_value=order_row):
+            with self.assertRaises(HTTPException) as ctx_err:
+                store_admin.create_order_item(
+                    "ord-1",
+                    OrderItemPayload(product_id="prod-1", quantity=1),
+                    authorization="Bearer token",
+                )
+        self.assertEqual(ctx_err.exception.status_code, 409)
+        self.assertEqual(ctx_err.exception.detail["code"], "order_finalized")
+
+    def test_update_item_on_accepted_paid_order_rejected(self):
+        """PATCH /order-items/{id} on accepted+paid order → 409 order_finalized."""
+        fake_ctx, order_row = self._common_patches()
+        item_row = {"id": "item-1", "store_id": "store-1", "order_id": "ord-1", "product_id": "prod-1", "quantity": 2}
+
+        exists_q = MagicMock()
+        exists_q.select.return_value = exists_q
+        exists_q.eq.return_value = exists_q
+        exists_q.limit.return_value = exists_q
+        exists_q.execute.return_value = SimpleNamespace(error=None, data=[item_row])
+
+        fake_ctx["client"].table.return_value = exists_q
+
+        with patch("app.api.store_admin._get_ctx", return_value=fake_ctx), \
+            patch("app.api.store_admin._resolve_store_id", return_value=("store-1", "manager")), \
+            patch("app.api.store_admin._require_manager"), \
+            patch("app.api.store_admin._sanitize_order_item_payload", return_value={"quantity": 3}), \
+            patch("app.api.store_admin.order_items_has_column", return_value=False), \
+            patch("app.api.store_admin.order_items_supports_store_scope", return_value=True), \
+            patch("app.api.store_admin._get_order_row", return_value=order_row):
+            with self.assertRaises(HTTPException) as ctx_err:
+                store_admin.update_order_item(
+                    "item-1",
+                    OrderItemUpdate(quantity=3),
+                    authorization="Bearer token",
+                )
+        self.assertEqual(ctx_err.exception.status_code, 409)
+        self.assertEqual(ctx_err.exception.detail["code"], "order_finalized")
+
+    def test_delete_item_on_accepted_paid_order_rejected(self):
+        """DELETE /order-items/{id} on accepted+paid order → 409 order_finalized."""
+        fake_ctx, order_row = self._common_patches()
+        item_row = {"id": "item-1", "store_id": "store-1", "order_id": "ord-1"}
+
+        exists_q = MagicMock()
+        exists_q.select.return_value = exists_q
+        exists_q.eq.return_value = exists_q
+        exists_q.limit.return_value = exists_q
+        exists_q.execute.return_value = SimpleNamespace(error=None, data=[item_row])
+
+        fake_ctx["client"].table.return_value = exists_q
+
+        with patch("app.api.store_admin._get_ctx", return_value=fake_ctx), \
+            patch("app.api.store_admin._resolve_store_id", return_value=("store-1", "manager")), \
+            patch("app.api.store_admin._require_manager"), \
+            patch("app.api.store_admin.order_items_supports_store_scope", return_value=True), \
+            patch("app.api.store_admin._get_order_row", return_value=order_row):
+            with self.assertRaises(HTTPException) as ctx_err:
+                store_admin.delete_order_item("item-1", authorization="Bearer token")
+        self.assertEqual(ctx_err.exception.status_code, 409)
+        self.assertEqual(ctx_err.exception.detail["code"], "order_finalized")
 
 
 if __name__ == "__main__":  # pragma: no cover

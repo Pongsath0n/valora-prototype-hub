@@ -8881,19 +8881,42 @@ def cancel_order_atomic(
 # HHL-007: Finalized orders (completed / cancelled / voided) are immutable.
 # Item mutations (add / update / delete) must be rejected to preserve the
 # finalized cost snapshot, stock consumption, and financial truth.
-def _reject_if_finalized(client: Client, order_id: str, store_id: str) -> None:
-    """Raise 409 if the order is in a finalized state.
+# HHL-007 (extended): A paid but not completed order (e.g. status=accepted,
+# payment_status=paid) is also financially finalized — stock has been
+# consumed and payment recorded via finalize_paid_order_atomic.
+def _is_order_financially_finalized(order_row: Dict[str, Any]) -> tuple[bool, str]:
+    """Return (finalized, status_label) for an order row.
 
-    Finalized states: completed, cancelled, voided.  These states have
-    consumed stock and/or recorded financial truth; mutating items would
-    desynchronize cost snapshots, stock movements, and totals.
+    An order is financially finalized if:
+      - its order status is in _FINALIZED_ORDER_STATUSES (completed /
+        cancelled / voided), OR
+      - its payment status is in CONFIRMED_PAYMENT_STATUSES (paid) —
+        the canonical finalize_paid_order_atomic RPC has consumed stock
+        and recorded the paid payment.
     """
-    order_row = _get_order_row(client, order_id, store_id)
     current_status = normalize_order_status(order_row.get("status"))
     if current_status in _FINALIZED_ORDER_STATUSES:
+        return True, current_status
+    payment_status = normalize_payment_status(order_row.get("payment_status"))
+    if payment_status in CONFIRMED_PAYMENT_STATUSES:
+        return True, current_status
+    return False, current_status
+
+
+def _reject_if_finalized(client: Client, order_id: str, store_id: str) -> None:
+    """Raise 409 if the order is in a financially finalized state.
+
+    Finalized states: completed, cancelled, voided, OR any order with a
+    confirmed (paid) payment.  These states have consumed stock and/or
+    recorded financial truth; mutating items would desynchronize cost
+    snapshots, stock movements, and totals.
+    """
+    order_row = _get_order_row(client, order_id, store_id)
+    finalized, status_label = _is_order_financially_finalized(order_row)
+    if finalized:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail={"code": "order_finalized", "status": current_status},
+            detail={"code": "order_finalized", "status": status_label},
         )
 
 
@@ -8931,13 +8954,9 @@ def create_order_item(order_id: str, payload: OrderItemPayload, authorization: O
     _require_manager(role)
 
     order_row = _get_order_row(ctx["client"], order_id, store_id_resolved)
-    # HHL-007: Reject item creation on finalized orders.
-    order_status = normalize_order_status(order_row.get("status"))
-    if order_status in _FINALIZED_ORDER_STATUSES:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={"code": "order_finalized", "status": order_status},
-        )
+    # HHL-007: Reject item creation on financially finalized orders
+    # (completed / cancelled / voided, OR any paid order).
+    _reject_if_finalized(ctx["client"], order_id, store_id_resolved)
     data = _sanitize_order_item_payload(payload)
     _ensure_product_in_store(ctx["client"], data["product_id"], store_id_resolved)
     snapshot = prepare_order_item_snapshot(
@@ -8993,13 +9012,9 @@ def update_order_item(item_id: str, payload: OrderItemUpdate, authorization: Opt
     target_product = data.get("product_id") or row.get("product_id")
     order_id_value = str(row.get("order_id"))
     order_row = _get_order_row(ctx["client"], order_id_value, store_id_resolved)
-    # HHL-007: Reject item update on finalized orders.
-    order_status = normalize_order_status(order_row.get("status"))
-    if order_status in _FINALIZED_ORDER_STATUSES:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={"code": "order_finalized", "status": order_status},
-        )
+    # HHL-007: Reject item update on financially finalized orders
+    # (completed / cancelled / voided, OR any paid order).
+    _reject_if_finalized(ctx["client"], order_id_value, store_id_resolved)
     target_quantity = data.get("quantity") if data.get("quantity") is not None else row.get("quantity")
     if target_quantity is None:
         raise HTTPException(status_code=500, detail="order_item_quantity_missing")
@@ -9055,15 +9070,10 @@ def delete_order_item(item_id: str, authorization: Optional[str] = Header(None),
     if str(row.get("store_id")) != str(store_id_resolved):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="store_mismatch")
 
-    # HHL-007: Reject item deletion on finalized orders.
+    # HHL-007: Reject item deletion on financially finalized orders
+    # (completed / cancelled / voided, OR any paid order).
     order_id_value = str(row.get("order_id"))
-    order_row = _get_order_row(ctx["client"], order_id_value, store_id_resolved)
-    order_status = normalize_order_status(order_row.get("status"))
-    if order_status in _FINALIZED_ORDER_STATUSES:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={"code": "order_finalized", "status": order_status},
-        )
+    _reject_if_finalized(ctx["client"], order_id_value, store_id_resolved)
 
     delete_item_query = ctx["client"].table("order_items").delete().eq("id", item_id)
     if order_items_supports_store_scope(ctx["client"]):
