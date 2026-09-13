@@ -8456,6 +8456,23 @@ def update_order(order_id: str, payload: OrderUpdate, authorization: Optional[st
     # Non-cancellation manager functionality is unchanged.
     if next_status and str(next_status) in CANCELLED_ORDER_STATUSES:
         _require_owner_store_role(role)
+
+    # HHL-005: Cancellation-equivalent transitions are DELEGATED to the
+    # canonical _cancel_order_business function.  The previous direct
+    # update bypassed stock restoration and could cancel finalized orders.
+    if next_status and str(next_status) in CANCELLED_ORDER_STATUSES:
+        actor_id = ctx.get("user_id")
+        if not actor_id:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid_token")
+        reason_text = (data.get("cancelled_reason") or data.get("note") or "").strip() or None
+        return _cancel_order_business(
+            ctx["client"],
+            order_id=order_id,
+            store_id=store_id_resolved,
+            actor_id=actor_id,
+            reason=reason_text,
+        )
+
     if next_status and not _valid_order_transition(str(current.get("status") or ""), str(next_status)):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid_status_transition")
 
@@ -8493,69 +8510,43 @@ def update_order(order_id: str, payload: OrderUpdate, authorization: Optional[st
 
 @router.delete("/orders/{order_id}")
 def delete_order(order_id: str, authorization: Optional[str] = Header(None), store_id: Optional[str] = None) -> Dict[str, Any]:
+    """HHL-005: DELETE /orders/{id} is an archive operation that results in a
+    cancelled-equivalent state.  It is DELEGATED to the canonical
+    _cancel_order_business function so that state validation, stock
+    restoration (for accepted orders), and idempotency are enforced in
+    exactly one place.  The previous direct update bypassed stock
+    restoration for accepted orders.
+
+    The response contract preserves the archive-style shape
+    (status="archived", order_status=cancelled/voided) for backward
+    compatibility with existing callers.
+    """
     ctx = _get_ctx(authorization)
     store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
     # P0-1: DELETE /orders/{id} always results in cancelled or voided,
     # making it cancellation-equivalent. Require Owner store role.
     _require_owner_store_role(role)
 
-    order_row = _get_order_row(ctx["client"], order_id, store_id_resolved)
-    current_status = normalize_order_status(order_row.get("status"))
-    current_payment_status = normalize_payment_status(order_row.get("payment_status"))
+    actor_id = ctx.get("user_id")
+    if not actor_id:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid_token")
 
-    payments_query = ctx["client"].table("payments").select("id, status").eq("order_id", order_id)
-    if _payments_has_column(ctx["client"], "store_id"):
-        payments_query = payments_query.eq("store_id", store_id_resolved)
-    payments_resp = payments_query.execute()
-    if getattr(payments_resp, "error", None):
-        raise HTTPException(status_code=500, detail="payment_lookup_failed")
-    payments = getattr(payments_resp, "data", None) or []
-
-    has_confirmed_payment = any(
-        normalize_payment_status(payment.get("status")) in CONFIRMED_PAYMENT_STATUSES for payment in payments
-    ) or current_payment_status in CONFIRMED_PAYMENT_STATUSES
-
-    target_status = "voided" if has_confirmed_payment or current_status == "completed" else "cancelled"
-    already_archived = current_status in CANCELLED_ORDER_STATUSES
-    archive_reason = "archived_by_manager" if target_status == "cancelled" else "voided_by_manager"
-
-    if already_archived and current_status == target_status:
-        return {
-            "id": order_id,
-            "status": "archived",
-            "order_status": current_status,
-            "archived": True,
-            "archived_reason": order_row.get("cancelled_reason") or archive_reason,
-            "archived_at": order_row.get("cancelled_at"),
-        }
-
-    archive_time = datetime.utcnow().isoformat()
-    update_data = {
-        "status": target_status,
-        "cancelled_reason": archive_reason,
-        "cancelled_at": archive_time,
-    }
-
-    resp = ctx["client"].table("orders").update(update_data).eq("id", order_id).eq("store_id", store_id_resolved).execute()
-    if getattr(resp, "error", None):
-        raise HTTPException(status_code=500, detail="order_archive_failed")
-
-    _write_order_status_log(
+    cancel_result = _cancel_order_business(
         ctx["client"],
-        order_id,
-        str(order_row.get("status") or ""),
-        target_status,
-        ctx.get("user_id"),
-        archive_reason,
+        order_id=order_id,
+        store_id=store_id_resolved,
+        actor_id=actor_id,
+        reason="archived_by_manager",
     )
 
+    final_status = str(cancel_result.get("status") or "cancelled")
     return {
         "id": order_id,
         "status": "archived",
-        "order_status": target_status,
+        "order_status": final_status,
         "archived": True,
-        "archived_reason": archive_reason,
-        "archived_at": archive_time,
+        "archived_reason": "archived_by_manager",
+        "archived_at": datetime.utcnow().isoformat(),
     }
 
 
@@ -8566,13 +8557,9 @@ def update_order_status(order_id: str, payload: OrderStatusUpdate, authorization
     _require_staff_or_above(role)
     normalized_role = _normalize_store_role(role)
 
-    current = _get_order_row(ctx["client"], order_id, store_id_resolved)
     next_status = payload.status
     if next_status == "ready_for_pickup":
         next_status = "ready"
-
-    current_status_raw = str(current.get("status") or "")
-    current_status_normalized = normalize_order_status(current_status_raw)
     next_status_value = str(next_status)
 
     # P0-1: Cancellation-equivalent transitions require Owner store role.
@@ -8580,6 +8567,29 @@ def update_order_status(order_id: str, payload: OrderStatusUpdate, authorization
     # Operational non-cancellation transitions remain Staff+.
     if next_status_value in CANCELLED_ORDER_STATUSES:
         _require_owner_store_role(role)
+
+    # HHL-005: Cancellation-equivalent transitions are DELEGATED to the
+    # canonical _cancel_order_business function.  This ensures state
+    # validation, stock restoration (for accepted orders), idempotency,
+    # and race-safety are enforced in exactly one place.  The previous
+    # direct update bypassed stock restoration and could cancel already
+    # finalized orders.
+    if next_status_value in CANCELLED_ORDER_STATUSES:
+        actor_id = ctx.get("user_id")
+        if not actor_id:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid_token")
+        reason_text = (payload.cancelled_reason or payload.note or "").strip() or None
+        return _cancel_order_business(
+            ctx["client"],
+            order_id=order_id,
+            store_id=store_id_resolved,
+            actor_id=actor_id,
+            reason=reason_text,
+        )
+
+    current = _get_order_row(ctx["client"], order_id, store_id_resolved)
+    current_status_raw = str(current.get("status") or "")
+    current_status_normalized = normalize_order_status(current_status_raw)
 
     if not _valid_order_transition(current_status_normalized, next_status_value):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid_status_transition")
@@ -8590,14 +8600,6 @@ def update_order_status(order_id: str, payload: OrderStatusUpdate, authorization
 
     status_note = (payload.note or "").strip() or None
     update_data: Dict[str, Any] = {"status": next_status_value}
-    cancelled_reason_for_notify: Optional[str] = None
-    if next_status_value == "cancelled":
-        cancelled_reason = (payload.cancelled_reason or "").strip()
-        cancelled_reason = cancelled_reason or status_note or "cancelled_via_status_update"
-        cancelled_at_value = (payload.cancelled_at or "").strip() or datetime.utcnow().isoformat()
-        update_data["cancelled_reason"] = cancelled_reason
-        update_data["cancelled_at"] = cancelled_at_value
-        cancelled_reason_for_notify = cancelled_reason
 
     resp = (
         ctx["client"].table("orders").update(update_data).eq("id", order_id).eq("store_id", store_id_resolved).execute()
@@ -8615,8 +8617,6 @@ def update_order_status(order_id: str, payload: OrderStatusUpdate, authorization
     )
 
     notify_payload = {"note": status_note}
-    if next_status_value == "cancelled":
-        notify_payload["cancelled_reason"] = cancelled_reason_for_notify or ORDER_CANCEL_REASON_FALLBACK
     _notify_order_status_change(
         ctx["client"],
         order_id,
@@ -8663,6 +8663,13 @@ def _cancel_order_business(
     reason_text = (reason or "").strip() or None
 
     # pending_payment: direct cancel, no stock movement.
+    # HHL-006: Use a CONDITIONAL update (eq status=pending_payment) so that
+    # a concurrent finalize_paid_order_atomic RPC cannot be overwritten by
+    # this cancellation.  Only one transition may win the race:
+    #   - If cancel wins: order → cancelled, finalize RPC later sees
+    #     cancelled status and rejects (invalid_order_status_for_finalization).
+    #   - If finalize wins: order → accepted/paid, this conditional update
+    #     affects 0 rows and we detect the concurrent transition.
     if current_status == "pending_payment":
         update_data: Dict[str, Any] = {
             "status": "cancelled",
@@ -8676,10 +8683,33 @@ def _cancel_order_business(
             .update(update_data)
             .eq("id", order_id)
             .eq("store_id", store_id)
+            .eq("status", "pending_payment")
             .execute()
         )
         if getattr(resp, "error", None):
             raise HTTPException(status_code=500, detail="order_cancel_failed")
+        # HHL-006: Conditional update — if 0 rows affected, a concurrent
+        # transition (finalize or another cancel) won the race.  Re-read
+        # the order to determine the actual current state.
+        updated_rows = getattr(resp, "data", None) or []
+        if not updated_rows:
+            refreshed = _get_order_row(client, order_id, store_id)
+            refreshed_status = normalize_order_status(refreshed.get("status"))
+            if refreshed_status in CANCELLED_ORDER_STATUSES:
+                return {
+                    "id": order_id,
+                    "status": "cancelled",
+                    "result": "already_cancelled",
+                }
+            if refreshed_status in CONFIRMED_PAYMENT_STATUSES or refreshed_status == "accepted":
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={"code": "order_finalized_concurrently", "status": refreshed_status},
+                )
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"code": "invalid_status_for_cancellation", "status": refreshed_status},
+            )
         _write_order_status_log(
             client,
             order_id,
@@ -8848,6 +8878,25 @@ def cancel_order_atomic(
     )
 
 
+# HHL-007: Finalized orders (completed / cancelled / voided) are immutable.
+# Item mutations (add / update / delete) must be rejected to preserve the
+# finalized cost snapshot, stock consumption, and financial truth.
+def _reject_if_finalized(client: Client, order_id: str, store_id: str) -> None:
+    """Raise 409 if the order is in a finalized state.
+
+    Finalized states: completed, cancelled, voided.  These states have
+    consumed stock and/or recorded financial truth; mutating items would
+    desynchronize cost snapshots, stock movements, and totals.
+    """
+    order_row = _get_order_row(client, order_id, store_id)
+    current_status = normalize_order_status(order_row.get("status"))
+    if current_status in _FINALIZED_ORDER_STATUSES:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "order_finalized", "status": current_status},
+        )
+
+
 @router.get("/orders/{order_id}/items")
 def list_order_items(order_id: str, authorization: Optional[str] = Header(None), store_id: Optional[str] = None) -> Dict[str, Any]:
     ctx = _get_ctx(authorization)
@@ -8882,6 +8931,13 @@ def create_order_item(order_id: str, payload: OrderItemPayload, authorization: O
     _require_manager(role)
 
     order_row = _get_order_row(ctx["client"], order_id, store_id_resolved)
+    # HHL-007: Reject item creation on finalized orders.
+    order_status = normalize_order_status(order_row.get("status"))
+    if order_status in _FINALIZED_ORDER_STATUSES:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "order_finalized", "status": order_status},
+        )
     data = _sanitize_order_item_payload(payload)
     _ensure_product_in_store(ctx["client"], data["product_id"], store_id_resolved)
     snapshot = prepare_order_item_snapshot(
@@ -8937,6 +8993,13 @@ def update_order_item(item_id: str, payload: OrderItemUpdate, authorization: Opt
     target_product = data.get("product_id") or row.get("product_id")
     order_id_value = str(row.get("order_id"))
     order_row = _get_order_row(ctx["client"], order_id_value, store_id_resolved)
+    # HHL-007: Reject item update on finalized orders.
+    order_status = normalize_order_status(order_row.get("status"))
+    if order_status in _FINALIZED_ORDER_STATUSES:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "order_finalized", "status": order_status},
+        )
     target_quantity = data.get("quantity") if data.get("quantity") is not None else row.get("quantity")
     if target_quantity is None:
         raise HTTPException(status_code=500, detail="order_item_quantity_missing")
@@ -8991,6 +9054,16 @@ def delete_order_item(item_id: str, authorization: Optional[str] = Header(None),
     row = exists[0]
     if str(row.get("store_id")) != str(store_id_resolved):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="store_mismatch")
+
+    # HHL-007: Reject item deletion on finalized orders.
+    order_id_value = str(row.get("order_id"))
+    order_row = _get_order_row(ctx["client"], order_id_value, store_id_resolved)
+    order_status = normalize_order_status(order_row.get("status"))
+    if order_status in _FINALIZED_ORDER_STATUSES:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "order_finalized", "status": order_status},
+        )
 
     delete_item_query = ctx["client"].table("order_items").delete().eq("id", item_id)
     if order_items_supports_store_scope(ctx["client"]):
@@ -9597,65 +9670,25 @@ def submit_payment_slip(payment_id: str, payload: PaymentSubmitSlip, authorizati
 
 @router.post("/payments/{payment_id}/approve")
 def approve_payment(payment_id: str, payload: Optional[PaymentApprovePayload] = None, authorization: Optional[str] = Header(None), store_id: Optional[str] = None) -> Dict[str, Any]:
-    ctx = _get_ctx(authorization)
-    store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
-    _ensure_staff_can_manage_payments(role)
+    """HHL-004: Legacy slip-approval route DISABLED.
 
-    current = _get_payment_row(ctx["client"], payment_id, store_id_resolved)
-    if not _valid_payment_transition(str(current.get("status") or ""), "paid"):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid_payment_status_transition")
+    This route bypassed canonical payment finalization: it set
+    payments.status='paid' and orders.status='accepted' without consuming
+    stock, without validating the order wasn't cancelled, and without
+    race-safety.  The canonical finalization path is
+    POST /orders/{order_id}/finalize-payment which uses the
+    finalize_paid_order_atomic RPC (atomic, stock-consuming, race-safe).
 
-    update_payload = {
-        "status": "paid",
-        "confirmed_by": ctx.get("user_id"),
-        "confirmed_at": datetime.utcnow().isoformat(),
-        "reject_reason": None,
-    }
-    update_query = ctx["client"].table("payments").update(update_payload).eq("id", payment_id)
-    if _payments_supports_store_scope(ctx["client"]):
-        update_query = update_query.eq("store_id", store_id_resolved)
-    resp = update_query.execute()
-    err = getattr(resp, "error", None)
-    if err and any(_is_missing_column(err, k) for k in ["confirmed_by", "confirmed_at", "reject_reason"]):
-        trimmed = _omit_optional_fields(update_payload, ["confirmed_by", "confirmed_at", "reject_reason"])
-        trimmed_query = ctx["client"].table("payments").update(trimmed).eq("id", payment_id)
-        if _payments_supports_store_scope(ctx["client"]):
-            trimmed_query = trimmed_query.eq("store_id", store_id_resolved)
-        resp = trimmed_query.execute()
-        err = getattr(resp, "error", None)
-    if err:
-        raise HTTPException(status_code=500, detail="payment_approve_failed")
-
-    order_id = str(current.get("order_id"))
-    note = (payload.note or "").strip() if payload else None
-    _sync_order_payment_status(
-        ctx["client"],
-        store_id_resolved,
-        order_id,
-        "paid",
-        "accepted",
-        ctx.get("user_id"),
-        note or None,
+    The Healholic frontend no longer calls this route.  It is disabled to
+    prevent any client from bypassing canonical finalization invariants.
+    """
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail={
+            "code": "legacy_payment_approval_disabled",
+            "message": "Use POST /orders/{order_id}/finalize-payment for canonical payment finalization",
+        },
     )
-    _write_payment_status_log(
-        ctx["client"],
-        payment_id,
-        order_id,
-        str(current.get("status") or ""),
-        "paid",
-        ctx.get("user_id"),
-        note or None,
-    )
-
-    send_line_notification(
-        ctx["client"],
-        order_id,
-        None,
-        None,
-        "payment_approved",
-        {"payment_id": payment_id, "note": note},
-    )
-    return {"id": payment_id, "status": "paid"}
 
 
 @router.post("/payments/{payment_id}/reject")

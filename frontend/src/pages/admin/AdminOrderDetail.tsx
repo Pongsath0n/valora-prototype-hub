@@ -217,11 +217,13 @@ export default function AdminOrderDetailPage() {
 
   // Canonical cancellation uses `cancelOrder` (POST /api/store-admin/orders/{id}/cancel),
   // NOT the legacy PATCH status=cancelled flow.
+  // HHL-013: cancelOrder requires an OrderCancelPayload argument. Pass an
+  // empty object (reason is optional) to match the API contract.
   const handleCancel = async () => {
     setCancelSubmitting(true);
     setError("");
     try {
-      await storeAdminApi.cancelOrder(order.id);
+      await storeAdminApi.cancelOrder(order.id, {});
       setInfo("ยกเลิกออเดอร์แล้ว");
       await refresh();
     } catch (err) {

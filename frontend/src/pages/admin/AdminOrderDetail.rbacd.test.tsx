@@ -270,7 +270,8 @@ describe("RBACD12 canonical cancelOrder used", () => {
     await screen.findByText("confirm-cancel");
     fireEvent.click(screen.getByRole("button", { name: "confirm" }));
     await waitFor(() => {
-      expect(mockedCancelOrder).toHaveBeenCalledWith("ord_1");
+      // HHL-013: cancelOrder is called with (id, payload).
+      expect(mockedCancelOrder).toHaveBeenCalledWith("ord_1", expect.objectContaining({}));
     });
   });
 
@@ -306,7 +307,8 @@ describe("RBACD13 no PATCH cancelled", () => {
     await screen.findByText("confirm-cancel");
     fireEvent.click(screen.getByRole("button", { name: "confirm" }));
     await waitFor(() => {
-      expect(mockedCancelOrder).toHaveBeenCalledWith("ord_1");
+      // HHL-013: cancelOrder is called with (id, payload).
+      expect(mockedCancelOrder).toHaveBeenCalledWith("ord_1", expect.objectContaining({}));
     });
     expect(mockedUpdateOrderStatus).not.toHaveBeenCalledWith(
       "ord_1",

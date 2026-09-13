@@ -118,7 +118,13 @@ class G03OwnerPatchCancelledAllowedTests(unittest.TestCase):
             self.assertEqual(response["id"], "ord-1")
 
     def test_owner_patch_cancelled_invalid_transition_rejected(self):
-        """Owner cannot cancel from a terminal status (invalid transition)."""
+        """Owner cannot cancel from a terminal status (invalid transition).
+
+        HHL-005: PATCH /orders/{id} status=cancelled now delegates to
+        _cancel_order_business. A completed order is in
+        _BLOCKED_CANCEL_STATUSES, so the canonical function returns 409
+        invalid_status_for_cancellation.
+        """
         fake_ctx = _build_fake_ctx("owner")
         orders_query = _build_orders_query()
         fake_ctx["client"].table.return_value = orders_query
@@ -126,6 +132,7 @@ class G03OwnerPatchCancelledAllowedTests(unittest.TestCase):
         with patch("app.api.store_admin._get_ctx", return_value=fake_ctx), \
             patch("app.api.store_admin._resolve_store_id", return_value=("store-1", "owner")), \
             patch("app.api.store_admin._require_manager"), \
+            patch("app.api.store_admin._require_owner_store_role"), \
             patch("app.api.store_admin._get_order_row", return_value={
                 "id": "ord-1", "status": "completed",
                 "payment_status": "paid",
@@ -139,9 +146,11 @@ class G03OwnerPatchCancelledAllowedTests(unittest.TestCase):
                     "ord-1", OrderUpdate(status="cancelled"),
                     authorization="Bearer token",
                 )
-            # Owner passes role check, but transition is invalid.
-            self.assertEqual(ctx_err.exception.status_code, 400)
-            self.assertEqual(ctx_err.exception.detail, "invalid_status_transition")
+            # HHL-005: Delegated to _cancel_order_business which returns 409
+            # for blocked statuses (completed is in _BLOCKED_CANCEL_STATUSES).
+            self.assertEqual(ctx_err.exception.status_code, 409)
+            detail = ctx_err.exception.detail
+            self.assertEqual(detail["code"], "invalid_status_for_cancellation")
             mock_log.assert_not_called()
 
 

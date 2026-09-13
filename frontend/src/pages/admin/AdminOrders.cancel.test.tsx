@@ -119,7 +119,9 @@ describe("AdminOrderDetail cancellation (FE-10 canonical cancelOrder)", () => {
     fireEvent.click(screen.getByRole("button", { name: "ยืนยันยกเลิกออเดอร์" }));
 
     await waitFor(() => {
-      expect(mockedCancelOrder).toHaveBeenCalledWith("ord_1");
+      // HHL-013: cancelOrder must be called with (id, payload) — the payload
+      // is an OrderCancelPayload object (reason is optional, defaults to {}).
+      expect(mockedCancelOrder).toHaveBeenCalledWith("ord_1", expect.objectContaining({}));
     });
     // updateOrderStatus must NOT be called with "cancelled"
     expect(mockedUpdateOrderStatus).not.toHaveBeenCalledWith("ord_1", expect.objectContaining({ status: "cancelled" }));
@@ -136,7 +138,7 @@ describe("AdminOrderDetail cancellation (FE-10 canonical cancelOrder)", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "ยืนยันยกเลิกออเดอร์" }));
     await waitFor(() => {
-      expect(mockedCancelOrder).toHaveBeenCalledWith("ord_1");
+      expect(mockedCancelOrder).toHaveBeenCalledWith("ord_1", expect.objectContaining({}));
     });
   });
 
