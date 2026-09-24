@@ -1556,6 +1556,15 @@ export const storeAdminApi = {
     });
   },
 
+  // G3.4: server-authoritative cart validation before the Kiosk payment
+  // step. Read-only — no order, payment, or stock mutation.
+  async kioskPreflight(payload: { items: KioskOrderItemPayload[] }): Promise<{ status: string }> {
+    return request<{ status: string }>("/api/store-admin/kiosk/orders/preflight", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
   async updateOrder(id: string, payload: Partial<OrderPayload>): Promise<{ id: string; status: string; mock_notification?: string }> {
     return request<{ id: string; status: string; mock_notification?: string }>(`/api/store-admin/orders/${id}`, { method: "PATCH", body: JSON.stringify(payload) });
   },

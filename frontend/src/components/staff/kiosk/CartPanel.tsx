@@ -1,4 +1,4 @@
-import { ArrowRight, Minus, Pencil, Plus, ShoppingBag, Trash2 } from "lucide-react";
+import { ArrowRight, Loader2, Minus, Pencil, Plus, ShoppingBag, TriangleAlert, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,6 +25,10 @@ type CartPanelProps = {
   onCustomerNameChange: (value: string) => void;
   customerPhone: string;
   onCustomerPhoneChange: (value: string) => void;
+  /** G3.4: server-authoritative cart validation is running */
+  preflightChecking?: boolean;
+  /** G3.4: cart failed server validation — payment step stays blocked */
+  preflightError?: string | null;
 };
 
 function CartLine({
@@ -117,6 +121,8 @@ export default function CartPanel({
   onCustomerNameChange,
   customerPhone,
   onCustomerPhoneChange,
+  preflightChecking = false,
+  preflightError = null,
 }: CartPanelProps) {
   return (
     <aside className="flex flex-col rounded-2xl border bg-card shadow-sm lg:sticky lg:top-6">
@@ -179,9 +185,38 @@ export default function CartPanel({
           <span className="text-sm font-medium text-muted-foreground">ยอดรวม</span>
           <span className="text-2xl font-extrabold tabular-nums text-foreground">{formatCurrency(orderTotal)}</span>
         </div>
-        <Button className="h-11 w-full text-base" disabled={!hasItems} onClick={onNext}>
-          ไปขั้นตอนการชำระเงิน
-          <ArrowRight className="h-4 w-4" />
+
+        {/* G3.4: cart failed server-side validation — the payment step
+            (QR + cash confirmation) stays blocked until the cart is fixed. */}
+        {preflightError ? (
+          <div
+            role="alert"
+            className="flex items-start gap-2 rounded-xl border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive"
+          >
+            <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" />
+            <div>
+              <p className="font-semibold">ไม่สามารถไปขั้นตอนการชำระเงินได้</p>
+              <p className="mt-0.5">{preflightError}</p>
+              <p className="mt-1 text-xs text-muted-foreground">กรุณาแก้ไขหรือลบรายการที่มีปัญหาออกจากตะกร้าก่อน</p>
+            </div>
+          </div>
+        ) : null}
+
+        <Button
+          className="h-11 w-full text-base"
+          disabled={!hasItems || preflightChecking}
+          onClick={onNext}
+        >
+          {preflightChecking ? (
+            <>
+              <Loader2 className="h-4 w-4 animate-spin" /> กำลังตรวจสอบออเดอร์...
+            </>
+          ) : (
+            <>
+              ไปขั้นตอนการชำระเงิน
+              <ArrowRight className="h-4 w-4" />
+            </>
+          )}
         </Button>
         {hasItems ? (
           <button

@@ -681,6 +681,10 @@ class KioskOrderCreate(BaseModel):
     client_order_id: Optional[str] = None
 
 
+class KioskOrderPreflight(BaseModel):
+    items: List[OrderItemPayload]
+
+
 class SalesReportFilters(BaseModel):
     start_date: Optional[str] = None
     end_date: Optional[str] = None
@@ -1581,9 +1585,105 @@ def _sanitize_kiosk_order_items(items: List[OrderItemPayload]) -> List[Dict[str,
 
 # ── FIX-A: Pre-persistence sale configuration validation ────────────────
 # Validates that every item snapshot has a usable recipe before any
-# order/payment/stock persistence.  Rejects with 400 so no partial
+# order/payment/stock persistence.  Rejects with 409 so no partial
 # transaction is committed.
-def _validate_sale_configuration(item_snapshots: List[Dict[str, Any]]) -> None:
+
+_INVALID_INVENTORY_GENERIC_MESSAGE = "ไม่สามารถขายบางเมนูได้ เนื่องจากข้อมูลสูตรไม่สมบูรณ์"
+
+
+def _invalid_inventory_detail(reason: str, product_name: Optional[str]) -> Dict[str, Any]:
+    """G3.6: structured business error for invalid inventory configuration.
+
+    Never includes database UUIDs, RPC details, or internal exception
+    strings — those stay in server-side logs only.
+    """
+    if product_name:
+        message = f"ไม่สามารถขาย{product_name}ได้ เนื่องจากข้อมูลสูตรไม่สมบูรณ์"
+    else:
+        message = _INVALID_INVENTORY_GENERIC_MESSAGE
+    detail: Dict[str, Any] = {
+        "code": "invalid_inventory_configuration",
+        "reason": reason,
+        "message": message,
+    }
+    if product_name:
+        detail["product_name"] = product_name
+    return detail
+
+
+def _log_invalid_inventory_configuration(
+    *,
+    store_id: Optional[str],
+    client_order_id: Optional[str],
+    product_id: Optional[str],
+    product_name: Optional[str],
+    ingredient_id: Optional[str],
+    ingredient_name: Optional[str],
+    quantity_used: Any,
+    recipe_unit: Optional[str],
+    reason: str,
+    client: Optional[Client] = None,
+) -> None:
+    """G3.8: server-side diagnostics for invalid inventory configuration.
+
+    Stays server-side — never exposed to the client. Enriches the log
+    with the recipe row id and the ingredient stock unit where possible;
+    enrichment failures are swallowed so diagnostics can never mask the
+    business error.
+    """
+    recipe_id: Optional[str] = None
+    stock_unit: Optional[str] = None
+    if client is not None and product_id and ingredient_id:
+        try:
+            resp = (
+                client.table("recipes")
+                .select("id")
+                .eq("product_id", product_id)
+                .eq("ingredient_id", ingredient_id)
+                .limit(1)
+                .execute()
+            )
+            rows = getattr(resp, "data", None) or []
+            if rows and rows[0].get("id"):
+                recipe_id = str(rows[0]["id"])
+            ing_resp = (
+                client.table("ingredients")
+                .select("unit")
+                .eq("id", ingredient_id)
+                .limit(1)
+                .execute()
+            )
+            ing_rows = getattr(ing_resp, "data", None) or []
+            if ing_rows and ing_rows[0].get("unit"):
+                stock_unit = str(ing_rows[0]["unit"])
+        except Exception:
+            pass
+    logger.error(
+        "kiosk_invalid_inventory_configuration "
+        "store=%s client_order_id=%s product_id=%s product_name=%s "
+        "recipe_id=%s ingredient_id=%s ingredient_name=%s "
+        "quantity_used=%r recipe_unit=%s stock_unit=%s reason=%s",
+        store_id,
+        client_order_id,
+        product_id,
+        product_name,
+        recipe_id,
+        ingredient_id,
+        ingredient_name,
+        quantity_used,
+        recipe_unit,
+        stock_unit,
+        reason,
+    )
+
+
+def _validate_sale_configuration(
+    item_snapshots: List[Dict[str, Any]],
+    *,
+    store_id: Optional[str] = None,
+    client_order_id: Optional[str] = None,
+    client: Optional[Client] = None,
+) -> None:
     """Validate stock-consumption prerequisites BEFORE financial persistence.
 
     Checks each prepared snapshot for:
@@ -1592,52 +1692,54 @@ def _validate_sale_configuration(item_snapshots: List[Dict[str, Any]]) -> None:
     - quantity_used <= 0 in breakdown rows
     - unresolved addon recipe rows with missing ingredient data
 
-    Raises HTTPException(400) with domain code
-    ``kiosk_order_invalid_inventory_configuration`` on the first issue.
+    G3.5/G3.6: Raises HTTPException(409 Conflict) with a structured
+    business error (``invalid_inventory_configuration``) — a known
+    server-side inventory configuration problem, not a client input
+    error. Full row-level context (product/recipe/ingredient ids and
+    values) is logged server-side only (G3.8).
     """
+
+    def _fail(reason: str, snapshot: Dict[str, Any], detail_row: Optional[Dict[str, Any]] = None) -> None:
+        product_name = snapshot.get("product_name")
+        _log_invalid_inventory_configuration(
+            store_id=store_id or snapshot.get("store_id"),
+            client_order_id=client_order_id,
+            product_id=snapshot.get("product_id"),
+            product_name=product_name,
+            ingredient_id=(detail_row or {}).get("ingredient_id"),
+            ingredient_name=(detail_row or {}).get("ingredient_name"),
+            quantity_used=(detail_row or {}).get("quantity_used"),
+            recipe_unit=(detail_row or {}).get("unit"),
+            reason=reason,
+            client=client,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=_invalid_inventory_detail(reason, product_name),
+        )
+
     for snapshot in item_snapshots:
-        product_name = snapshot.get("product_name") or snapshot.get("product_id") or "unknown"
         base_breakdown = snapshot.get("base_cost_breakdown")
         if not isinstance(base_breakdown, list) or not base_breakdown:
-            logger.warning(
-                "kiosk_preflight_missing_recipe product=%s", product_name,
-            )
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="kiosk_order_invalid_inventory_configuration:missing_recipe",
-            )
+            _fail("missing_recipe", snapshot)
         for detail in base_breakdown:
             if not isinstance(detail, dict):
                 continue
-            ingredient_id = detail.get("ingredient_id")
-            if not ingredient_id:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="kiosk_order_invalid_inventory_configuration:missing_ingredient_id",
-                )
+            if not detail.get("ingredient_id"):
+                _fail("missing_ingredient_id", snapshot, detail)
             quantity_used = _safe_float(detail.get("quantity_used"))
             if quantity_used <= 0:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="kiosk_order_invalid_inventory_configuration:invalid_recipe_quantity",
-                )
+                _fail("invalid_recipe_quantity", snapshot, detail)
         addon_breakdown = snapshot.get("addon_cost_breakdown")
         if isinstance(addon_breakdown, list):
             for detail in addon_breakdown:
                 if not isinstance(detail, dict):
                     continue
-                ingredient_id = detail.get("ingredient_id")
-                if not ingredient_id:
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="kiosk_order_invalid_inventory_configuration:missing_addon_ingredient_id",
-                    )
+                if not detail.get("ingredient_id"):
+                    _fail("missing_addon_ingredient_id", snapshot, detail)
                 quantity_used = _safe_float(detail.get("quantity_used"))
                 if quantity_used <= 0:
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="kiosk_order_invalid_inventory_configuration:invalid_addon_recipe_quantity",
-                    )
+                    _fail("invalid_addon_recipe_quantity", snapshot, detail)
 
 
 # ── FIX-B: Idempotent replay helpers ────────────────────────────────────
@@ -3147,9 +3249,27 @@ def _sanitize_recipe_payload(payload: RecipeCreate | RecipeUpdate, partial: bool
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="ingredient_required")
 
     if "quantity_used" in data or not partial:
-        qty = float(data.get("quantity_used") or 0)
-        if qty < 0:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="quantity_non_negative")
+        # G3.1 write guard: quantity_used must be strictly positive.
+        # Zero, negative, null, and empty values are rejected before
+        # persistence so an invalid recipe row can never be created.
+        try:
+            qty = float(data.get("quantity_used") or 0)
+        except (TypeError, ValueError):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "code": "invalid_recipe_quantity",
+                    "message": "จำนวนวัตถุดิบที่ใช้ต้องมากกว่า 0",
+                },
+            )
+        if qty <= 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "code": "invalid_recipe_quantity",
+                    "message": "จำนวนวัตถุดิบที่ใช้ต้องมากกว่า 0",
+                },
+            )
         data["quantity_used"] = qty
 
     if "unit" in data:
@@ -8108,6 +8228,197 @@ def create_order(payload: OrderCreate, authorization: Optional[str] = Header(Non
     return {"id": order_id, "status": "created"}
 
 
+def _prepare_kiosk_item_snapshots(
+    client: Client,
+    store_id: str,
+    sanitized_items: List[Dict[str, Any]],
+    channel_id_value: Optional[str],
+    *,
+    client_order_id: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """Build trusted per-item snapshots for a Kiosk cart.
+
+    Shared by the preflight validation (G3.4) and the atomic order
+    creation so both guards evaluate the SAME server-side pipeline:
+    product store-scope check, recipe costing, addon validation, strict
+    sale-configuration validation, and usage-snapshot embedding. Each
+    item is validated BEFORE embedding so the exact failing product /
+    ingredient row is reported with its precise reason. Performs no
+    persistence.
+    """
+    item_snapshots: List[Dict[str, Any]] = []
+    for item in sanitized_items:
+        _ensure_product_in_store(client, item["product_id"], store_id)
+        # BE-FIX-05: Strip any client-supplied _system before processing.
+        safe_options = strip_client_system(item.get("options"))
+        snapshot = prepare_order_item_snapshot(
+            client,
+            store_id,
+            product_id=item["product_id"],
+            quantity=item["quantity"],
+            channel_id=channel_id_value,
+            raw_options=safe_options,
+        )
+        # G3.4/G3.5: strict per-item sale-configuration validation
+        # BEFORE usage embedding so the exact failing row (e.g. a
+        # legacy zero-quantity recipe row) is reported with its precise
+        # reason and full server-side diagnostics.
+        _validate_sale_configuration(
+            [snapshot],
+            store_id=store_id,
+            client_order_id=client_order_id,
+            client=client,
+        )
+        # BE-FIX-05: Embed the server-generated usage snapshot into
+        # options for the finalize RPC to read later. This is the ONLY
+        # path that produces _system.usage_breakdown.
+        try:
+            options_with_usage = embed_usage_snapshot(
+                snapshot.get("options_snapshot") or {},
+                snapshot,
+            )
+        except UsageSnapshotError as exc:
+            # Defensive: unreachable after the strict validation above
+            # (a snapshot with every row valid always embeds). Mapped
+            # to the same structured conflict, preserving the snapshot
+            # builder's reason (e.g. unit_mismatch).
+            snapshot_reason = getattr(exc, "reason", "missing_recipe")
+            if snapshot_reason not in ("missing_recipe", "unit_mismatch"):
+                snapshot_reason = "missing_recipe"
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=_invalid_inventory_detail(snapshot_reason, snapshot.get("product_name")),
+            )
+        snapshot["options_snapshot"] = options_with_usage
+        item_snapshots.append(snapshot)
+    return item_snapshots
+
+
+def _validate_kiosk_stock_preflight(
+    client: Client,
+    store_id: str,
+    item_snapshots: List[Dict[str, Any]],
+) -> None:
+    """G3.4: practical stock availability check for a Kiosk cart.
+
+    Advisory only — the atomic RPC remains the transaction authority
+    (stock can change between preflight and final submit). Uses the
+    same usage-plan derivation as stock deduction so the check mirrors
+    what the final transaction would consume. Lookup failures are
+    logged and skipped (never block checkout on an advisory check).
+    """
+    try:
+        usage_plan = build_usage_plan(
+            [
+                {"id": f"preflight-{index}", "quantity": snapshot.get("quantity"), "snapshot": snapshot}
+                for index, snapshot in enumerate(item_snapshots)
+            ]
+        )
+    except StockUsageError:
+        # Configuration problems are already rejected by
+        # _validate_sale_configuration; nothing further to check.
+        return
+    if not usage_plan:
+        return
+
+    required: Dict[str, float] = {}
+    for entry in usage_plan:
+        ingredient_id = str(entry.get("ingredient_id") or "")
+        if not ingredient_id:
+            continue
+        required[ingredient_id] = required.get(ingredient_id, 0.0) + _safe_float(entry.get("quantity"))
+    if not required:
+        return
+
+    try:
+        resp = (
+            client.table("ingredients")
+            .select("*")
+            .eq("store_id", store_id)
+            .in_("id", sorted(required.keys()))
+            .execute()
+        )
+    except Exception as exc:
+        logger.warning(
+            "kiosk_preflight_stock_lookup_failed store=%s detail=%s",
+            store_id,
+            _safe_error_detail(exc),
+        )
+        return
+    if getattr(resp, "error", None):
+        logger.warning(
+            "kiosk_preflight_stock_lookup_failed store=%s detail=%s",
+            store_id,
+            _safe_error_detail(resp.error),
+        )
+        return
+
+    stock_map: Dict[str, float] = {}
+    for row in (getattr(resp, "data", None) or []):
+        if row.get("id"):
+            stock_map[str(row["id"])] = _safe_float(
+                row.get("stock_on_hand") if row.get("stock_on_hand") is not None else row.get("current_stock")
+            )
+
+    shortages = {
+        ingredient_id: (needed, stock_map.get(ingredient_id, 0.0))
+        for ingredient_id, needed in required.items()
+        if needed > stock_map.get(ingredient_id, 0.0)
+    }
+    if shortages:
+        # G3.8: full shortage detail stays server-side.
+        logger.warning(
+            "kiosk_preflight_insufficient_stock store=%s shortages=%s",
+            store_id,
+            sorted(shortages.items()),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "insufficient_stock",
+                "message": "วัตถุดิบไม่เพียงพอสำหรับออเดอร์นี้ กรุณาลดจำนวนสินค้า หรือตรวจสอบสต็อก",
+            },
+        )
+
+
+@router.post("/kiosk/orders/preflight")
+def kiosk_order_preflight(payload: KioskOrderPreflight, authorization: Optional[str] = Header(None), store_id: Optional[str] = None) -> Dict[str, Any]:
+    """G3.4: Server-authoritative cart validation BEFORE payment.
+
+    Runs the same server-side snapshot pipeline as the atomic order
+    creation and validates sale configuration plus practical stock
+    availability. Performs NO order persistence, NO payment
+    persistence, NO stock deduction, and NO reservation.
+
+    This is a safety gate for entering the Kiosk payment UI — it is
+    NOT transaction authority. The final atomic RPC validation remains
+    the last line of defense because state can change between
+    preflight and final submit.
+
+    Authorization: Staff, Manager, Owner (operational).
+    """
+    ctx = _get_ctx(authorization)
+    store_id_resolved, role = _resolve_store_id(ctx["memberships"], store_id)
+    _require_staff_or_above(role)
+
+    client = ctx["client"]
+
+    sanitized_items = _sanitize_kiosk_order_items(payload.items or [])
+    channel_id_value = _ensure_kiosk_channel(client, store_id_resolved)
+
+    item_snapshots = _prepare_kiosk_item_snapshots(client, store_id_resolved, sanitized_items, channel_id_value)
+
+    _validate_sale_configuration(
+        item_snapshots,
+        store_id=store_id_resolved,
+        client_order_id=None,
+        client=client,
+    )
+    _validate_kiosk_stock_preflight(client, store_id_resolved, item_snapshots)
+
+    return {"status": "ready"}
+
+
 @router.post("/kiosk/orders", status_code=status.HTTP_201_CREATED)
 def create_kiosk_order(payload: KioskOrderCreate, authorization: Optional[str] = Header(None), store_id: Optional[str] = None) -> Dict[str, Any]:
     """BE-FIX-05: Atomic Kiosk order creation + payment finalization.
@@ -8160,37 +8471,18 @@ def create_kiosk_order(payload: KioskOrderCreate, authorization: Optional[str] =
     sanitized_items = _sanitize_kiosk_order_items(payload.items or [])
     channel_id_value = _ensure_kiosk_channel(client, store_id_resolved)
 
-    item_snapshots: List[Dict[str, Any]] = []
-    for item in sanitized_items:
-        _ensure_product_in_store(client, item["product_id"], store_id_resolved)
-        # BE-FIX-05: Strip any client-supplied _system before processing.
-        safe_options = strip_client_system(item.get("options"))
-        snapshot = prepare_order_item_snapshot(
-            client,
-            store_id_resolved,
-            product_id=item["product_id"],
-            quantity=item["quantity"],
-            channel_id=channel_id_value,
-            raw_options=safe_options,
-        )
-        # BE-FIX-05: Embed the server-generated usage snapshot into
-        # options for the finalize RPC to read later. This is the ONLY
-        # path that produces _system.usage_breakdown.
-        try:
-            options_with_usage = embed_usage_snapshot(
-                snapshot.get("options_snapshot") or {},
-                snapshot,
-            )
-        except UsageSnapshotError:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="invalid_recipe_configuration",
-            )
-        snapshot["options_snapshot"] = options_with_usage
-        item_snapshots.append(snapshot)
+    item_snapshots = _prepare_kiosk_item_snapshots(
+        client, store_id_resolved, sanitized_items, channel_id_value,
+        client_order_id=client_order_id,
+    )
 
     # FIX-A: Validate sale configuration BEFORE any persistence
-    _validate_sale_configuration(item_snapshots)
+    _validate_sale_configuration(
+        item_snapshots,
+        store_id=store_id_resolved,
+        client_order_id=client_order_id,
+        client=client,
+    )
 
     # Compute trusted totals (advisory; RPC recomputes via triggers)
     subtotal = sum(float(snapshot.get("total_price") or 0) for snapshot in item_snapshots)
@@ -8264,9 +8556,16 @@ def create_kiosk_order(payload: KioskOrderCreate, authorization: Optional[str] =
             channel_fee=channel_fee_value,
         )
     except AtomicRPCError as exc:
+        # G3.7: known business conflicts get a staff-safe message.
+        # Raw RPC detail (with ingredient UUIDs) is already logged
+        # server-side in atomic_rpc; it must never reach the client.
+        if exc.reason == "insufficient_stock":
+            error_message = "วัตถุดิบไม่เพียงพอสำหรับออเดอร์นี้ กรุณาลดจำนวนสินค้า หรือตรวจสอบสต็อก"
+        else:
+            error_message = exc.detail
         raise HTTPException(
             status_code=exc.http_status,
-            detail={"code": exc.reason, "message": exc.detail},
+            detail={"code": exc.reason, "message": error_message},
         )
 
     # Map the committed result for the response

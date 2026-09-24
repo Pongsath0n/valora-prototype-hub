@@ -71,6 +71,8 @@ export default function StaffKioskPage() {
                 onCustomerNameChange={kiosk.setCustomerName}
                 customerPhone={kiosk.customerPhone}
                 onCustomerPhoneChange={kiosk.setCustomerPhone}
+                preflightChecking={kiosk.preflightChecking}
+                preflightError={kiosk.preflightError}
               />
             </div>
           </div>

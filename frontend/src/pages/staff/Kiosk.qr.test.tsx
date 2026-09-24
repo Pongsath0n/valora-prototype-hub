@@ -8,6 +8,7 @@ import StoreQrPanel from "@/components/staff/kiosk/StoreQrPanel";
 // Mock storeAdminApi for tests that exercise the full Kiosk page.
 const mockListMenu = vi.fn();
 const mockCreateKioskOrder = vi.fn();
+const mockKioskPreflight = vi.fn();
 const mockGetPaymentSettings = vi.fn();
 const mockListIncomingQueue = vi.fn();
 
@@ -33,6 +34,7 @@ vi.mock("@/services/storeAdminApi", async () => {
     storeAdminApi: {
       ...actual.storeAdminApi,
       createKioskOrder: (...args: unknown[]) => mockCreateKioskOrder(...args),
+      kioskPreflight: (...args: unknown[]) => mockKioskPreflight(...args),
       getPaymentSettings: (...args: unknown[]) => mockGetPaymentSettings(...args),
       listIncomingQueue: (...args: unknown[]) => mockListIncomingQueue(...args),
     },
@@ -115,6 +117,9 @@ async function addItemAndGoToPayment() {
   fireEvent.click(await screen.findByLabelText(/เพิ่ม Iced Latte/i));
   fireEvent.click(await screen.findByRole("button", { name: "เพิ่มลงรายการ" }));
   fireEvent.click(screen.getByRole("button", { name: "ไปขั้นตอนการชำระเงิน" }));
+  // G3.4: payment entry is gated by a server preflight round trip —
+  // the step transition is asynchronous now.
+  await screen.findByRole("button", { name: "ยืนยันว่าได้รับชำระแล้ว" });
 }
 
 beforeEach(() => {
@@ -127,6 +132,8 @@ beforeEach(() => {
     total_amount: 55,
     latest_payment: { method: "cash" },
   });
+  mockKioskPreflight.mockReset();
+  mockKioskPreflight.mockResolvedValue({ status: "ready" });
   mockGetPaymentSettings.mockReset();
   mockGetPaymentSettings.mockResolvedValue(PAYMENT_SETTINGS_OK);
   mockListIncomingQueue.mockReset();

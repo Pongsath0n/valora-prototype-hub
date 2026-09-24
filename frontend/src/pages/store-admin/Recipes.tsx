@@ -40,7 +40,7 @@ const createEmptyForm = (productId = ""): FormState => ({
   unit: "",
 });
 
-type RecipeStatus = { code: "complete" | "missing" | "zero" | "inactive"; label: string; tone: BadgeTone };
+type RecipeStatus = { code: "complete" | "missing" | "zero" | "inactive" | "invalid"; label: string; tone: BadgeTone };
 
 type ExtendedRecipeItem = ApiRecipe & { line_cost: number };
 
@@ -94,8 +94,9 @@ export default function StoreAdminRecipesPage() {
   const [drawerOpen, setDrawerOpen] = useState(false);
 
   const valid = useMemo(() => {
+    // G3.1: quantity must be strictly positive — zero is no longer accepted.
     const qty = Number(form.quantityUsed);
-    return Boolean(form.productId && form.ingredientId && !Number.isNaN(qty) && qty >= 0);
+    return Boolean(form.productId && form.ingredientId && !Number.isNaN(qty) && qty > 0);
   }, [form]);
 
   const refresh = async () => {
@@ -167,6 +168,9 @@ export default function StoreAdminRecipesPage() {
       let hasActiveLine = false;
       let hasInactiveLine = false;
       let zeroCostLine = false;
+      // G3.13: a row with quantity_used <= 0 makes the product NOT sellable
+      // (mirrors the backend readiness/final-validation contract).
+      let zeroQuantityLine = false;
 
       items.forEach((item) => {
         const category = normalizeCostCategory(item.ingredient_cost_type);
@@ -175,6 +179,8 @@ export default function StoreAdminRecipesPage() {
         if (item.ingredient_is_active === false) hasInactiveLine = true;
         else hasActiveLine = true;
         if (!item.line_cost || item.line_cost <= 0) zeroCostLine = true;
+        const quantityValue = Number(item.quantity_used ?? 0);
+        if (!Number.isFinite(quantityValue) || quantityValue <= 0) zeroQuantityLine = true;
       });
 
       const totalCost = COST_CATEGORY_ORDER.reduce((sum, key) => sum + breakdown[key].total, 0);
@@ -185,9 +191,11 @@ export default function StoreAdminRecipesPage() {
       const warnings: string[] = [];
       if (hasInactiveLine) warnings.push("สูตรนี้มีวัตถุดิบที่ถูกปิดใช้งาน");
       if (zeroCostLine && items.length > 0) warnings.push("มีวัตถุดิบที่ต้นทุน 0 บาท");
+      if (zeroQuantityLine) warnings.push("จำนวนวัตถุดิบที่ใช้ต้องมากกว่า 0");
 
       let status: RecipeStatus;
       if (items.length === 0) status = { code: "missing", label: "ยังไม่มีสูตร", tone: "warning" };
+      else if (zeroQuantityLine) status = { code: "invalid", label: "ไม่พร้อมขาย", tone: "danger" };
       else if (totalCost <= 0) status = { code: "zero", label: "ต้นทุนยังไม่ถูกตั้ง", tone: "warning" };
       else if (hasInactiveLine) status = { code: "inactive", label: "มีวัตถุดิบปิดใช้งาน", tone: "warning" };
       else if (hasActiveLine) status = { code: "complete", label: "สูตรครบถ้วน", tone: "success" };
@@ -221,7 +229,7 @@ export default function StoreAdminRecipesPage() {
 
   const handleSubmit = async () => {
     if (!valid) {
-      setError("กรุณาเลือกเมนู/วัตถุดิบ และปริมาณต้องไม่ติดลบ");
+      setError("กรุณาเลือกเมนู/วัตถุดิบ และปริมาณต้องมากกว่า 0");
       return;
     }
 
@@ -243,8 +251,12 @@ export default function StoreAdminRecipesPage() {
       resetForm(selectedProductId ?? form.productId);
       void refresh();
     } catch (err) {
+      // G3.6: prefer the structured business message from the backend.
+      const detail = (err as { detail?: { message?: string } })?.detail;
       const reason = err instanceof Error ? err.message : "บันทึกไม่สำเร็จ";
-      if (reason === "recipe_exists") setError("มีสูตรนี้แล้ว");
+      if (detail && typeof detail === "object" && detail.message) {
+        setError(detail.message);
+      } else if (reason === "recipe_exists") setError("มีสูตรนี้แล้ว");
       else if (reason === "unauthorized" || reason === "missing_token") setError("ต้องเข้าสู่ระบบก่อนใช้งาน");
       else setError(reason);
     }

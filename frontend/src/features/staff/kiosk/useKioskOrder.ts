@@ -34,6 +34,23 @@ function createDraftFromCartItem(item: CartItem, product: CustomerMenuItem): Dra
   };
 }
 
+// G3.6: map known structured business errors from the backend to
+// staff-safe Thai messages. Raw internal codes, UUIDs, and RPC details
+// must never be displayed.
+function mapBusinessError(error: unknown): string {
+  const err = error as { detail?: { code?: string; message?: string }; message?: string };
+  const detail = err?.detail;
+  if (detail && typeof detail === "object") {
+    if (detail.code === "invalid_inventory_configuration") {
+      return detail.message || "ไม่สามารถขายบางเมนูได้ เนื่องจากข้อมูลสูตรไม่สมบูรณ์";
+    }
+    if (detail.code === "insufficient_stock") {
+      return detail.message || "วัตถุดิบไม่เพียงพอสำหรับออเดอร์นี้ กรุณาลดจำนวนสินค้า หรือตรวจสอบสต็อก";
+    }
+  }
+  return err?.message || "ไม่สามารถสร้างออเดอร์ได้";
+}
+
 /**
  * Single source of truth for the Staff Kiosk flow.
  *
@@ -61,6 +78,12 @@ export function useKioskOrder() {
   const [submitError, setSubmitError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [successOrder, setSuccessOrder] = useState<ApiOrder | null>(null);
+
+  // --- G3.4: Payment-entry preflight state ---------------------------------
+  // Server-authoritative cart validation runs BEFORE the payment step so
+  // an invalid cart can never render the PromptPay QR or cash confirmation.
+  const [preflightChecking, setPreflightChecking] = useState(false);
+  const [preflightError, setPreflightError] = useState<string | null>(null);
 
   // --- FIX-B: Transaction idempotency --------------------------------------
   // client_order_id is generated ONCE per logical checkout attempt and
@@ -318,10 +341,34 @@ export function useKioskOrder() {
   // --- Step navigation ------------------------------------------------------
   const goToMenu = useCallback(() => setActiveStep("menu"), []);
 
-  const goToPayment = useCallback(() => {
-    if (cart.length === 0) return;
-    setActiveStep("payment");
-  }, [cart.length]);
+  // G3.4: payment-entry preflight. Runs BEFORE the payment step renders
+  // so an invalid cart can never display the PromptPay QR or cash
+  // confirmation. Server-authoritative — never relies on cached menu state.
+  const goToPayment = useCallback(async () => {
+    if (cart.length === 0 || preflightChecking) return;
+    setPreflightChecking(true);
+    setPreflightError(null);
+    try {
+      await storeAdminApi.kioskPreflight({
+        items: cart.map((item) => ({
+          product_id: item.productId,
+          quantity: item.quantity,
+          options: buildItemOptions(item),
+        })),
+      });
+      setActiveStep("payment");
+    } catch (error) {
+      const message = mapBusinessError(error);
+      setPreflightError(message);
+      toast({
+        title: "ไม่สามารถไปขั้นตอนการชำระเงินได้",
+        description: message,
+        variant: "destructive",
+      });
+    } finally {
+      setPreflightChecking(false);
+    }
+  }, [cart, preflightChecking]);
 
   const resetFlow = useCallback(() => {
     setSuccessOrder(null);
@@ -329,6 +376,7 @@ export function useKioskOrder() {
     setSubmitError("");
     setClientOrderId(null);
     setStockSyncFailure(null);
+    setPreflightError(null);
   }, []);
 
   // --- Submission -----------------------------------------------------------
@@ -423,6 +471,17 @@ export function useKioskOrder() {
           description: `ออเดอร์ ${detail.order_no || detail.order_id} ชำระแล้ว ห้ามสร้างซ้ำ`,
           variant: "destructive",
         });
+      } else if (
+        detail &&
+        typeof detail === "object" &&
+        (detail.code === "invalid_inventory_configuration" || detail.code === "insufficient_stock")
+      ) {
+        // G3.6: known business conflict — staff-safe Thai message.
+        // State can change between preflight and final submit, so the
+        // final atomic guard can still reject here.
+        const message = mapBusinessError(error);
+        setSubmitError(message);
+        toast({ title: "ไม่สามารถบันทึกได้", description: message, variant: "destructive" });
       } else {
         const message = err?.message || "ไม่สามารถสร้างออเดอร์ได้";
         setSubmitError(message);
@@ -491,6 +550,9 @@ export function useKioskOrder() {
     goToMenu,
     goToPayment,
     resetFlow,
+    // G3.4: payment-entry preflight
+    preflightChecking,
+    preflightError,
     // payment & submit
     paymentMethod,
     setPaymentMethod,

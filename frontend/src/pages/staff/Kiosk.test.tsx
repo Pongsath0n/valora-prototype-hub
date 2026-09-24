@@ -8,6 +8,7 @@ import StaffKioskPage from "./Kiosk";
 
 const mockListMenu = vi.fn();
 const mockCreateKioskOrder = vi.fn();
+const mockKioskPreflight = vi.fn();
 const mockGetPaymentSettings = vi.fn();
 const mockListIncomingQueue = vi.fn();
 const mockToast = vi.fn();
@@ -35,6 +36,7 @@ vi.mock("@/services/storeAdminApi", async () => {
     storeAdminApi: {
       ...actual.storeAdminApi,
       createKioskOrder: (...args: unknown[]) => mockCreateKioskOrder(...args),
+      kioskPreflight: (...args: unknown[]) => mockKioskPreflight(...args),
       getPaymentSettings: (...args: unknown[]) => mockGetPaymentSettings(...args),
       listIncomingQueue: (...args: unknown[]) => mockListIncomingQueue(...args),
     },
@@ -116,6 +118,8 @@ describe("/staff/kiosk route", () => {
     mockListMenu.mockResolvedValue(MENU_FIXTURE);
     mockCreateKioskOrder.mockReset();
     mockCreateKioskOrder.mockResolvedValue(ORDER_RESPONSE);
+    mockKioskPreflight.mockReset();
+    mockKioskPreflight.mockResolvedValue({ status: "ready" });
     mockGetPaymentSettings.mockReset();
     mockGetPaymentSettings.mockResolvedValue(PAYMENT_SETTINGS_RESPONSE);
     mockListIncomingQueue.mockReset();
@@ -161,6 +165,8 @@ describe("/staff/kiosk route", () => {
     fireEvent.change(screen.getByPlaceholderText("เบอร์โทร"), { target: { value: "0812345678" } });
 
     fireEvent.click(screen.getByRole("button", { name: "ไปขั้นตอนการชำระเงิน" }));
+    // G3.4: payment entry is gated by a server preflight round trip.
+    await screen.findByRole("button", { name: "ยืนยันว่าได้รับชำระแล้ว" });
     expect(await screen.findByAltText("QR พร้อมเพย์ของร้าน")).toHaveAttribute("src", "https://cdn.example.com/qr.png");
     expect(screen.getByText("Valora Cafe")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /เงินสด/ }));
@@ -208,6 +214,8 @@ describe("/staff/kiosk route", () => {
     fireEvent.click(await screen.findByLabelText(/เพิ่ม Iced Latte/i));
     fireEvent.click(await screen.findByRole("button", { name: "เพิ่มลงรายการ" }));
     fireEvent.click(screen.getByRole("button", { name: "ไปขั้นตอนการชำระเงิน" }));
+    // G3.4: payment entry is gated by a server preflight round trip.
+    await screen.findByRole("button", { name: "ยืนยันว่าได้รับชำระแล้ว" });
 
     expect(screen.queryByAltText("QR พร้อมเพย์ของร้าน")).not.toBeInTheDocument();
     expect(screen.getByText("QR ร้านแบบไม่ระบุยอด")).toBeInTheDocument();
@@ -230,6 +238,8 @@ describe("/staff/kiosk route", () => {
     fireEvent.click(await screen.findByLabelText(/เพิ่ม Iced Latte/i));
     fireEvent.click(await screen.findByRole("button", { name: "เพิ่มลงรายการ" }));
     fireEvent.click(screen.getByRole("button", { name: "ไปขั้นตอนการชำระเงิน" }));
+    // G3.4: payment entry is gated by a server preflight round trip.
+    await screen.findByRole("button", { name: "ยืนยันว่าได้รับชำระแล้ว" });
 
     expect(screen.queryByRole("button", { name: /PromptPay/ })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /เงินสด/ })).toBeInTheDocument();
@@ -252,6 +262,8 @@ describe("/staff/kiosk route", () => {
     fireEvent.click(await screen.findByLabelText(/เพิ่ม Iced Latte/i));
     fireEvent.click(await screen.findByRole("button", { name: "เพิ่มลงรายการ" }));
     fireEvent.click(screen.getByRole("button", { name: "ไปขั้นตอนการชำระเงิน" }));
+    // G3.4: payment entry is gated by a server preflight round trip.
+    await screen.findByRole("button", { name: "ยืนยันว่าได้รับชำระแล้ว" });
 
     expect(screen.queryByRole("button", { name: /เงินสด/ })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /PromptPay/ })).toBeInTheDocument();
@@ -275,6 +287,8 @@ describe("/staff/kiosk route", () => {
     fireEvent.click(await screen.findByLabelText(/เพิ่ม Iced Latte/i));
     fireEvent.click(await screen.findByRole("button", { name: "เพิ่มลงรายการ" }));
     fireEvent.click(screen.getByRole("button", { name: "ไปขั้นตอนการชำระเงิน" }));
+    // G3.4: payment entry is gated by a server preflight round trip.
+    await screen.findByRole("button", { name: "ยืนยันว่าได้รับชำระแล้ว" });
 
     const confirmButton = screen.getByRole("button", { name: "ยืนยันว่าได้รับชำระแล้ว" });
     expect(confirmButton).toBeDisabled();
@@ -300,6 +314,8 @@ describe("/staff/kiosk route", () => {
     fireEvent.click(await screen.findByLabelText(/เพิ่ม Iced Latte/i));
     fireEvent.click(await screen.findByRole("button", { name: "เพิ่มลงรายการ" }));
     fireEvent.click(screen.getByRole("button", { name: "ไปขั้นตอนการชำระเงิน" }));
+    // G3.4: payment entry is gated by a server preflight round trip.
+    await screen.findByRole("button", { name: "ยืนยันว่าได้รับชำระแล้ว" });
 
     expect(await screen.findByText("network_down")).toBeInTheDocument();
     const confirmButton = screen.getByRole("button", { name: "ยืนยันว่าได้รับชำระแล้ว" });
@@ -354,6 +370,8 @@ describe("/staff/kiosk route", () => {
     fireEvent.click(await screen.findByLabelText(/เพิ่ม Iced Latte/i));
     fireEvent.click(await screen.findByRole("button", { name: "เพิ่มลงรายการ" }));
     fireEvent.click(screen.getByRole("button", { name: "ไปขั้นตอนการชำระเงิน" }));
+    // G3.4: payment entry is gated by a server preflight round trip.
+    await screen.findByRole("button", { name: "ยืนยันว่าได้รับชำระแล้ว" });
     fireEvent.click(screen.getByRole("button", { name: "ยืนยันว่าได้รับชำระแล้ว" }));
 
     await waitFor(() => expect(mockCreateKioskOrder).toHaveBeenCalled());
@@ -374,6 +392,8 @@ describe("/staff/kiosk route", () => {
     fireEvent.click(await screen.findByLabelText(/เพิ่ม Iced Latte/i));
     fireEvent.click(await screen.findByRole("button", { name: "เพิ่มลงรายการ" }));
     fireEvent.click(screen.getByRole("button", { name: "ไปขั้นตอนการชำระเงิน" }));
+    // G3.4: payment entry is gated by a server preflight round trip.
+    await screen.findByRole("button", { name: "ยืนยันว่าได้รับชำระแล้ว" });
     fireEvent.click(screen.getByRole("button", { name: "ยืนยันว่าได้รับชำระแล้ว" }));
 
     await waitFor(() => expect(mockCreateKioskOrder).toHaveBeenCalledTimes(1));
@@ -398,6 +418,8 @@ describe("/staff/kiosk route", () => {
     fireEvent.click(await screen.findByLabelText(/เพิ่ม Iced Latte/i));
     fireEvent.click(await screen.findByRole("button", { name: "เพิ่มลงรายการ" }));
     fireEvent.click(screen.getByRole("button", { name: "ไปขั้นตอนการชำระเงิน" }));
+    // G3.4: payment entry is gated by a server preflight round trip.
+    await screen.findByRole("button", { name: "ยืนยันว่าได้รับชำระแล้ว" });
     fireEvent.click(screen.getByRole("button", { name: "ยืนยันว่าได้รับชำระแล้ว" }));
 
     await waitFor(() => expect(mockCreateKioskOrder).toHaveBeenCalled());
@@ -412,6 +434,8 @@ describe("/staff/kiosk route", () => {
     fireEvent.click(await screen.findByLabelText(/เพิ่ม Iced Latte/i));
     fireEvent.click(await screen.findByRole("button", { name: "เพิ่มลงรายการ" }));
     fireEvent.click(screen.getByRole("button", { name: "ไปขั้นตอนการชำระเงิน" }));
+    // G3.4: payment entry is gated by a server preflight round trip.
+    await screen.findByRole("button", { name: "ยืนยันว่าได้รับชำระแล้ว" });
     fireEvent.click(screen.getByRole("button", { name: "ยืนยันว่าได้รับชำระแล้ว" }));
 
     await waitFor(() => expect(mockCreateKioskOrder).toHaveBeenCalledTimes(2));
@@ -443,6 +467,8 @@ describe("/staff/kiosk route", () => {
     fireEvent.click(await screen.findByLabelText(/เพิ่ม Iced Latte/i));
     fireEvent.click(await screen.findByRole("button", { name: "เพิ่มลงรายการ" }));
     fireEvent.click(screen.getByRole("button", { name: "ไปขั้นตอนการชำระเงิน" }));
+    // G3.4: payment entry is gated by a server preflight round trip.
+    await screen.findByRole("button", { name: "ยืนยันว่าได้รับชำระแล้ว" });
     fireEvent.click(screen.getByRole("button", { name: "ยืนยันว่าได้รับชำระแล้ว" }));
 
     // FIX-D: must show blocking warning, not generic "try again"

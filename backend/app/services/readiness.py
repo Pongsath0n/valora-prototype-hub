@@ -120,52 +120,39 @@ def batch_check_product_recipe_readiness(
             if ing_row.get("id"):
                 ingredients_map[str(ing_row["id"])] = ing_row
 
-    # 3. Evaluate each product.
-    # BE-FIX-02A: If ANY recipe row has a unit mismatch (both units exist
-    # and differ), the product is NOT orderable — prevents partial stock
-    # deduction when no unit conversion exists.
+    # 3. Evaluate each product — G3.2 all-rows-valid contract.
+    # A product is READY only when it has at least one recipe row AND
+    # EVERY recipe row is valid:
+    #   - ingredient reference present and found in the same store
+    #   - ingredient is active
+    #   - units are strictly compatible (both present and matching)
+    #   - quantity_used > 0
+    # Any invalid row (zero/negative quantity, missing/inactive
+    # ingredient, unit mismatch) quarantines the whole product so
+    # partially-valid legacy configuration cannot reach a sale.
     readiness: Dict[str, bool] = {pid: False for pid in unique_ids}
-    unit_mismatch_products: set = set()
+    products_with_rows: set = set()
+    invalid_products: set = set()
     for row in recipe_rows:
         product_id = str(row.get("product_id") or "")
         if not product_id or product_id not in readiness:
             continue
 
-        ingredient_id = str(row.get("ingredient_id") or "")
-        if not ingredient_id:
-            continue
-        ingredient = ingredients_map.get(ingredient_id)
-        if not ingredient:
-            continue
-
-        if not _units_compatible(row.get("unit"), ingredient.get("unit")):
-            unit_mismatch_products.add(product_id)
-
-    for row in recipe_rows:
-        product_id = str(row.get("product_id") or "")
-        if not product_id or product_id not in readiness:
-            continue
-        if readiness[product_id]:
-            continue
-        if product_id in unit_mismatch_products:
-            continue
+        products_with_rows.add(product_id)
 
         ingredient_id = str(row.get("ingredient_id") or "")
-        if not ingredient_id:
-            continue
+        ingredient = ingredients_map.get(ingredient_id) if ingredient_id else None
+        row_valid = (
+            ingredient is not None
+            and ingredient.get("is_active") is not False
+            and _units_compatible(row.get("unit"), ingredient.get("unit"))
+            and _safe_float(row.get("quantity_used")) > 0
+        )
+        if not row_valid:
+            invalid_products.add(product_id)
 
-        ingredient = ingredients_map.get(ingredient_id)
-        if not ingredient:
-            continue
-        if ingredient.get("is_active") is False:
-            continue
-
-        quantity_used = _safe_float(row.get("quantity_used"))
-        if quantity_used <= 0:
-            continue
-
-        # At least one valid recipe row found.
-        readiness[product_id] = True
+    for product_id in readiness:
+        readiness[product_id] = product_id in products_with_rows and product_id not in invalid_products
 
     return readiness
 
@@ -242,50 +229,34 @@ def batch_check_addon_recipe_readiness(
             if ing_row.get("id"):
                 ingredients_map[str(ing_row["id"])] = ing_row
 
-    # 3. Evaluate each addon.
-    # BE-FIX-02A: If ANY addon recipe row has a unit mismatch, the addon
-    # is NOT selectable — prevents partial stock deduction.
+    # 3. Evaluate each addon — G3.2 all-rows-valid contract (mirrors
+    # product readiness). An addon is selectable only when it has at
+    # least one recipe row AND every row references an active
+    # same-store ingredient with quantity_used > 0 and a compatible
+    # unit. Any invalid row quarantines the addon.
     readiness: Dict[str, bool] = {aid: False for aid in unique_ids}
-    unit_mismatch_addons: set = set()
+    addons_with_rows: set = set()
+    invalid_addons: set = set()
     for row in recipe_rows:
         addon_id = str(row.get("addon_id") or "")
         if not addon_id or addon_id not in readiness:
             continue
 
-        ingredient_id = str(row.get("ingredient_id") or "")
-        if not ingredient_id:
-            continue
-        ingredient = ingredients_map.get(ingredient_id)
-        if not ingredient:
-            continue
-
-        if not _units_compatible(row.get("unit"), ingredient.get("unit")):
-            unit_mismatch_addons.add(addon_id)
-
-    for row in recipe_rows:
-        addon_id = str(row.get("addon_id") or "")
-        if not addon_id or addon_id not in readiness:
-            continue
-        if readiness[addon_id]:
-            continue
-        if addon_id in unit_mismatch_addons:
-            continue
+        addons_with_rows.add(addon_id)
 
         ingredient_id = str(row.get("ingredient_id") or "")
-        if not ingredient_id:
-            continue
+        ingredient = ingredients_map.get(ingredient_id) if ingredient_id else None
+        row_valid = (
+            ingredient is not None
+            and ingredient.get("is_active") is not False
+            and _units_compatible(row.get("unit"), ingredient.get("unit"))
+            and _safe_float(row.get("quantity_used")) > 0
+        )
+        if not row_valid:
+            invalid_addons.add(addon_id)
 
-        ingredient = ingredients_map.get(ingredient_id)
-        if not ingredient:
-            continue
-        if ingredient.get("is_active") is False:
-            continue
-
-        quantity_used = _safe_float(row.get("quantity_used"))
-        if quantity_used <= 0:
-            continue
-
-        readiness[addon_id] = True
+    for addon_id in readiness:
+        readiness[addon_id] = addon_id in addons_with_rows and addon_id not in invalid_addons
 
     return readiness
 

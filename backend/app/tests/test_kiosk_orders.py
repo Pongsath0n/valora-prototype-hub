@@ -136,13 +136,8 @@ class KioskOrderEndpointTests(unittest.TestCase):
 
     # ── Pre-persistence validation tests ──────────────────────────────
 
-    def test_missing_recipe_rejected_before_order_insert(self) -> None:
-        """BE-FIX-05: Missing recipe → 400 before any persistence."""
-        payload = self._build_payload()
-        snapshot = self._make_snapshot(base_breakdown=[])
-        patches = self._common_patches(snapshot=snapshot)
-        # Replace the RPC mock to verify it's NOT called
-        patches[-1] = patch("app.api.store_admin.create_and_finalize_kiosk_order")
+    def _run_expect_invalid_inventory(self, patches, payload, reason: str) -> None:
+        """G3.6: invalid sale configuration → structured 409 before persistence."""
         import contextlib
         with contextlib.ExitStack() as stack:
             rpc_mock = None
@@ -152,13 +147,39 @@ class KioskOrderEndpointTests(unittest.TestCase):
                     rpc_mock = entered
             with self.assertRaises(HTTPException) as ctx_err:
                 store_admin.create_kiosk_order(payload, authorization="Bearer token")
-        self.assertEqual(ctx_err.exception.status_code, 400)
+        self.assertEqual(ctx_err.exception.status_code, 409)
+        detail = ctx_err.exception.detail
+        self.assertEqual(detail["code"], "invalid_inventory_configuration")
+        self.assertEqual(detail["reason"], reason)
+        self.assertIn("ไม่สามารถขาย", detail["message"])
         rpc_mock.assert_not_called()
 
+    def test_missing_recipe_rejected_before_order_insert(self) -> None:
+        """G3.6: Missing recipe → structured 409 before any persistence."""
+        payload = self._build_payload()
+        snapshot = self._make_snapshot(base_breakdown=[])
+        patches = self._common_patches(snapshot=snapshot)
+        patches[-1] = patch("app.api.store_admin.create_and_finalize_kiosk_order")
+        self._run_expect_invalid_inventory(patches, payload, "missing_recipe")
+
     def test_invalid_recipe_quantity_rejected_before_persistence(self) -> None:
-        """BE-FIX-05: quantity_used <= 0 → 400 before any persistence."""
+        """G3.6: quantity_used <= 0 → structured 409 before any persistence."""
         payload = self._build_payload()
         snapshot = self._make_snapshot(base_breakdown=[
+            {"ingredient_id": "ing-coffee", "quantity_used": 0.0, "unit": "g"},
+        ])
+        patches = self._common_patches(snapshot=snapshot)
+        patches[-1] = patch("app.api.store_admin.create_and_finalize_kiosk_order")
+        self._run_expect_invalid_inventory(patches, payload, "invalid_recipe_quantity")
+
+    def test_invalid_recipe_quantity_in_mixed_rows_reports_product(self) -> None:
+        """G3.6: production incident shape — 4 valid rows + 1 zero row →
+        structured 409 naming the product (previously a raw 400 string)."""
+        payload = self._build_payload()
+        snapshot = self._make_snapshot(base_breakdown=[
+            {"ingredient_id": "ing-cup", "quantity_used": 1.0, "unit": "pcs"},
+            {"ingredient_id": "ing-water", "quantity_used": 180.0, "unit": "ml"},
+            {"ingredient_id": "ing-ice", "quantity_used": 350.0, "unit": "g"},
             {"ingredient_id": "ing-coffee", "quantity_used": 0.0, "unit": "g"},
         ])
         patches = self._common_patches(snapshot=snapshot)
@@ -172,28 +193,23 @@ class KioskOrderEndpointTests(unittest.TestCase):
                     rpc_mock = entered
             with self.assertRaises(HTTPException) as ctx_err:
                 store_admin.create_kiosk_order(payload, authorization="Bearer token")
-        self.assertEqual(ctx_err.exception.status_code, 400)
+        self.assertEqual(ctx_err.exception.status_code, 409)
+        detail = ctx_err.exception.detail
+        self.assertEqual(detail["code"], "invalid_inventory_configuration")
+        self.assertEqual(detail["reason"], "invalid_recipe_quantity")
+        self.assertEqual(detail["product_name"], "Latte")
+        self.assertIn("Latte", detail["message"])
         rpc_mock.assert_not_called()
 
     def test_missing_ingredient_id_rejected_before_persistence(self) -> None:
-        """BE-FIX-05: missing ingredient_id → 400 before any persistence."""
+        """G3.6: missing ingredient_id → structured 409 before any persistence."""
         payload = self._build_payload()
         snapshot = self._make_snapshot(base_breakdown=[
             {"ingredient_id": None, "quantity_used": 18.0, "unit": "g"},
         ])
         patches = self._common_patches(snapshot=snapshot)
         patches[-1] = patch("app.api.store_admin.create_and_finalize_kiosk_order")
-        import contextlib
-        with contextlib.ExitStack() as stack:
-            rpc_mock = None
-            for p in patches:
-                entered = stack.enter_context(p)
-                if p is patches[-1]:
-                    rpc_mock = entered
-            with self.assertRaises(HTTPException) as ctx_err:
-                store_admin.create_kiosk_order(payload, authorization="Bearer token")
-        self.assertEqual(ctx_err.exception.status_code, 400)
-        rpc_mock.assert_not_called()
+        self._run_expect_invalid_inventory(patches, payload, "missing_ingredient_id")
 
     # ── Idempotency tests ─────────────────────────────────────────────
 
@@ -293,6 +309,10 @@ class KioskOrderEndpointTests(unittest.TestCase):
         self.assertEqual(ctx_err.exception.status_code, 409)
         detail = ctx_err.exception.detail
         self.assertEqual(detail["code"], "insufficient_stock")
+        # G3.7: staff-safe message — raw RPC detail with ingredient UUID
+        # must never reach the client.
+        self.assertNotIn("ing-coffee", str(detail))
+        self.assertIn("วัตถุดิบไม่เพียงพอ", detail["message"])
 
     def test_create_kiosk_order_stock_failure_surfaces_controlled_error(self) -> None:
         """BE-FIX-05: Stock failure is atomic - no partial commit, returns 409."""

@@ -248,7 +248,7 @@ class TestKioskTrustBoundary(_BaseKioskAtomicTests):
         self.assertEqual(result["stock_consumed"], True)
 
     def test_t08_invalid_recipe_rejected_before_rpc(self):
-        """T08: Invalid recipe is rejected before any write RPC."""
+        """T08: Invalid recipe is rejected before any write RPC (G3.6: 409)."""
         payload = self._build_payload()
         bad_snapshot = _make_snapshot(base_breakdown=[])
         patches = self._common_patches(snapshot=bad_snapshot)
@@ -256,11 +256,13 @@ class TestKioskTrustBoundary(_BaseKioskAtomicTests):
         with patch("app.api.store_admin.create_and_finalize_kiosk_order") as mock_rpc:
             with self.assertRaises(HTTPException) as ctx_err:
                 self._run_with_patches(patches, payload)
-            self.assertEqual(ctx_err.exception.status_code, 400)
+            self.assertEqual(ctx_err.exception.status_code, 409)
+            self.assertEqual(ctx_err.exception.detail["code"], "invalid_inventory_configuration")
+            self.assertEqual(ctx_err.exception.detail["reason"], "missing_recipe")
             mock_rpc.assert_not_called()
 
     def test_t09_unit_mismatch_rejected_before_rpc(self):
-        """T09: Unit mismatch is rejected before any write RPC."""
+        """T09: Unit mismatch is rejected before any write RPC (G3.6: 409)."""
         payload = self._build_payload()
         # Snapshot with unit_mismatch flag in breakdown
         bad_snapshot = _make_snapshot(base_breakdown=[
@@ -271,11 +273,13 @@ class TestKioskTrustBoundary(_BaseKioskAtomicTests):
             with self.assertRaises(HTTPException) as ctx_err:
                 self._run_with_patches(patches, payload)
             # embed_usage_snapshot raises UsageSnapshotError for unit mismatch
-            self.assertEqual(ctx_err.exception.status_code, 400)
+            self.assertEqual(ctx_err.exception.status_code, 409)
+            self.assertEqual(ctx_err.exception.detail["code"], "invalid_inventory_configuration")
+            self.assertEqual(ctx_err.exception.detail["reason"], "unit_mismatch")
             mock_rpc.assert_not_called()
 
     def test_t10_invalid_addon_rejected_before_rpc(self):
-        """T10: Invalid addon is rejected before any write RPC."""
+        """T10: Invalid addon is rejected before any write RPC (G3.6: 409)."""
         payload = self._build_payload()
         bad_snapshot = _make_snapshot(addon_breakdown=[
             {"ingredient_id": None, "addon_id": "addon-1", "quantity_used": 5.0, "unit": "g"},
@@ -284,7 +288,9 @@ class TestKioskTrustBoundary(_BaseKioskAtomicTests):
         with patch("app.api.store_admin.create_and_finalize_kiosk_order") as mock_rpc:
             with self.assertRaises(HTTPException) as ctx_err:
                 self._run_with_patches(patches, payload)
-            self.assertEqual(ctx_err.exception.status_code, 400)
+            self.assertEqual(ctx_err.exception.status_code, 409)
+            self.assertEqual(ctx_err.exception.detail["code"], "invalid_inventory_configuration")
+            self.assertEqual(ctx_err.exception.detail["reason"], "missing_addon_ingredient_id")
             mock_rpc.assert_not_called()
 
     def test_t11_addon_max_quantity_preserved(self):

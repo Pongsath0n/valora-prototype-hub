@@ -8,6 +8,7 @@ import StaffKioskPage from "./Kiosk";
 // ── Mocks ───────────────────────────────────────────────────────────────────
 const mockListMenu = vi.fn();
 const mockCreateKioskOrder = vi.fn();
+const mockKioskPreflight = vi.fn();
 const mockGetPaymentSettings = vi.fn();
 const mockListIncomingQueue = vi.fn();
 const mockListOrders = vi.fn();
@@ -39,6 +40,7 @@ vi.mock("@/services/storeAdminApi", async () => {
     storeAdminApi: {
       ...actual.storeAdminApi,
       createKioskOrder: (...args: unknown[]) => mockCreateKioskOrder(...args),
+      kioskPreflight: (...args: unknown[]) => mockKioskPreflight(...args),
       getPaymentSettings: (...args: unknown[]) => mockGetPaymentSettings(...args),
       listIncomingQueue: (...args: unknown[]) => mockListIncomingQueue(...args),
       listOrders: (...args: unknown[]) => mockListOrders(...args),
@@ -136,6 +138,8 @@ beforeEach(() => {
     total_amount: 55,
     latest_payment: { method: "cash" },
   });
+  mockKioskPreflight.mockReset();
+  mockKioskPreflight.mockResolvedValue({ status: "ready" });
   mockGetPaymentSettings.mockReset();
   mockGetPaymentSettings.mockResolvedValue(PAYMENT_SETTINGS_OK);
   mockListIncomingQueue.mockReset();
